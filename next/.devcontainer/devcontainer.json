@@ -1,0 +1,14 @@
+{
+    "name": "example dev container next",
+    "dockerComposeFile": "../docker-compose.yml",
+    "service": "example-next-compose",
+    "workspaceFolder": "/workspace",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "amodio.toggle-excluded-files"
+            ]
+        }
+    },
+    "overrideCommand": true
+}

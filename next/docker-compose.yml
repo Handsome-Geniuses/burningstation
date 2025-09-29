@@ -1,0 +1,15 @@
+services:
+    example-next-compose:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: example_next_container
+        volumes:
+            - .:/workspace
+        privileged: true
+        ports:
+            - "8010:8010"
+        restart: unless-stopped
+        environment:
+            - TZ=America/Los_Angeles
+        command: sh -c "npx next dev --turbopack --hostname 0.0.0.0 --port 8010; tail -f /dev/null"
