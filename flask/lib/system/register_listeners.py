@@ -24,59 +24,6 @@ for p in rollers:
     # HWGPIO_MONITOR.add_listener(p, roller_event)
     p.out_cb = roller_event
 
-
-# ==========================================
-# mdets
-# ==========================================
-# last_meters_detected = [m.occupied for m in mdets]
-# def mdet_event(p: HWGPIO):
-#     # print(f"mdet{p.gpio} --> {p.state}")
-#     mdet = next((obj for obj in mdets if p.gpio in obj.pins), None)
-#     if mdet is None:
-#         return
-#     idx = mdets.index(mdet)
-#     if idx is None:
-#         return
-
-#     occupied = mdet.occupied
-#     if last_meters_detected[idx] == occupied:
-#         return
-
-#     last_meters_detected[idx] = occupied
-#     SSEQM.broadcast("state", key_payload("mdets", last_meters_detected))
-
-# for mdet in mdets:
-#     for p in mdet.sensors:
-#         HWGPIO_MONITOR.add_listener(p, mdet_event)
-
-
-
-        
-# ==========================================
-# pcf. maybe merge? idk. 
-# ==========================================
-# last_mdets = mdets
-# def pcf1_event(p:HWGPIO):
-#     global mdets
-#     global last_mdets
-#     if not p.state:
-#         states = pcf1.get_state()
-#         mdets = states + [mdets[7]]
-#         if last_mdets == mdets: return
-#         last_mdets = mdets
-#         SSEQM.broadcast("state", key_payload("mdets", mdets)) 
-
-# def pcf2_event(p:HWGPIO):
-#     global mdets
-#     global last_mdets
-#     if not p.state:
-#         state = pcf2.get_state(1)
-#         mdets[7] = state
-#         if last_mdets == mdets: return
-#         last_mdets = mdets
-#         SSEQM.broadcast("state", key_payload("mdets", mdets)) 
-
-
 def pcfio1_event(p:HWGPIO):
     if not p.state:
         bits = pcfio1.byte

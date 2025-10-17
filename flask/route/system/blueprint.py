@@ -3,8 +3,10 @@
 # Desc: handle routes
 # ================================================================
 import flask
+
+from lib.sse.question import setResponse
 from .manager import *
-from .sim import on_action
+from lib.system.sim import on_action
 
 bp = flask.Blueprint("hello", __name__)
 
@@ -28,11 +30,6 @@ def __stream():
         return flask.Response(event_stream(), content_type="text/event-stream")
 
 
-@bp.post("/sim/<action>")
-def __roller(action):
-    return on_action(action, **flask.request.get_json())
-
-
 @bp.post("/question/response")
 def __request_response():
     args = flask.request.get_json()
@@ -45,3 +42,14 @@ def __request_response():
         return "invalid/incorrect type", 400
 
     return "", 200
+
+
+
+@bp.post("/sim/<action>")
+def __roller(action):
+    return on_action(action, **flask.request.get_json())
+
+
+@bp.post("/program/<program>")
+def __program(program):
+    return "",200

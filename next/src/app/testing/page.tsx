@@ -5,8 +5,8 @@ import React from "react"
 
 const Layout1 = ()=>{
     return (
-        <div className="relative w-full h-full bg-blue-100">
-            <header className="h-16 bg-green-100">
+        <div className="relative w-full h-full bg-blue-100/10">
+            <header className="h-16 bg-teal-100">
 
             </header>
         </div>

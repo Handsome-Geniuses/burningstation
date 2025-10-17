@@ -29,7 +29,7 @@ const Meter = ({ powered = false, sections = [false, false, false] }) => {
         <div className="relative">
             <div className="relative">
                 <img src="meter.avif" alt="" className={`size-32 opacity-10`} />
-                {clips.map((s,i)=><img key={i}src="meter.avif" alt="" className={`size-32 ${sections[i]?'opacity-100':'opacity-1'} absolute inset-0 ${s}`} />)}
+                {clips.map((s,i)=><img key={i}src="meter.avif" alt="" className={`size-32 ${sections[i]?'opacity-100':'opacity-0'} absolute inset-0 ${s}`} />)}
             </div>
         </div>
     )

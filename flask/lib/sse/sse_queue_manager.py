@@ -47,38 +47,6 @@ class SSEQueue:
             return self.queue.popleft()
 
 
-# class SSEQueueManager:
-#     _instance: Optional["SSEQueueManager"] = None
-#     queues: list["SSEQueue"]
-#     verbose: bool
-
-#     def __new__(cls):
-#         if cls._instance is None:
-#             cls._instance = super().__new__(cls)
-#             cls._instance.queues = []
-#             cls._instance.verbose = False
-#         return cls._instance
-
-#     def append(self, q: SSEQueue):
-#         self.queues.append(q)
-
-#     def remove(self, q: SSEQueue):
-#         self.queues.remove(q)
-
-#     def broadcast_payload(self, payload: SSEPayload):
-#         for q in self.queues:
-#             q.add_payload(payload)
-
-#     def broadcast(self, event: str, payload: Any):
-#         if event != "keep-alive":
-#             if self.verbose:
-#                 print(f"[DEBUG] broadcast(event={event}, payload={payload})")
-#         self.broadcast_payload(sse_payload(event, payload))
-
-
-# sseq = SSEQueueManager()
-
-
 class SSEQM:
     queues: list["SSEQueue"] = []
     verbose: bool = False

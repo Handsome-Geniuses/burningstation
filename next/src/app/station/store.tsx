@@ -57,6 +57,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
 
     function flaskconnect() {
         if (flasksse.current) flasksse.current.close()
+        setCountdown(-1)
 
         flasksse.current = new EventSource('http://localhost:8011/api/system/sse')
         flasksse.current.onopen = () => {
@@ -89,11 +90,14 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
 
     return (
         <StoreContext.Provider value={{ systemState, systemDispatch, handsome, connected }}>
-            {!connected && <LoadingGif
-                variant="fill"
-                msg={countdown > 0 ? `Reconnecting in ${countdown}` : 'Reconnecting ...'}
-                blur
-            />}
+            {!connected &&
+                <LoadingGif
+                    variant="fill"
+                    msg={countdown > 0 ? `Reconnecting in ${countdown}` : 'Reconnecting ...'}
+                    blur
+                    onClick={()=>(countdown>0) && flaskconnect()}
+                />
+            }
             {children}
             <Question open={!!question} {...question} />
         </StoreContext.Provider>

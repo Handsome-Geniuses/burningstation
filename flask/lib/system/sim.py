@@ -4,8 +4,7 @@ import time
 
 from lib.gpio import *
 from lib.sse import ask_clients
-from .manager import *
-
+from lib.system import last_roller_states,last_emergency_state, mds
 
 _roller_lock = threading.Lock()
 _roller_running = False
@@ -48,26 +47,27 @@ def meter_random(**kwargs):
     write random value to pcfios and trigger interrupt for listener
     """
     if PCF8574.MOCK:
-        _pcfio1_byte = pcfio1.read_byte()
-        pcfio1_byte_ = pcfio1.write_byte(random.randint(0, 0xFF))
+        curr = pcfio1.read_byte()
+        byte = random.randint(0, 0xFF)
+        pcfio1.write_byte(byte)
+        pcfio1_changed = curr != byte
 
-        _pcfio2_byte = pcfio2.read_byte()
-        pcfio2_byte_ = pcfio2.set_state(0, random.choice([True, False]))
-
-        pcfio1_changed = _pcfio1_byte != pcfio1_byte_
-        pcfio2_changed = _pcfio2_byte != pcfio2_byte_
+        curr = pcfio2.get_state(0)
+        bit = random.choice([True, False])
+        pcfio2_byte_ = pcfio2.set_state(0, bit)
+        pcfio2_changed = curr != bit
+        
+        print(pcfio2_changed)
 
         if pcfio1_changed:
             pcfio1_int.state = 1
-            time.sleep(0.05)
+            time.sleep(0.01)
             pcfio1_int.state = 0
-            time.sleep(0.05)
 
         if pcfio2_changed:
             pcfio2_int.state = 1
-            time.sleep(0.05)
+            time.sleep(0.01)
             pcfio2_int.state = 0
-            time.sleep(0.05)
 
 
 def toggle_emergency(**kwargs):
