@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { Toaster } from "sonner";
 
 const geistSans = Geist({
     variable: "--font-geist-sans",
@@ -25,16 +26,18 @@ export default function RootLayout({
     return (
         <html lang="en">
             <head>
+                {/* <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, interactive-widget=resizes-content"></meta> */}
                 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, interactive-widget=resizes-content"></meta>
             </head>
             <body
                 className={`antialiased overflow-hidden relative`}
-            // className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+                // className={`${geistSans.variable} ${geistMono.variable} antialiased`}
             >
                 {children}
-                {/* <Toaster position="bottom-left" className="" expand={true} /> */}
+                <Toaster position="bottom-left" className="" expand={true}/>
             </body>
         </html>
-    )
+    );
+
 }
 

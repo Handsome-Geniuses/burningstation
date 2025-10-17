@@ -5,3 +5,8 @@
 #file
 *tempCodeRunnerFile*
 
+
+
+
+*venv/
+.env

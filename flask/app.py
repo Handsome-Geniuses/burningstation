@@ -7,7 +7,7 @@ from flask_cors import CORS
 from datetime import datetime
 import logging
 from route import *
-import argparse    
+import argparse
 
 #================================================================
 # parse arguments
@@ -20,7 +20,7 @@ parser.add_argument("--key-file",   default=None)
 args = parser.parse_args()
 
 #================================================================
-# setup
+# app setup
 #================================================================
 # disabling default logger
 log = logging.getLogger('werkzeug')
@@ -72,8 +72,7 @@ context = (args.cert_file,  args.key_file) if args.key_file and args.cert_file e
 if __name__ == "__main__": 
     print("=========================================================================")
     print(f">> Server running at {args.host}:{args.port}")
-    # app.run(host=args.host, port=args.port, ssl_context=context, use_reloader=True)
     app.run(host=args.host, port=args.port, ssl_context=context, use_reloader=False)
-    
+        
     
     

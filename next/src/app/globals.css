@@ -3,9 +3,10 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@import "./themes/darkmatter.css";
+/* @import "./themes/darkmatter.css"; */
+@import "./themes/oceanbreeze.css";
+/* @import "./themes/nature.css"; */
 /* @import "./themes/default.css"; */
-
 
 @layer base {
     *,
@@ -15,6 +16,9 @@
         @apply box-border border-border outline-ring/50 antialiased;
     }
 
+    html {
+        font-size: 2rem;
+    }
     html,body {
         /* touch-action: pan-x pan-y; */
         @apply touch-pan-x touch-pan-y;
