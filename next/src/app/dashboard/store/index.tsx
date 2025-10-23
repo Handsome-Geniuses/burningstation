@@ -55,7 +55,6 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
     function flaskconnect() {
         if (flasksse.current) flasksse.current.close()
         setCountdown(-1)
-
         flasksse.current = new EventSource(`http://${window.location.hostname}:8011/api/system/sse`)
         flasksse.current.onopen = () => {
             console.log("connection established")
