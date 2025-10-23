@@ -28,4 +28,4 @@ services:
         restart: unless-stopped
         environment:
             - TZ=America/Los_Angeles
-        command: sh -c "npx next dev & echo $! > /tmp/pid; tail -f /dev/null"
+        command: sh -c "npm run dev & echo $! > /tmp/pid; tail -f /dev/null"

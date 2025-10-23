@@ -7,11 +7,16 @@ const nextConfig: NextConfig = {
         return [
             {
                 source: '/flask/:path*',
-                destination:
-                    process.env.NODE_ENV === 'development'
-                        ? 'http://127.0.0.1:8011/api/:path*'
-                        : '/api/',
+                destination: '/api/proxy/:path*',
             },
+            // {
+            //     source: '/flask/:path*',
+            //     destination:
+            //         process.env.NODE_ENV === 'development'
+            //             ? 'http://127.0.0.1:8011/api/:path*'
+            //             // ? 'http://host.docker.internal:8011/api/:path*'
+            //             : '/api/',
+            // },
         ]
     },
 };
