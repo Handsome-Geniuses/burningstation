@@ -11,7 +11,7 @@ i2c = None if secrets.MOCK else NosI2C
 HWGPIO.MOCK = secrets.MOCK
 PCF8574.MOCK = secrets.MOCK
 
-emergency = HWGPIO(12, "in")
+emergency = HWGPIO(23, "in")
 
 # ==========================================
 # set up pcf8574 io expander
@@ -38,13 +38,13 @@ class __PCF8574_with_interrupt(PCF8574):
 
 
 pcfio1 = __PCF8574_with_interrupt(
-    addr=0x20, invert=True, intgpio=HWGPIO(13, "in", "pull_up"), i2c=i2c
+    addr=0x20, invert=True, intgpio=HWGPIO(14, "in", "pull_up"), i2c=i2c
 )
 pcfio2 = __PCF8574_with_interrupt(
-    addr=0x21, invert=True, intgpio=HWGPIO(14, "in", "pull_up"), i2c=i2c
+    addr=0x21, invert=True, intgpio=HWGPIO(15, "in", "pull_up"), i2c=i2c
 )
 pcfio3 = __PCF8574_with_interrupt(
-    addr=0x22, invert=True, intgpio=HWGPIO(15, "in", "pull_up"), i2c=i2c
+    addr=0x22, invert=True, intgpio=HWGPIO(18, "in", "pull_up"), i2c=i2c
 )
 
 # ==========================================
