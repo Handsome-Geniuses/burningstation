@@ -1,10 +1,9 @@
 # ================================================================
 # File: manager.py
 # ================================================================
-from lib.system import last_roller_states,last_emergency_state, mds
+from lib.system import states
 
 from lib.sse import (
-    SSEQueue,
     dump_sse_payload,
     SSEQM,
     event_stream as _estream,
@@ -21,12 +20,7 @@ def test_message():
 
 
 def initial_payloads():
-    data = {
-        "mds": mds.states,
-        "rollersMoving": last_roller_states,
-        "emergency": last_emergency_state
-    }
-    for k, v in data.items():
+    for k, v in states.items():
         yield dump_sse_payload(sse_payload("state", {"key": k, "value": v}))
 
 

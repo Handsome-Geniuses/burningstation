@@ -6,7 +6,10 @@ import flask
 
 from lib.sse.question import setResponse
 from .manager import *
-from lib.system.sim import on_action
+# import lib.system.sim as sim
+# import lib.system.override as override
+# import lib.system.station as station
+from lib.system import sim,override,station,program
 
 bp = flask.Blueprint("hello", __name__)
 
@@ -43,13 +46,15 @@ def __request_response():
 
     return "", 200
 
-
-
 @bp.post("/sim/<action>")
-def __roller(action):
-    return on_action(action, **flask.request.get_json())
-
-
-@bp.post("/program/<program>")
-def __program(program):
-    return "",200
+def __sim(action):
+    return sim.on_action(action, **flask.request.get_json())
+@bp.post('/override/<action>')
+def __override(action):
+    return override.on_action(action, **flask.request.get_json())
+@bp.post('/station/<action>')
+def __station(action):
+    return station.on_action(action, **flask.request.get_json())
+@bp.post("/program/<action>")
+def __program(action):
+    return program.on_action(action, **flask.request.get_json())

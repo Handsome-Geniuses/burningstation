@@ -1,73 +1,275 @@
 import random
 import threading
-import time
 
 from lib.gpio import *
 from lib.sse import ask_clients
-from lib.system import last_roller_states,last_emergency_state, mds
+import lib.system.station as station
 
-_roller_lock = threading.Lock()
-_roller_running = False
+_sim_lock = threading.Lock()
+_sim_running = False
+_sim_emergency_stop = False
+
+
+def sim_operation(delay: float = 1.0):
+    """Decorator that manages threading, _sim_lock, and _sim_running for simulation operations"""
+
+    def decorator(fn):
+        def wrapper(**kwargs):
+            global _sim_running
+            global _sim_lock
+            global _sim_emergency_stop
+            
+            with _sim_lock:
+                if _sim_emergency_stop:
+                    print("sim emergency stop active!")
+                    return "Emergency stop active", 500
+                if _sim_running:
+                    return "Already running", 409
+                _sim_running = True
+
+            def run_steps():
+                global _sim_running
+                global _sim_lock
+                global _sim_emergency_stop
+                try:
+                    fn(delay=delay, **kwargs)
+                finally:
+                    with _sim_lock:
+                        _sim_running = False
+
+            # Start in background thread
+            threading.Thread(target=run_steps, daemon=True).start()
+            return "", 200
+
+        return wrapper
+
+    return decorator
+
+def execute_steps(steps: dict, **kwargs):
+    """Execute a dictionary of steps with delays between them"""
+    delay = kwargs.get('delay',1.0)
+    def run_step(i=0):
+        if i in steps:
+            steps[i]()
+        if i < max(steps.keys()):
+            threading.Timer(delay, lambda i=i: run_step(i + 1)).start()
+
+    run_step(0)
+    return "", 200
+
+def sim_emergency_stop():
+    """Activate emergency stop - prevents new sim operations from starting"""
+    global _sim_emergency_stop
+    with _sim_lock:
+        _sim_emergency_stop = True
+    print("Sim emergency stop activated!")
+
+def sim_emergency_reset():
+    """Reset emergency stop flag - call this to allow sim operations again"""
+    global _sim_emergency_stop
+    with _sim_lock:
+        _sim_emergency_stop = False
+    print("Sim emergency stop cleared!")
+
+def emergency_event(p:HWGPIO):
+    if p.state:  sim_emergency_stop()
+    else:  sim_emergency_reset()
+HWGPIO_MONITOR.add_listener(emergency, emergency_event)
+
+
+
+
+
 
 def roller_move(**kwargs):
     """
     cycle some rollers
     """
-    global _roller_running
-    with _roller_lock:
-        if _roller_running:
+    global _sim_running
+    with _sim_lock:
+        if _sim_running:
             return "Already running", 409
-        _roller_running = True
+        _sim_running = True
 
     steps = [
-        [True, False, False],
-        [True, True, False],
-        [True, True, True],
-        [False, False, False],
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [0, 0, 0],
+        [1, 1, 1],
+        [2, 2, 2],
+        [2, 2, 0],
+        [2, 0, 0],
+        [0, 0, 0],
     ]
 
     def run_step(i=0):
         if i >= len(steps):
-            global _roller_running
-            with _roller_lock:
-                _roller_running = False
+            global _sim_running
+            with _sim_lock:
+                _sim_running = False
             return
-
-        for j in range(3):
-            rollers[j].state = steps[i][j]
-
-        threading.Timer(1.2, lambda: run_step(i + 1)).start()
+        print(steps[i])
+        rm.set_value_list(steps[i])
+        threading.Timer(1, lambda: run_step(i + 1)).start()
 
     run_step(0)
     return "", 200
 
+@sim_operation(delay=0.5)
+def user_loading_meter(**kwargs):
+    """ pretend that a user put meter on belt """
+    value = mdm.get_value()
+    if not mdm.is_ch_empty(0, value):
+        print("[person_loading_meter] not empty to pretend load")
+        return
+    steps = {
+        0: lambda: mdm.set_value(mdm.get_value() | 0b1),
+        1: lambda: mdm.set_value(mdm.get_value() | 0b11),
+    }
+    return execute_steps(steps, **kwargs)
+
+@sim_operation(delay=0.5)
+def user_unloading_meter(**kwargs):
+    """ user unloaded meter from 3rd station """
+    value = mdm.get_value()
+    if mdm.is_ch_empty(2, value):
+        print("[user_unloading_meter] nothing to unload")
+        return
+    steps = {
+        0: lambda: mdm.set_ch_bit(2,0,False),
+        1: lambda: mdm.set_ch_bit(2,1,False),
+        2: lambda: mdm.set_ch_bit(2,2,False),
+    }
+    return execute_steps(steps, **kwargs)
+
+
+
+@sim_operation(delay=1.0)
+def user_press_load_L(**kwargs):
+    """ this just pretends the meter is actually moving """
+    msg, code = station.load_L()
+    if code==200:
+        steps = {
+            0: lambda: mdm.set_ch_bit(0,1,True),
+            1: lambda: mdm.set_ch_bit(0,2,True),
+        }
+        return execute_steps(steps, **kwargs)
+
+
+@sim_operation(delay=1.0)
+def user_press_load_M(**kwargs):
+    """ this just pretends the meter is actually moving """
+    msg, code = station.load_M()
+    if code==200:
+        steps = {
+            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
+            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
+            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+        }
+        return execute_steps(steps, **kwargs)
+
+
+@sim_operation(delay=1.0)
+def user_press_load_R(**kwargs):
+    """ this just pretends the meter is actually moving """
+    msg, code = station.load_R()
+    if code==200:
+        steps = {
+            0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
+            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
+            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
+            3: lambda: mdm.set_ch_bit(2,0,False),
+        }
+        return execute_steps(steps, **kwargs)
+
+@sim_operation(delay=1.0)
+def user_press_shift_all(**kwargs):
+    """Simulate user pressing shift all -> chains M->R and L->M"""
+
+    def on_R_done():
+        # Load M
+        if station.load_M()[1] == 200:
+            steps_M = {
+                1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
+                2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
+                3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+            }
+            execute_steps(steps_M, **kwargs)
+
+    # Load R
+    if station.load_R(on_done=on_R_done)[1] == 200:
+        steps_R = {
+            0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
+            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
+            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
+            3: lambda: mdm.set_ch_bit(2, 0, False),
+        }
+        execute_steps(steps_R, **kwargs)
+    
+    
+
+    
+
+
+# @sim_operation(delay=1.0)
+# def user_press_shift_all(**kwargs):
+#     """Simulate user pressing shift all - chains R → M → L"""
+    
+#     # Load R
+#     msg, code = station.load_R()
+#     if code != 200:
+#         return
+    
+#     steps_R = {
+#         0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
+#         1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
+#         2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
+#         3: lambda: mdm.set_ch_bit(2, 0, False),
+#         6: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
+#         7: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
+#         8: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+#     }
+#     execute_steps(steps_R, **kwargs)
+    
+#     # Load M
+#     msg, code = station.load_M()
+#     if code != 200:
+#         return
+    
+#     steps_M = {
+#         1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
+#         2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
+#         3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+#     }
+#     execute_steps(steps_M, delay=delay)
+#     time.sleep(3 * delay + 0.5)
 
 def meter_random(**kwargs):
-    """
-    write random value to pcfios and trigger interrupt for listener
-    """
-    if PCF8574.MOCK:
-        curr = pcfio1.read_byte()
-        byte = random.randint(0, 0xFF)
-        pcfio1.write_byte(byte)
-        pcfio1_changed = curr != byte
+    n1 = random.choice([0, 7])
+    n2 = random.choice([0, 7])
+    n3 = random.choice([0, 7])
 
-        curr = pcfio2.get_state(0)
-        bit = random.choice([True, False])
-        pcfio2_byte_ = pcfio2.set_state(0, bit)
-        pcfio2_changed = curr != bit
-        
-        print(pcfio2_changed)
+    n = (n3 << 6) | (n2 << 3) | n1
 
-        if pcfio1_changed:
-            pcfio1_int.state = 1
-            time.sleep(0.01)
-            pcfio1_int.state = 0
+    if n == mdm.get_value():
+        return meter_random()
+    mdm.set_value(n)
 
-        if pcfio2_changed:
-            pcfio2_int.state = 1
-            time.sleep(0.01)
-            pcfio2_int.state = 0
+
+"""
+# Set bit n
+value |= (1 << n)
+
+# Clear bit n
+value &= ~(1 << n)
+
+# Toggle bit n
+value ^= (1 << n)
+
+# Check if bit n is set
+is_set = bool(value & (1 << n))
+"""
 
 
 def toggle_emergency(**kwargs):
@@ -84,7 +286,7 @@ src = "data:image/png;base64," + base64.b64encode(cv2.imencode(".png", img)[1]).
 """
 
 
-def question(**kwargs):
+def on_question(**kwargs):
     def gimme_boolean():
         ask_clients(
             title="Are you handsome?",
@@ -129,38 +331,41 @@ def question(**kwargs):
         gimme_boolean()
 
 
+def on_meter(**kwargs):
+    option = kwargs.get("type", 0)
+    res = None
+    if option == 0:
+        res = meter_random()
+    elif option == 10:
+        res = user_loading_meter()
+    elif option == 11:
+        res = user_press_load_L()
+    elif option == 12:
+        res = user_press_load_M()
+    elif option == 13:
+        res = user_press_load_R()
+    elif option == 14:
+        res = user_unloading_meter()
+    elif option == 15:
+        res = user_press_shift_all()
 
-
-
-
-
-def start(**kwargs):
-    if mds.is_ch_full(1):
-        """ middle is occupied so runnable """
-
-    # else 
-
-
-
-
-
-
-
-
-
-
+    return res if res is not None else ("", 200)
 
 
 def on_action(action, **kwargs):
     res = None
-    if action == "roller":
+    if not secrets.MOCK: print("[sim] not mock so not safe to sim")
+    elif action == "roller":
         res = roller_move(**kwargs)
     elif action == "meter":
-        res = meter_random(**kwargs)
+        res = on_meter(**kwargs)
     elif action == "question":
-        res = question(**kwargs)
+        res = on_question(**kwargs)
     elif action == "emergency":
         res = toggle_emergency(**kwargs)
+    
     return res if res is not None else ("", 200)
 
-
+__all__ = ['on_action']
+if __name__ == "__main__":
+    PCF8574.MOCK = True
