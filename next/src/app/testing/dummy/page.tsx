@@ -12,41 +12,25 @@ type Actions = 'roller' | 'meter' | string
 
 export default () => {
     const [loading, setLoading] = React.useState(false)
-    const handleSimAction = async (action: Actions, kwargs: { [key: string]: any } = {}) => {
-        setLoading(true)
-        flask.post(`/sim/${action}`, { body: JSON.stringify(kwargs) })
-        setLoading(false)
-    }
-    const SimWrap = ({ text, action, kwargs = {} }: { text?: string, action: string, kwargs?: { [key: string]: any } }) => <Button onClick={() => handleSimAction(action, kwargs)}>{text ?? action}</Button>
-
-    const handleOverrideAction = async (action: Actions, kwargs: { [key: string]: any } = {}) => {
-        setLoading(true)
-        flask.post(`/override/${action}`, { body: JSON.stringify(kwargs) })
-        setLoading(false)
-    }
-    const OverrideWrap = ({ text, action, kwargs = {} }: { text?: string, action: string, kwargs?: { [key: string]: any } }) => <Button onClick={() => handleOverrideAction(action, kwargs)}>{text ?? action}</Button>
+    const SimWrap = ({ text, action, kwargs = {} }: { text?: string, action: string, kwargs?: { [key: string]: any } }) => <Button onClick={() => flask.handleAction('sim', action, kwargs)}>{text ?? action}</Button>
+    const OverrideWrap = ({ text, action, kwargs = {} }: { text?: string, action: string, kwargs?: { [key: string]: any } }) => <Button onClick={() => flask.handleAction('override', action, kwargs)}>{text ?? action}</Button>
     const OverrideUpDownWrap = ({ text, dn_action, dn_kwargs = {} , up_action, up_kwargs = {} }: { text?: string, dn_action: string, dn_kwargs?: { [key: string]: any }, up_action: string, up_kwargs?: { [key: string]: any } }) => 
         <Button 
-            // onClick={() => handleOverrideAction(action, kwargs)}
-            onMouseDown={() => handleOverrideAction(dn_action, dn_kwargs)}
-            onMouseUp={() => handleOverrideAction(up_action, up_kwargs)}
+            onMouseDown={() => flask.handleAction('override', dn_action, dn_kwargs)}
+            onMouseUp={() => flask.handleAction('override', up_action, up_kwargs)}
         >
             {text ?? dn_action}
         </Button>
+        
     const OverrideMotorWrap = ({ text, value_list }: { text?: string, value_list:number[]}) => 
         <Button 
-            onMouseDown={() => handleOverrideAction('motor', { value_list: value_list })}
-            onMouseUp={() => handleOverrideAction('motor', { value_list: [0,0,0] })}
+            onMouseDown={() => flask.handleAction('override', 'motor', { value_list: value_list })}
+            onMouseUp={() => flask.handleAction('override', 'motor', { value_list: [0,0,0] })}
         >
             {text ?? 'motor'}
         </Button>
 
-    const handleStationAction = async (action: Actions, kwargs: { [key: string]: any } = {}) => {
-        setLoading(true)
-        flask.post(`/station/${action}`, { body: JSON.stringify(kwargs) })
-        setLoading(false)
-    }
-    const StationWrap = ({ text, action, kwargs = {} }: { text?: string, action: string, kwargs?: { [key: string]: any } }) => <Button onClick={() => handleStationAction(action, kwargs)}>{text ?? action}</Button>
+    const StationWrap = ({ text, action, kwargs = {} }: { text?: string, action: string, kwargs?: { [key: string]: any } }) => <Button onClick={() => flask.handleAction('station',action, kwargs)}>{text ?? action}</Button>
 
     return (
         <div className="space-x-2 space-y-2 font-mono">
@@ -127,3 +111,5 @@ export default () => {
         </div>
     )
 }
+
+
