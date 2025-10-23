@@ -3,7 +3,7 @@ WORKDIR /app
 
 # System dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends nmap fping && \
+    apt-get install -y --no-install-recommends fping --fix-missing && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
