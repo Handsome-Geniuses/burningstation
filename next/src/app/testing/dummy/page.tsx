@@ -68,6 +68,8 @@ export default () => {
             <StationWrap action="load" text="load L" kwargs={{type:'L'}}/>
             <StationWrap action="load" text="load M" kwargs={{type:'M'}}/>
             <StationWrap action="load" text="load R" kwargs={{type:'R'}}/>
+            <StationWrap action="load" text="load RM" kwargs={{type:'RM'}}/>
+            <StationWrap action="load" text="shift all" kwargs={{type:'ALL'}}/>
 
 
             <br />
