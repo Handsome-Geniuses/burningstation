@@ -1,0 +1,17 @@
+{
+    "name": "burn station flask",
+    "dockerComposeFile": "../../docker-compose.yml",
+    "service": "burn-station-flask",
+    "workspaceFolder": "/app",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "formulahendry.code-runner",
+                "amodio.toggle-excluded-files",
+                "ms-python.python"
+            ]
+        }
+    },
+    "overrideCommand": true,
+    "postStartCommand": "PYTHONPATH=/app python -u tools/kill.py"
+}

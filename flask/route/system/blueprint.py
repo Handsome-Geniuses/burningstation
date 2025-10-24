@@ -3,7 +3,8 @@
 # Desc: handle routes
 # ================================================================
 import flask
-
+import os
+import signal
 from lib.sse.question import setResponse
 from .manager import *
 # import lib.system.sim as sim
@@ -25,6 +26,13 @@ def __test():
     # print("hello")
     test_message()
     return "hello", 200
+
+
+@bp.get("/suicide")
+def __suicide():
+    print("SHINDERU")
+    os.kill(os.getpid(),signal.SIGKILL)
+    return "",200
 
 
 @bp.get("/sse")

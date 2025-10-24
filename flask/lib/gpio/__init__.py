@@ -3,15 +3,17 @@
 from pigpiod import HWGPIO, HWGPIO_MONITOR
 from pcf8574 import PCF8574
 from i2c import NosI2C
-from .hbridge import HBridgeViaPCF8574 as HBridge
+from lib.gpio.hbridge import HBridgeViaPCF8574 as HBridge
 from lib.utils import secrets
 import time
 
-i2c = None if secrets.MOCK else NosI2C
+i2c = None if secrets.MOCK else NosI2C()
 HWGPIO.MOCK = secrets.MOCK
 PCF8574.MOCK = secrets.MOCK
 
 emergency = HWGPIO(23, "in")
+
+
 
 # ==========================================
 # set up pcf8574 io expander
@@ -273,4 +275,5 @@ class ROLLER_MANAGER:
 rm = ROLLER_MANAGER
 
 HWGPIO_MONITOR.start()
+
 

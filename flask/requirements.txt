@@ -5,6 +5,7 @@ flask
 flask-cors
 smbus2
 python-dotenv
+requests
 
 # GitHub HTTPS
 git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/hardware/i2c/i2c

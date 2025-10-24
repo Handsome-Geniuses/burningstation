@@ -1,6 +1,6 @@
 from lib.gpio import *
 from lib.sse.sse_queue_manager import SSEQM, key_payload
-from .states import states
+from lib.system.states import states, update
 from typing import Callable, Any
 
 def event_builder(key: str, value_fn: Callable[..., Any], extra_fn: Callable=lambda:None) -> Callable:
@@ -33,3 +33,5 @@ HWGPIO_MONITOR.add_listener(pcfio2.intgpio, roller_motor_event)
 meter_detection_event = event_builder("mds", lambda p: mdm.get_state())
 HWGPIO_MONITOR.add_listener(pcfio1.intgpio, meter_detection_event)
 HWGPIO_MONITOR.add_listener(pcfio2.intgpio, meter_detection_event)
+
+
