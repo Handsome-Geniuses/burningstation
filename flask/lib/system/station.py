@@ -104,9 +104,9 @@ def load_L(**kwargs):
         print("[load_L] nothing to load")
         return "Nothing to load", 409
     else: 
-        rm.get_motor(0).forward()
+        rm.set_value_list([rm.FORWARD, rm.COAST, rm.COAST])
         while not states['mds'][2]: time.sleep(0.1)
-        rm.get_motor(0).coast()
+        rm.set_value(0)
         
     return "[load_L] Load completed", 200
 
@@ -122,13 +122,9 @@ def load_M(**kwargs):
         print("[load_M] M is occupied")
         return "M is occupied", 409
     else:
-        # rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.COAST])
-        rm.get_motor(0).forward()
-        rm.get_motor(1).forward()
+        rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.COAST])
         while not states['mds'][5]: time.sleep(0.1)
-        # rm.set_value_list([rm.COAST, rm.COAST, rm.COAST])
-        rm.get_motor(0).coast()
-        rm.get_motor(1).coast()
+        rm.set_value_list([rm.COAST, rm.COAST, rm.COAST])
         return "[load_M] Load completed", 200
 
 @station_operation(timeout=10.0)
@@ -143,16 +139,11 @@ def load_R(**kwargs):
         print("[load_R] R is occupied")
         return "R is occupied", 409
     else:
-        # rm.set_value_list([rm.COAST, rm.FORWARD, rm.FORWARD])
-        rm.get_motor(1).forward()
-        rm.get_motor(2).forward()
+        rm.set_value_list([rm.COAST, rm.FORWARD, rm.FORWARD])
         while not states["mds"][8]: time.sleep(0.1)
-        # rm.set_value_list([rm.COAST, rm.COAST, rm.FORWARD])
-        rm.get_motor(1).coast()
+        rm.set_value_list([rm.COAST, rm.COAST, rm.FORWARD])
         while states["mds"][6]: time.sleep(0.1)
-        # rm.set_value_list([rm.COAST, rm.COAST, rm.COAST])
-        rm.get_motor(2).coast()
-
+        rm.set_value(0)
         return "[load_R] Load completed", 200
     
 
@@ -177,162 +168,7 @@ def load_ALL(**kwargs):
         print("6 has cleared!")
     rm.set_value(0)
 
-# @station_operation(timeout=20.0)
-# def load_ALL(**kwargs):
-#     mds = states["mds"]
-#     value = mdm.get_value()
-
-#     # check if need to load L
-#     if mds[0] and not mds[2]:
-#         print("quick loading L")
-#         rm.get_motor(0).forward()
-#         while not mds[2]: time.sleep(0.1)
-#         rm.get_motor(0).coast()
-#         print("quick loading L done")
-
-#     mds = states["mds"]
-#     value = mdm.get_value()
-
-#     # x x x
-#     if value == 0:
-#         return "nothing to do", 204
-    
-#     # o x x
-#     if mdm.is_ch_full(0, value) and mdm.is_ch_empty(1, value):
-#         rm.get_motor(0).forward()
-#         while mds[0]: time.sleep(0.1)
-#         rm.get_motor(1).forward()
-#         while mds[2]: time.sleep(0.1)
-#         rm.get_motor(0).coast()
-#         while not mds[5]: time.sleep(0.1)
-#         rm.get_motor(1).coast()
-#     # o o x
-#     elif mdm.is_ch_full(0, value) and mdm.is_ch_full(1, value) and mdm.is_ch_empty(2, value):
-#         rm.get_motor(1).forward()
-#         while mds[3]: time.sleep(0.1) # middle moved a bit
-#         rm.get_motor(0).forward()
-#         while not mds[6]: time.sleep(0.1) # right breached
-#         rm.get_motor(2).forward()
-#         while mds[5]: time.sleep(0.1) # middle left
-#         while not mds[5] or mds[6]:
-#             if not mds[2]: rm.get_motor(0).coast()
-#             if mds[5]: rm.get_motor(1).coast()
-#             if not mds[6]: rm.get_motor(2).coast()
-#     # x o x
-#     elif mdm.is_ch_full(1, value) and mdm.is_ch_empty(2, value):
-#         rm.get_motor(1).forward()
-#         while not mds[6]: time.sleep(0.1)
-#         rm.get_motor(2).forward()
-#         while mds[5]: time.sleep(0.1)
-#         rm.get_motor(1).coast()
-#         while mds[6]: time.sleep(0.1)
-#         rm.get_motor(2).coast()
-    
-    
-#     rm.set_value(0)
-
-
-
-
-
         
-
-
-    
-"""
-x x x       -> done
-
-o x x       ->
-x o x
-x x o
-
-o o x
-x o o
-o x o
-
-o o o
-
-"""
-
-    
-    # # if middle clear, keep going
-    # if mdm.is_ch_empty(1, value):
-    #     rm.get_motor(1).forward()
-    #     while not states[5]: time.sleep(0.1)
-    
-    # # if middle occupied but right is clear
-    # elif mdm.is_ch_empty(2, value):
-    #     rm.get_motor(1).forward()
-    #     rm.get_motor(2).forward()
-        
-
-        
-    
-# @station_operation(timeout=20.0)
-# def load_RM(**kwargs):
-#     value = mdm.get_value()
-#     br = True
-#     if not mdm.is_ch_full(1, value):
-#         print("[load_RM] M not loaded yet")
-#         br = False
-#     elif not mdm.is_ch_empty(2, value):
-#         print("[load_RM] R is occupied")
-#         br = False
-
-#     bm = True
-#     if not mdm.get_ch_bit(0,0,value):
-#         print("[load_RM] nothing in L")
-#         bm = False
-
-#     if not br and not bm:
-#         return "[load_RM] not doable", 409
-
-#     if br and not bm: load_R()
-#     elif bm and not br: load_M()
-#     else:
-#         def uno():
-#             """ safer way """
-#             rm.set_value_list([rm.COAST, rm.FORWARD, rm.FORWARD])
-#             while not states["mds"][6]: continue # wait for [3][0] to hit to move other 
-#             print("yo1")
-#             rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.FORWARD])
-#             while states["mds"][6]: continue # wait for [3][0] to miss to stop last
-#             print("yo2")
-#             rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.COAST])
-#             while not states["mds"][5]: continue # wait for [2][2] to hit to stop rest
-#             print("yo3")
-#             rm.set_value_list([rm.COAST, rm.COAST, rm.COAST])
-#             return "[load_RM] Load completed", 200
-        
-#         def dos():
-#             """ faster way """
-#             rm.set_value_list([rm.COAST, rm.FORWARD, rm.FORWARD])
-#             while states["mds"][3]: continue # wait for [2][0] to miss to move other
-#             print("yo1")
-#             rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.FORWARD])
-#             while not states["mds"][6]: continue # wait for [3][0] to hit 
-#             print("yo2")
-
-#             flag1 = False
-#             flag2 = False
-#             flag3 = False
-
-#             while True:
-#                 if flag1 and flag2 and flag3: break
-#                 if not flag1 and not states["mds"][6]: 
-#                     flag1 = True
-#                     rm.set_ch_value(2,rm.COAST)
-#                 if not flag2 and not states["mds"][2]:
-#                     flag2 = True
-#                     rm.set_ch_value(0,rm.COAST)
-#                 if not flag3 and states["mds"][5]:
-#                     flag3 = True
-#                     rm.set_ch_value(1,rm.COAST)
-
-#             rm.set_value_list([rm.COAST, rm.COAST, rm.COAST])
-#             return "[load_RM] Load completed", 200
-#         return uno()
-
 def on_load(**kwargs):
     option = kwargs.get('type', None)
     if option==None: return

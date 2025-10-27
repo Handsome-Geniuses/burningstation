@@ -4,6 +4,8 @@ import threading
 from lib.gpio import *
 from lib.sse import ask_clients
 import lib.system.station as station
+from lib.system.states import states
+from lib.utils import packer, secrets
 
 _sim_lock = threading.Lock()
 _sim_running = False
@@ -47,11 +49,15 @@ def sim_operation(delay: float = 1.0):
 
 def execute_steps(steps: dict, **kwargs):
     """Execute a dictionary of steps with delays between them"""
-    delay = kwargs.get('delay',1.0)
+    global _sim_emergency_stop
+    delay = kwargs.get('delay', 1.0)
+    
     def run_step(i=0):
+        if _sim_emergency_stop:
+            return
         if i in steps:
             steps[i]()
-        if i < max(steps.keys()):
+        if i < max(steps.keys()) and not _sim_emergency_stop:
             threading.Timer(delay, lambda i=i: run_step(i + 1)).start()
 
     run_step(0)
@@ -77,44 +83,23 @@ def emergency_event(p:HWGPIO):
 HWGPIO_MONITOR.add_listener(emergency, emergency_event)
 
 
-
-
-
-
+@sim_operation(delay=1.0)  # adjust delay per step if needed
 def roller_move(**kwargs):
     """
-    cycle some rollers
+    Cycle some rollers using sim_operation decorator.
     """
-    global _sim_running
-    with _sim_lock:
-        if _sim_running:
-            return "Already running", 409
-        _sim_running = True
-
-    steps = [
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1],
-        [0, 0, 0],
-        [1, 1, 1],
-        [2, 2, 2],
-        [2, 2, 0],
-        [2, 0, 0],
-        [0, 0, 0],
-    ]
-
-    def run_step(i=0):
-        if i >= len(steps):
-            global _sim_running
-            with _sim_lock:
-                _sim_running = False
-            return
-        print(steps[i])
-        rm.set_value_list(steps[i])
-        threading.Timer(1, lambda: run_step(i + 1)).start()
-
-    run_step(0)
-    return "", 200
+    steps = {
+        0: lambda: rm.set_value_list([1, 0, 0]),
+        1: lambda: rm.set_value_list([0, 1, 0]),
+        2: lambda: rm.set_value_list([0, 0, 1]),
+        3: lambda: rm.set_value_list([0, 0, 0]),
+        4: lambda: rm.set_value_list([1, 1, 1]),
+        5: lambda: rm.set_value_list([2, 2, 2]),
+        6: lambda: rm.set_value_list([2, 2, 0]),
+        7: lambda: rm.set_value_list([2, 0, 0]),
+        8: lambda: rm.set_value_list([0, 0, 0]),
+    }
+    return execute_steps(steps, **kwargs)
 
 @sim_operation(delay=0.5)
 def user_loading_meter(**kwargs):
@@ -142,7 +127,6 @@ def user_unloading_meter(**kwargs):
         2: lambda: mdm.set_ch_bit(2,2,False),
     }
     return execute_steps(steps, **kwargs)
-
 
 
 @sim_operation(delay=1.0)
@@ -209,50 +193,15 @@ def user_press_shift_all(**kwargs):
     
     
 
-    
-
-
-# @sim_operation(delay=1.0)
-# def user_press_shift_all(**kwargs):
-#     """Simulate user pressing shift all - chains R → M → L"""
-    
-#     # Load R
-#     msg, code = station.load_R()
-#     if code != 200:
-#         return
-    
-#     steps_R = {
-#         0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-#         1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
-#         2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
-#         3: lambda: mdm.set_ch_bit(2, 0, False),
-#         6: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
-#         7: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
-#         8: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-#     }
-#     execute_steps(steps_R, **kwargs)
-    
-#     # Load M
-#     msg, code = station.load_M()
-#     if code != 200:
-#         return
-    
-#     steps_M = {
-#         1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
-#         2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
-#         3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-#     }
-#     execute_steps(steps_M, delay=delay)
-#     time.sleep(3 * delay + 0.5)
-
 def meter_random(**kwargs):
     n1 = random.choice([0, 7])
     n2 = random.choice([0, 7])
     n3 = random.choice([0, 7])
 
+    curr = packer(states.get("mds", 0))
     n = (n3 << 6) | (n2 << 3) | n1
 
-    if n == mdm.get_value():
+    if curr == n:
         return meter_random()
     mdm.set_value(n)
 
@@ -367,5 +316,6 @@ def on_action(action, **kwargs):
     return res if res is not None else ("", 200)
 
 __all__ = ['on_action']
+
 if __name__ == "__main__":
-    PCF8574.MOCK = True
+    meter_random()

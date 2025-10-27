@@ -1,9 +1,5 @@
-# from pigpiod import HWGPIO, HWGPIO_MONITOR
-# from pcf8574 import PCF8574
-# from i2c import NosI2C
-# from lib.gpio.hbridge import HBridgeViaPCF8574 as HBridge
-# from lib.utils import secrets
-# import time
 
-from lib.gpio.core import *
-
+from pigpiod import HWGPIO, HWGPIO_MONITOR
+from lib.gpio.gpio_setup import emergency
+from lib.gpio.meter_detection_manager import METER_DETECTION_MANAGER as mdm
+from lib.gpio.roller_manager import ROLLER_MANAGER as rm
