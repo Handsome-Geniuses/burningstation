@@ -199,7 +199,7 @@ def on_lamp(**kwargs):
     option = kwargs.get('type', None)
     if option==None: return
     elif option=='L1': lm.lamp1(not states['lamp'][0])
-    elif option=='L2': lm.lamp1(not states['lamp'][1])
+    elif option=='L2': lm.lamp2(not states['lamp'][1])
     elif option=='+L1': lm.lamp1(True)
     elif option=='-L1': lm.lamp1(False)
     elif option=='+L2': lm.lamp2(True)
