@@ -19,7 +19,7 @@ class METER_DETECTION_MANAGER:
 
     @staticmethod
     def get_value():
-        return packer(METER_DETECTION_MANAGER.get_state())
+        return packer(METER_DETECTION_MANAGER.get_value_list())
 
     @staticmethod
     def set_value(value: int):

@@ -181,6 +181,11 @@ def on_load(**kwargs):
 def on_tower(**kwargs):
     option = kwargs.get('type', None)
     if option==None: return
+    elif option=='R': tm.red( not states['tower'][0])
+    elif option=='G': tm.green( not states['tower'][1])
+    elif option=='B': tm.blue( not states['tower'][2])
+    elif option=='BUZ': tm.buzz( not states['tower'][3])
+
     elif option=='+R': tm.red(True)
     elif option=='-R': tm.red(False)
     elif option=='+G': tm.green(True)
@@ -193,6 +198,8 @@ def on_tower(**kwargs):
 def on_lamp(**kwargs):
     option = kwargs.get('type', None)
     if option==None: return
+    elif option=='L1': lm.lamp1(not states['lamp'][0])
+    elif option=='L2': lm.lamp1(not states['lamp'][1])
     elif option=='+L1': lm.lamp1(True)
     elif option=='-L1': lm.lamp1(False)
     elif option=='+L2': lm.lamp2(True)

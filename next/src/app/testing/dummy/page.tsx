@@ -42,19 +42,13 @@ export default () => {
             <br />
             tower and lamp control
             <br />
-            <StationWrap action="tower" text="+red" kwargs={{type:'+R'}}/>
-            <StationWrap action="tower" text="-red" kwargs={{type:'-R'}}/>
-            <StationWrap action="tower" text="+green" kwargs={{type:'+G'}}/>
-            <StationWrap action="tower" text="-green" kwargs={{type:'-G'}}/>
-            <StationWrap action="tower" text="+blue" kwargs={{type:'+B'}}/>
-            <StationWrap action="tower" text="-blue" kwargs={{type:'-B'}}/>
-            <StationWrap action="tower" text="+buzzer" kwargs={{type:'+BUZ'}}/>
-            <StationWrap action="tower" text="-buzzer" kwargs={{type:'-BUZ'}}/>
+            <StationWrap action="tower" text="red" kwargs={{type:'R'}}/>
+            <StationWrap action="tower" text="green" kwargs={{type:'G'}}/>
+            <StationWrap action="tower" text="blue" kwargs={{type:'B'}}/>
+            <StationWrap action="tower" text="buzz" kwargs={{type:'BUZ'}}/>
+            <StationWrap action="lamp" text="lamp1" kwargs={{type:'L1'}}/>
+            <StationWrap action="lamp" text="lamp2" kwargs={{type:'L2'}}/>
             <br />
-            <StationWrap action="lamp" text="+lamp1" kwargs={{type:'+L1'}}/>
-            <StationWrap action="lamp" text="-lamp1" kwargs={{type:'-L1'}}/>
-            <StationWrap action="lamp" text="+lamp2" kwargs={{type:'+L2'}}/>
-            <StationWrap action="lamp" text="-lamp2" kwargs={{type:'-L2'}}/>
 
             <br />
             Control rollers manually! It forces so careful
@@ -94,35 +88,8 @@ export default () => {
             <SimWrap action="question" kwargs={{ type: 1 }} text="ask number" />
             <SimWrap action="question" kwargs={{ type: 2 }} text="ask string" />
 
-            <br />
-            <br />
-            <br />
-            meter move simulation
-            <br />
-            <SimWrap action="meter" kwargs={{ type: 0 }} text="randomize" />
-            <SimWrap action="meter" kwargs={{ type: 10 }} text="user loading meter" />
-            <SimWrap action="meter" kwargs={{ type: 14 }} text="user unloading meter" />
-            <SimWrap action="meter" kwargs={{ type: 15 }} text="user pressed shift ALL" />
-            <br />
-            <SimWrap action="meter" kwargs={{ type: 11 }} text="user pressed meter load" />
-            <SimWrap action="meter" kwargs={{ type: 12 }} text="user pressed load middle" />
-            <SimWrap action="meter" kwargs={{ type: 13 }} text="user pressed load right" />
 
 
-            <br />
-            program
-            <br />
-            <SimWrap action="run" kwargs={{ type: 0 }} text="run L passive test" />
-            <SimWrap action="run" kwargs={{ type: 1 }} text="run M active test" />
-
-            <br />
-            robot
-            <br />
-            <SimWrap action="robot power on" />
-            <SimWrap action="robot power off" />
-            <SimWrap action="robot enable" />
-            <SimWrap action="robot disable" />
-            <SimWrap action="robot home" />
 
             {loading && <LoadingGif variant={'full'} msg="loading" blur={true} className="bg-secondary/20" />}
         </div>
