@@ -25,4 +25,9 @@ motors = [
     HBridge(pcfio[1], 6, 7),
 ]
 
+# pcfio interface and r g b b pins
+tower_interface = (pcfio[0], 0,1,2,3)
+
+lamp_interface = (pcfio[0], 4,5)
+
 HWGPIO_MONITOR.start()

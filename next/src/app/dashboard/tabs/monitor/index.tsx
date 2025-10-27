@@ -23,6 +23,12 @@ const Indicators = () => {
 
             <div className="flex gap-1 items-center w-fit"><Led state={systemState.emergency ? "off" : "neutral"} /></div>
             <p>EMERGENCY</p>
+
+            <div className="flex gap-1 items-center w-fit">{systemState.tower.map((b, i) => <Led key={i} state={b} />)}</div>
+            <p>tower rgb buz</p>
+
+            <div className="flex gap-1 items-center w-fit">{systemState.lamp.map((b, i) => <Led key={i} state={b} />)}</div>
+            <p>lamp</p>
         </div>
     )
 }

@@ -9,7 +9,6 @@ import React from "react"
 type Actions = 'roller' | 'meter' | string
 
 
-
 export default () => {
     const [loading, setLoading] = React.useState(false)
     const SimWrap = ({ text, action, kwargs = {} }: { text?: string, action: string, kwargs?: { [key: string]: any } }) => <Button onClick={() => flask.handleAction('sim', action, kwargs)}>{text ?? action}</Button>
@@ -40,6 +39,22 @@ export default () => {
             <br />
             <SimWrap action="roller" />
             <SimWrap action="emergency" text="tog emergency" />
+            <br />
+            tower and lamp control
+            <br />
+            <StationWrap action="tower" text="+red" kwargs={{type:'+R'}}/>
+            <StationWrap action="tower" text="-red" kwargs={{type:'-R'}}/>
+            <StationWrap action="tower" text="+green" kwargs={{type:'+G'}}/>
+            <StationWrap action="tower" text="-green" kwargs={{type:'-G'}}/>
+            <StationWrap action="tower" text="+blue" kwargs={{type:'+B'}}/>
+            <StationWrap action="tower" text="-blue" kwargs={{type:'-B'}}/>
+            <StationWrap action="tower" text="+buzzer" kwargs={{type:'+BUZ'}}/>
+            <StationWrap action="tower" text="-buzzer" kwargs={{type:'-BUZ'}}/>
+            <br />
+            <StationWrap action="lamp" text="+lamp1" kwargs={{type:'+L1'}}/>
+            <StationWrap action="lamp" text="-lamp1" kwargs={{type:'-L1'}}/>
+            <StationWrap action="lamp" text="+lamp2" kwargs={{type:'+L2'}}/>
+            <StationWrap action="lamp" text="-lamp2" kwargs={{type:'-L2'}}/>
 
             <br />
             Control rollers manually! It forces so careful

@@ -177,14 +177,34 @@ def on_load(**kwargs):
     elif option=='R': load_R()
     elif option=='RM': load_RM() 
     elif option=='ALL': load_ALL() 
-    
+
+def on_tower(**kwargs):
+    option = kwargs.get('type', None)
+    if option==None: return
+    elif option=='+R': tm.red(True)
+    elif option=='-R': tm.red(False)
+    elif option=='+G': tm.green(True)
+    elif option=='-G': tm.green(False)
+    elif option=='+B': tm.blue(True)
+    elif option=='-B': tm.blue(False)
+    elif option=='+BUZ': tm.buzz(True)
+    elif option=='-BUZ': tm.buzz(False)
+
+def on_lamp(**kwargs):
+    option = kwargs.get('type', None)
+    if option==None: return
+    elif option=='+L1': lm.lamp1(True)
+    elif option=='-L1': lm.lamp1(False)
+    elif option=='+L2': lm.lamp2(True)
+    elif option=='-L2': lm.lamp2(False)
+
 def on_action(action, **kwargs):
     res = None
-    if secrets.MOCK: print("[station] is mock so skipping")
+    # if secrets.MOCK: print("[station] is mock so skipping")
+    if False: pass
     elif action=="load":  on_load(**kwargs)
-    elif action=="load":  on_load(**kwargs)
-    elif action=="load":  on_load(**kwargs)
-
+    elif action=="tower": on_tower(**kwargs)
+    elif action=="lamp":  on_lamp(**kwargs)
 
     return res if res is not None else ("", 200)
 

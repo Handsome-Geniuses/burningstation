@@ -5,13 +5,12 @@ class METER_DETECTION_MANAGER:
     @staticmethod
     def get_mds():
         return mds
-
     @staticmethod
-    def get_state():
+    def get_value_list():
         return [md.state for md in mds]
     
     @staticmethod
-    def set_state(states: list[bool]):
+    def set_value_list(states: list[bool]):
         """Set all 9 sensors from a list of booleans (only in MOCK mode)."""
         if not HWGPIO.MOCK: return
         assert len(states) == 9, "State list must have exactly 9 elements"

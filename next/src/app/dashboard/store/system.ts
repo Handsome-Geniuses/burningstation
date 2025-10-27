@@ -28,6 +28,12 @@ export interface SystemState {
     
     // running
     running: boolean
+
+    // tower r,g,b,buzzer
+    tower: [boolean, boolean, boolean, boolean]
+
+    // lamp1, lamp2
+    lamp: [boolean,boolean]
 }
 export const initialSystemState: SystemState = {
     motors: [0, 0, 0],
@@ -36,7 +42,9 @@ export const initialSystemState: SystemState = {
     handsome: false,
     connected: false,
     currentTab: undefined,
-    running: false
+    running: false,
+    tower: [false, false, false, false],
+    lamp: [false, false],
 }
 
 export type Action = { type: 'set'; key: keyof SystemState; value: SystemState[keyof SystemState] }

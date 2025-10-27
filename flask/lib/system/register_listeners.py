@@ -1,11 +1,7 @@
-from lib.gpio import *
+from lib.gpio import HWGPIO, HWGPIO_MONITOR, emergency, rm, mdm
 from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.system.states import states
 from lib.utils import secrets
-
-states['emergency'] = emergency.state
-states['motors'] = rm.get_value_list()
-states['mds'] = mdm.get_state()
 
 # =============================================================
 # emergency!
