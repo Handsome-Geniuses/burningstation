@@ -25,7 +25,7 @@ class METER_DETECTION_MANAGER:
     def set_value(value: int):
         """Set all sensors from a 9-bit integer"""
         states = unpacker(value, 9)
-        METER_DETECTION_MANAGER.set_state(states)
+        METER_DETECTION_MANAGER.set_value_list(states)
     
 
     @staticmethod

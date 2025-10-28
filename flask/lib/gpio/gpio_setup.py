@@ -26,7 +26,9 @@ pcfio = [
     PCF8574(addr=0x22, invert=True, i2c=i2c),
 ]
 
-mds = [HWGPIO_INVERTED(pin, "in", "pull_up") for pin in [17, 27, 22, 10, 9, 11, 5, 6, 13]]
+
+HWGPIOMDS = HWGPIO if secrets.MOCK else HWGPIO_INVERTED
+mds = [HWGPIOMDS(pin, "in", "pull_up") for pin in [17, 27, 22, 10, 9, 11, 5, 6, 13]]
 
 motors = [
     HBridge(pcfio[1], 2, 3),
@@ -34,8 +36,9 @@ motors = [
     HBridge(pcfio[1], 6, 7),
 ]
 
+buzzer = HWGPIO(12, 'out')
 # pcfio interface and r g b b pins
-tower_interface = (pcfio[0], 0,1,2,3)
+tower_interface = (pcfio[0], 0,1,2, buzzer)
 
 lamp_interface = (pcfio[0], 4,5)
 

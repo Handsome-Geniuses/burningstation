@@ -182,18 +182,16 @@ def on_tower(**kwargs):
     option = kwargs.get('type', None)
     if option==None: return
     elif option=='R': tm.red( not states['tower'][0])
-    elif option=='G': tm.green( not states['tower'][1])
-    elif option=='B': tm.blue( not states['tower'][2])
+    elif option=='Y': tm.yellow( not states['tower'][1])
+    elif option=='G': tm.green( not states['tower'][2])
     elif option=='BUZ': tm.buzz( not states['tower'][3])
 
     elif option=='+R': tm.red(True)
     elif option=='-R': tm.red(False)
+    elif option=='+Y': tm.yellow(True)
+    elif option=='-Y': tm.yellow(False)
     elif option=='+G': tm.green(True)
     elif option=='-G': tm.green(False)
-    elif option=='+B': tm.blue(True)
-    elif option=='-B': tm.blue(False)
-    elif option=='+BUZ': tm.buzz(True)
-    elif option=='-BUZ': tm.buzz(False)
 
 def on_lamp(**kwargs):
     option = kwargs.get('type', None)
