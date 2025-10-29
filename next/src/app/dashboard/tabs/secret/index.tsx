@@ -39,6 +39,7 @@ const MotorControls = () => {
                     { text: "M", left: [0, 2, 0], right: [0, 1, 0] },
                     { text: "R", left: [0, 0, 2], right: [0, 0, 1] },
                     { text: "LM", left: [2, 2, 0], right: [1, 1, 0] },
+                    { text: "all", left: [2, 2, 2], right: [1, 1, 1] },
                     { text: "MR", left: [0, 2, 2], right: [0, 1, 1] },
                 ].map(({ text, left, right }) => (
                     <SnapBar
@@ -49,13 +50,6 @@ const MotorControls = () => {
                         onRelease={() => flask.handleAction('override', 'motor', { value_list: [0, 0, 0] })}
                     />
                 ))}
-                <SnapBar
-                    onLeft={() => flask.handleAction('override', 'motor', { value_list: [2, 2, 2] })}
-                    onRight={() => flask.handleAction('override', 'motor', { value_list: [1, 1, 1] })}
-                    onRelease={() => flask.handleAction('override', 'motor', { value_list: [0, 0, 0] })}
-                    barClassName="w-26 h-9 bg-gray-700 rounded-lg shadow-md"
-                    text="all"
-                />
             </div>
         </div>
     )
