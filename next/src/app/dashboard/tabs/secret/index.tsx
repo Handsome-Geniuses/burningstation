@@ -8,7 +8,7 @@ const TowerLampControls = () => {
         <div className="flex flex-col items-center justify-center">
             <div>Tower Lamp Controls</div>
             <div className="grid grid-cols-3 gap-1 p-1">
-                {['R', 'Y', 'G', 'BUZ'].map((type,i) => (
+                {['R', 'Y', 'G', 'BUZ'].map((type, i) => (
                     <Button
                         key={i}
                         onClick={() => flask.handleAction('station', 'tower', { type: type })}
@@ -16,7 +16,7 @@ const TowerLampControls = () => {
                         {type}
                     </Button>
                 ))}
-                {['L1', 'L2'].map((type,i) => (
+                {['L1', 'L2'].map((type, i) => (
                     <Button
                         key={i}
                         onClick={() => flask.handleAction('station', 'lamp', { type: type })}
@@ -57,10 +57,14 @@ const MotorControls = () => {
 
 export const SecretTab = () => {
     return (
-        <div className="">
-            <MeterSlots classname="border border-border p-1" />
-            <MotorControls />
+        <div className="flex flex-col gap-4 flex-1">
             <TowerLampControls />
+
+            <div className="items-end h-full p-2 flex justify-center gap-4">
+                <MeterSlots classname="border border-border p-1" />
+                <MotorControls />
+            </div>
+
         </div>
     )
 }

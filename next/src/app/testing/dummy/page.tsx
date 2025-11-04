@@ -51,22 +51,16 @@ const MotorControls = () => {
     return (
         <>
             <div>Control rollers manually! It forces so careful</div>
-            <div className="flex gap-2">
-                <OverrideMotorWrap text="off" value_list={[0, 0, 0]} />
-                <SnapBar
-                    onLeft={() => flask.handleAction('override', 'motor', { value_list: [2, 2, 2] })}
-                    onRight={() => flask.handleAction('override', 'motor', { value_list: [1, 1, 1] })}
-                    onRelease={() => flask.handleAction('override', 'motor', { value_list: [0, 0, 0] })}
-                    text="all"
-                />
-            </div>
-            <div className="flex gap-2">
+            <div><OverrideMotorWrap text="off" value_list={[0, 0, 0]} /></div>
+            
+            <div className="grid grid-cols-3 gap-1 p-1 w-fit">
                 {[
                     { text: "L", left: [2, 0, 0], right: [1, 0, 0] },
-                    { text: "LM", left: [2, 2, 0], right: [1, 1, 0] },
                     { text: "M", left: [0, 2, 0], right: [0, 1, 0] },
-                    { text: "MR", left: [0, 2, 2], right: [0, 1, 1] },
                     { text: "R", left: [0, 0, 2], right: [0, 0, 1] },
+                    { text: "LM", left: [2, 2, 0], right: [1, 1, 0] },
+                    { text: "all", left: [2, 2, 2], right: [1, 1, 1] },
+                    { text: "MR", left: [0, 2, 2], right: [0, 1, 1] },
                 ].map(({ text, left, right }) => (
                     <SnapBar
                         key={text}
@@ -98,12 +92,12 @@ export default () => {
 
 
 
-            <div>Buttons users will use. Disabled with mock tho</div>
+            <div>Buttons users will use</div>
             <div className="flex gap-2">
                 <StationWrap action="load" text="load L" kwargs={{ type: 'L' }} />
                 <StationWrap action="load" text="load M" kwargs={{ type: 'M' }} />
                 <StationWrap action="load" text="load R" kwargs={{ type: 'R' }} />
-                <StationWrap action="load" text="load RM" kwargs={{ type: 'RM' }} />
+                {/* <StationWrap action="load" text="load RM" kwargs={{ type: 'RM' }} /> */}
                 <StationWrap action="load" text="shift all" kwargs={{ type: 'ALL' }} />
             </div>
 
@@ -114,12 +108,12 @@ export default () => {
                 <SimWrap action="meter" kwargs={{ type: 0 }} text="randomize" />
                 <SimWrap action="meter" kwargs={{ type: 10 }} text="user loading meter" />
                 <SimWrap action="meter" kwargs={{ type: 14 }} text="user unloading meter" />
-                <SimWrap action="meter" kwargs={{ type: 15 }} text="user pressed shift ALL" />
+                {/* <SimWrap action="meter" kwargs={{ type: 15 }} text="user pressed shift ALL" /> */}
             </div>
             <div className="flex gap-2">
-                <SimWrap action="meter" kwargs={{ type: 11 }} text="user pressed meter load" />
+                {/* <SimWrap action="meter" kwargs={{ type: 11 }} text="user pressed meter load" />
                 <SimWrap action="meter" kwargs={{ type: 12 }} text="user pressed load middle" />
-                <SimWrap action="meter" kwargs={{ type: 13 }} text="user pressed load right" />
+                <SimWrap action="meter" kwargs={{ type: 13 }} text="user pressed load right" /> */}
             </div>
 
 

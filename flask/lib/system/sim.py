@@ -12,6 +12,22 @@ _sim_running = False
 _sim_emergency_stop = False
 
 
+"""
+# Set bit n
+value |= (1 << n)
+
+# Clear bit n
+value &= ~(1 << n)
+
+# Toggle bit n
+value ^= (1 << n)
+
+# Check if bit n is set
+is_set = bool(value & (1 << n))
+"""
+
+
+
 def sim_operation(delay: float = 1.0):
     """Decorator that manages threading, _sim_lock, and _sim_running for simulation operations"""
 
@@ -128,71 +144,6 @@ def user_unloading_meter(**kwargs):
     }
     return execute_steps(steps, **kwargs)
 
-
-@sim_operation(delay=1.0)
-def user_press_load_L(**kwargs):
-    """ this just pretends the meter is actually moving """
-    msg, code = station.load_L()
-    if code==200:
-        steps = {
-            0: lambda: mdm.set_ch_bit(0,1,True),
-            1: lambda: mdm.set_ch_bit(0,2,True),
-        }
-        return execute_steps(steps, **kwargs)
-
-
-@sim_operation(delay=1.0)
-def user_press_load_M(**kwargs):
-    """ this just pretends the meter is actually moving """
-    msg, code = station.load_M()
-    if code==200:
-        steps = {
-            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
-            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
-            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-        }
-        return execute_steps(steps, **kwargs)
-
-
-@sim_operation(delay=1.0)
-def user_press_load_R(**kwargs):
-    """ this just pretends the meter is actually moving """
-    msg, code = station.load_R()
-    if code==200:
-        steps = {
-            0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
-            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
-            3: lambda: mdm.set_ch_bit(2,0,False),
-        }
-        return execute_steps(steps, **kwargs)
-
-@sim_operation(delay=1.0)
-def user_press_shift_all(**kwargs):
-    """Simulate user pressing shift all -> chains M->R and L->M"""
-
-    def on_R_done():
-        # Load M
-        if station.load_M()[1] == 200:
-            steps_M = {
-                1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
-                2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
-                3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-            }
-            execute_steps(steps_M, **kwargs)
-
-    # Load R
-    if station.load_R(on_done=on_R_done)[1] == 200:
-        steps_R = {
-            0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
-            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
-            3: lambda: mdm.set_ch_bit(2, 0, False),
-        }
-        execute_steps(steps_R, **kwargs)
-    
-    
-
 def meter_random(**kwargs):
     n1 = random.choice([0, 7])
     n2 = random.choice([0, 7])
@@ -204,21 +155,6 @@ def meter_random(**kwargs):
     if curr == n:
         return meter_random()
     mdm.set_value(n)
-
-
-"""
-# Set bit n
-value |= (1 << n)
-
-# Clear bit n
-value &= ~(1 << n)
-
-# Toggle bit n
-value ^= (1 << n)
-
-# Check if bit n is set
-is_set = bool(value & (1 << n))
-"""
 
 
 def toggle_emergency(**kwargs):
@@ -288,16 +224,8 @@ def on_meter(**kwargs):
         res = meter_random()
     elif option == 10:
         res = user_loading_meter()
-    elif option == 11:
-        res = user_press_load_L()
-    elif option == 12:
-        res = user_press_load_M()
-    elif option == 13:
-        res = user_press_load_R()
     elif option == 14:
         res = user_unloading_meter()
-    elif option == 15:
-        res = user_press_shift_all()
 
     return res if res is not None else ("", 200)
 
@@ -343,17 +271,6 @@ def mock_station_load(**kwargs):
         }
     elif option == 'ALL':
         steps = {
-            # 0: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 3) | (0b1001 << 0))),
-            # 1: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 4) | (0b1001 << 1))),
-            # 2: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 5) | (0b1001 << 2))),
-            # 3: lambda: mdm.set_bit(6,False),
-            # 0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-            # 1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
-            # 2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
-            # 3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
-            # 4: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
-            # 5: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-            # 6: lambda: mdm.set_ch_bit(2,0,False),
             0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
             1: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 0)|(0b1001 << 4))),
             2: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 1)|(0b1001 << 5))),
