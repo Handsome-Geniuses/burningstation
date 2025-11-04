@@ -222,7 +222,8 @@ is_set = bool(value & (1 << n))
 
 
 def toggle_emergency(**kwargs):
-    emergency.state = not emergency.state
+    emergency.state = not bool(emergency.state)
+
 
 
 testimgsrc = "running-cat.gif"
@@ -314,6 +315,63 @@ def on_action(action, **kwargs):
         res = toggle_emergency(**kwargs)
     
     return res if res is not None else ("", 200)
+
+@sim_operation(delay=1.0)
+def mock_station_load(**kwargs):
+    option = kwargs.get("type", 0)
+    msg, code = station.on_load(**kwargs)
+    if code!=200: return
+    steps = None
+
+    if option == 'L':
+        steps = {
+            0: lambda: mdm.set_ch_bit(0,1,True),
+            1: lambda: mdm.set_ch_bit(0,2,True),
+        }
+    elif option == 'M':
+        steps = {
+            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
+            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
+            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+        }
+    elif option == 'R':
+        steps = {
+            0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
+            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
+            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
+            3: lambda: mdm.set_ch_bit(2,0,False),
+        }
+    elif option == 'ALL':
+        steps = {
+            # 0: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 3) | (0b1001 << 0))),
+            # 1: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 4) | (0b1001 << 1))),
+            # 2: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 5) | (0b1001 << 2))),
+            # 3: lambda: mdm.set_bit(6,False),
+            # 0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
+            # 1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
+            # 2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
+            # 3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
+            # 4: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
+            # 5: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+            # 6: lambda: mdm.set_ch_bit(2,0,False),
+            0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
+            1: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 0)|(0b1001 << 4))),
+            2: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 1)|(0b1001 << 5))),
+            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+            4: lambda: mdm.set_ch_bit(2,0,False),
+
+        }
+    if steps:
+        return execute_steps(steps, **kwargs)
+    
+def on_mock(handler, action, **kwargs):
+    res = None
+    if handler == station:
+        if action == 'load': 
+            res = mock_station_load(**kwargs)
+
+    return res if res is not None else ("", 200)
+    
 
 __all__ = ['on_action']
 

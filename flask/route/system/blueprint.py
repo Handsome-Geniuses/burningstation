@@ -6,6 +6,7 @@ import flask
 import os
 import signal
 from lib.sse.question import setResponse
+from lib.utils import secrets
 from .manager import *
 # import lib.system.sim as sim
 # import lib.system.override as override
@@ -54,15 +55,36 @@ def __request_response():
 
     return "", 200
 
-@bp.post("/sim/<action>")
-def __sim(action):
-    return sim.on_action(action, **flask.request.get_json())
-@bp.post('/override/<action>')
-def __override(action):
-    return override.on_action(action, **flask.request.get_json())
-@bp.post('/station/<action>')
-def __station(action):
-    return station.on_action(action, **flask.request.get_json())
-@bp.post("/program/<action>")
-def __program(action):
-    return program.on_action(action, **flask.request.get_json())
+# @bp.post("/sim/<action>")
+# def __sim(action):
+#     return sim.on_action(action, **flask.request.get_json())
+# @bp.post('/override/<action>')
+# def __override(action):
+#     return override.on_action(action, **flask.request.get_json())
+# @bp.post('/station/<action>')
+# def __station(action):
+#     return station.on_action(action, **flask.request.get_json())
+# @bp.post("/program/<action>")
+# def __program(action):
+#     return program.on_action(action, **flask.request.get_json())
+
+
+
+handlers = {
+    "sim": sim,
+    "override": override,
+    "station": station,
+    "program": program,
+}
+
+@bp.post("/<type>/<action>")
+def handle_action(type, action):
+    handler = handlers.get(type)
+    if not handler:
+        # 404 if unknown type
+        return f"Unknown type '{type}'", 404
+
+    data = flask.request.get_json() or {}
+    # if secrets.MOCK and handler!=sim: sim.on_action(action, **data)
+    if secrets.MOCK and handler!=sim: return sim.on_mock(handler,action,**data)
+    return handler.on_action(action, **data)
