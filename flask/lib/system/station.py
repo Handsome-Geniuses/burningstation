@@ -157,26 +157,34 @@ def load_RM(**kwargs):
 def load_ALL(**kwargs):
     value = mdm.get_value()
 
-    if mdm.is_ch_full(0,value) and mdm.is_ch_full(1,value) and mdm.is_ch_empty(2,value):
-        rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.FORWARD])
-        while states['mds'][5]: time.sleep(0.1)
-        print("5 has cleared")
-        while not states['mds'][5]: time.sleep(0.1)
-        print("5 has hit again!")
-        rm.set_value_list([rm.COAST, rm.COAST, rm.FORWARD])
-        while states['mds'][6]: time.sleep(0.1)
-        print("6 has cleared!")
+    if not mdm.is_ch_full(0,value): 
+        return "[load_ALL] L->M nothing to move", 204
+    elif not mdm.is_ch_full(1,value): 
+        return "[load_ALL] M->R nothing to move", 204
+    elif not mdm.is_ch_empty(2,value): 
+        return "[load_ALL] R occupied", 204
+    # if mdm.is_ch_full(0,value) and mdm.is_ch_full(1,value) and mdm.is_ch_empty(2,value):
+    rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.FORWARD])
+    while states['mds'][5]: time.sleep(0.1)
+    print("5 has cleared")
+    while not states['mds'][5]: time.sleep(0.1)
+    print("5 has hit again!")
+    rm.set_value_list([rm.COAST, rm.COAST, rm.FORWARD])
+    while states['mds'][6]: time.sleep(0.1)
+    print("6 has cleared!")
     rm.set_value(0)
+    return "[load_ALL] Load completed", 200
+
 
         
 def on_load(**kwargs):
     option = kwargs.get('type', None)
     if option==None: return
-    elif option=='L': load_L()
-    elif option=='M': load_M()
-    elif option=='R': load_R()
-    elif option=='RM': load_RM() 
-    elif option=='ALL': load_ALL() 
+    elif option=='L': return load_L()
+    elif option=='M': return load_M()
+    elif option=='R': return load_R()
+    elif option=='RM': return load_RM() 
+    elif option=='ALL': return load_ALL() 
 
 def on_tower(**kwargs):
     option = kwargs.get('type', None)
@@ -207,9 +215,9 @@ def on_action(action, **kwargs):
     res = None
     # if secrets.MOCK: print("[station] is mock so skipping")
     if False: pass
-    elif action=="load":  on_load(**kwargs)
-    elif action=="tower": on_tower(**kwargs)
-    elif action=="lamp":  on_lamp(**kwargs)
+    elif action=="load":  return on_load(**kwargs)
+    elif action=="tower": return on_tower(**kwargs)
+    elif action=="lamp":  return on_lamp(**kwargs)
 
     return res if res is not None else ("", 200)
 
