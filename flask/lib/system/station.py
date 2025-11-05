@@ -48,7 +48,7 @@ def load_L_precheck(**kwargs):
         return "Nothing to load", 409
     return None     # passed pre-check
 
-@ar_station.operation(timeout=10.0, precheck=load_L_precheck, on_start=on_load_start, on_done=on_load_done)
+@ar_station.operation(timeout=20.0, precheck=load_L_precheck, on_start=on_load_start, on_done=on_load_done)
 def load_L(**kwargs):
     """Meter was loaded onto station1. Needs alignment"""
     rm.set_value_list([rm.FORWARD, rm.COAST, rm.COAST])
@@ -68,7 +68,7 @@ def load_M_precheck(**kwargs):
         return "M is occupied", 409
     return None     # passed pre-check
 
-@ar_station.operation(timeout=10.0, precheck=load_M_precheck, on_start=on_load_start, on_done=on_load_done)
+@ar_station.operation(timeout=20.0, precheck=load_M_precheck, on_start=on_load_start, on_done=on_load_done)
 def load_M(**kwargs):
     """Moves meter from station1 to station2"""
     rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.COAST])
@@ -87,7 +87,7 @@ def load_R_precheck(**kwargs):
         return "R is occupied", 409
     return None     # passed pre-check
 
-@ar_station.operation(timeout=10.0, precheck=load_R_precheck, on_start=on_load_start, on_done=on_load_done)
+@ar_station.operation(timeout=20.0, precheck=load_R_precheck, on_start=on_load_start, on_done=on_load_done)
 def load_R(**kwargs):
     """Moves meter from station2 to station3"""
     rm.set_value_list([rm.COAST, rm.FORWARD, rm.FORWARD])
@@ -137,7 +137,7 @@ def load_M_to_L_precheck(**kwargs):
         return "L is occupied", 409
     return None  # passed pre-check
 
-@ar_station.operation(timeout=10.0, precheck=load_M_to_L_precheck, on_start=on_load_start, on_done=on_load_done)
+@ar_station.operation(timeout=20.0, precheck=load_M_to_L_precheck, on_start=on_load_start, on_done=on_load_done)
 def load_M_to_L(**kwargs):
     """Moves meter from middle station (M) back to left station (L)"""
     rm.set_value_list([rm.REVERSE, rm.REVERSE, rm.COAST])
@@ -154,7 +154,7 @@ def load_R_to_M_precheck(**kwargs):
         return "M is occupied", 409
     return None  # passed pre-check
 
-@ar_station.operation(timeout=10.0, precheck=load_R_to_M_precheck, on_start=on_load_start, on_done=on_load_done)
+@ar_station.operation(timeout=20.0, precheck=load_R_to_M_precheck, on_start=on_load_start, on_done=on_load_done)
 def load_R_to_M(**kwargs):
     """Moves meter from right station (R) back to middle station (M)"""
     rm.set_value_list([rm.COAST, rm.REVERSE, rm.REVERSE])
