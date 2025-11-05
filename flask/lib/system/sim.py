@@ -4,6 +4,7 @@ import threading
 from lib.gpio import *
 from lib.sse import ask_clients
 import lib.system.station as station
+import lib.system.override as override
 from lib.system.states import states
 from lib.utils import packer, secrets
 
@@ -82,15 +83,19 @@ def execute_steps(steps: dict, **kwargs):
 def sim_emergency_stop():
     """Activate emergency stop - prevents new sim operations from starting"""
     global _sim_emergency_stop
+    global _sim_running
     with _sim_lock:
         _sim_emergency_stop = True
+        _sim_running = False
     print("Sim emergency stop activated!")
 
 def sim_emergency_reset():
     """Reset emergency stop flag - call this to allow sim operations again"""
     global _sim_emergency_stop
+    global _sim_running
     with _sim_lock:
         _sim_emergency_stop = False
+        _sim_running = False
     print("Sim emergency stop cleared!")
 
 def emergency_event(p:HWGPIO):
@@ -248,7 +253,8 @@ def on_action(action, **kwargs):
 def mock_station_load(**kwargs):
     option = kwargs.get("type", 0)
     msg, code = station.on_load(**kwargs)
-    if code!=200: return
+    if not (code==202  or code == 200): return
+    
     steps = None
 
     if option == 'L':
@@ -263,20 +269,37 @@ def mock_station_load(**kwargs):
             3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
         }
     elif option == 'R':
-        steps = {
-            0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
-            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
-            3: lambda: mdm.set_ch_bit(2,0,False),
-        }
+        if mdm.is_ch_full(2):
+            steps = {
+                1: lambda: mdm.set_ch_bit(2,0,0),
+            }
+        else:
+            steps = {
+                1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
+                2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
+                3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
+                4: lambda: mdm.set_ch_bit(2,0,False),
+            }
     elif option == 'ALL':
         steps = {
-            0: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-            1: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 0)|(0b1001 << 4))),
-            2: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 1)|(0b1001 << 5))),
-            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-            4: lambda: mdm.set_ch_bit(2,0,False),
-
+            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
+            2: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 0)|(0b1001 << 4))),
+            3: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 1)|(0b1001 << 5))),
+            4: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+            5: lambda: mdm.set_ch_bit(2,0,False),
+        }
+    elif option == 'ML':
+        steps = {
+            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
+            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
+        }
+    elif option == 'RM':
+        steps = {
+            1: lambda: mdm.set_ch_bit(2,0,True),
+            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
+            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
+            4: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
         }
     if steps:
         return execute_steps(steps, **kwargs)
@@ -286,6 +309,10 @@ def on_mock(handler, action, **kwargs):
     if handler == station:
         if action == 'load': 
             res = mock_station_load(**kwargs)
+        else:
+            res = station.on_action(action, **kwargs)
+    elif handler == override:
+        res = override.on_action(action, **kwargs)
 
     return res if res is not None else ("", 200)
     

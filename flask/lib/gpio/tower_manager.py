@@ -10,6 +10,7 @@ def __broadcast_change():
 
 def red(state: bool):
     """Activate or deactivate the tower red light."""
+    state = bool(state)
     if states['tower'][0] != state:
         pcfio.set_state(r, state)
         states['tower'][0] = state
@@ -17,6 +18,7 @@ def red(state: bool):
 
 def yellow(state: bool):
     """Activate or deactivate the tower yellow light."""
+    state = bool(state)
     if states['tower'][1] != state:
         pcfio.set_state(y, state)
         states['tower'][1] = state
@@ -24,6 +26,7 @@ def yellow(state: bool):
 
 def green(state: bool):
     """Activate or deactivate the tower green light."""
+    state = bool(state)
     if states['tower'][2] != state:
         pcfio.set_state(g, state)
         states['tower'][2] = state
@@ -31,6 +34,7 @@ def green(state: bool):
 
 def buzz(state: bool):
     """Activate or deactivate the tower buzzer."""
+    state = bool(state)
     if states['tower'][3] != state:
         buzzer.state = state
         states['tower'][3] = state
@@ -46,4 +50,19 @@ def get_value_list() -> list[int]:
         bool(buzzer.state)
     ]
 
-__all__ = ['red', 'yellow', 'green', 'buzz', 'get_value_list']
+def set_value_list(values: list[bool] | list[int]):
+    """
+    Set all tower outputs at once by calling the existing functions.
+    
+    values: [R, Y, G, Buzzer]
+    """
+    if len(values) != 4:
+        raise ValueError("Expected a list of 4 values: [R, Y, G, Buzzer]")
+
+    red(values[0])
+    yellow(values[1])
+    green(values[2])
+    buzz(values[3])
+
+
+__all__ = ['red', 'yellow', 'green', 'buzz', 'get_value_list', set_value_list]

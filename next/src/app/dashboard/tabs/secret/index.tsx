@@ -29,10 +29,32 @@ const TowerLampControls = () => {
     )
 }
 
+const MeterLoadControls = () => {
+    return (
+        <div className="flex flex-col items-center justify-center">
+            <div>Meter Load Controls</div>
+            <div className="grid grid-cols-3 gap-1 p-1">
+                {['L', 'M', 'R', 'ALL'].map((s, i) => (
+                    <Button 
+                        key={s}
+                        onClick={()=>flask.handleAction('station','load', {type: s})}
+                    >
+                        load {s}
+                    </Button>
+                ))}
+                <Button onClick={()=>flask.handleAction('station','load', {type: 'ML'})}>M to L</Button>
+                <Button onClick={()=>flask.handleAction('station','load', {type: 'RM'})}>R to M</Button>
+            </div>
+
+        </div>
+    )
+
+}
+
 const MotorControls = () => {
     return (
         <div className="flex flex-col items-center justify-center">
-            <div>Motor Control</div>
+            <div>Motor Control OVERRIDE</div>
             <div className="grid grid-cols-3 gap-1 p-1">
                 {[
                     { text: "L", left: [2, 0, 0], right: [1, 0, 0] },
@@ -59,6 +81,7 @@ export const SecretTab = () => {
     return (
         <div className="flex flex-col gap-4 flex-1">
             <TowerLampControls />
+            <MeterLoadControls />
 
             <div className="items-end h-full p-2 flex justify-center gap-4">
                 <MeterSlots classname="border border-border p-1" />

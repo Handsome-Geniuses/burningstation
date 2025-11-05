@@ -5,7 +5,7 @@ from lib.system.states import states
 
 class ROLLER_MANAGER:
     FORWARD = HBridge.FORWARD
-    BACKWARD = HBridge.BACKWARD
+    REVERSE = HBridge.BACKWARD
     COAST = HBridge.COAST
     BRAKE = HBridge.BRAKE
 
