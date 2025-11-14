@@ -51,6 +51,10 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         if (response == undefined) setQuestion({ title, msg, qtype, src, id, confirm, cancel })
         else setQuestion(undefined)
     }
+    const onNotify = (payload: any) => {
+        const {msg, ntype} = payload
+        notify.notice(ntype,msg)
+    }
 
     function flaskconnect() {
         if (flasksse.current) flasksse.current.close()
@@ -67,6 +71,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             if (event === 'keep-alive') return
             else if (event === 'state') onState(payload)
             else if (event === 'question') onQuestion(payload)
+            else if (event === 'notify') onNotify(payload)
         }
         flasksse.current.onerror = () => {
             console.log('Connection lost. Reconnecting...')
@@ -79,7 +84,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
 
     // Initial setup
     useEffect(() => {
-        systemDispatch({type:'set', key: 'handsome', value: new URLSearchParams(window.location.search).has('handsome')})
+        systemDispatch({ type: 'set', key: 'handsome', value: new URLSearchParams(window.location.search).has('handsome') })
         flaskconnect()
         return () => { flasksse.current?.close() }
     }, [])
@@ -91,11 +96,11 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
                     variant="fill"
                     msg={countdown > 0 ? `Reconnecting in ${countdown}` : 'Reconnecting ...'}
                     blur
-                    onClick={()=>(countdown>0) && flaskconnect()}
+                    onClick={() => (countdown > 0) && flaskconnect()}
                 />
             }
             {children}
-            {question!=undefined && <Question open={question!=undefined} {...question} />}
+            {question != undefined && <Question open={question != undefined} {...question} />}
         </StoreContext.Provider>
     )
 }

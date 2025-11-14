@@ -1,6 +1,7 @@
 
 # ================================================================
 # File: tasks
+# kinda like a cron setup
 # ================================================================
 import threading
 import time
@@ -19,7 +20,6 @@ def __interval_task():
             pass
         time.sleep(1)
 
-
 __interval_thread_started = False
 
 def start_interval_task():
@@ -27,6 +27,5 @@ def start_interval_task():
     if not __interval_thread_started:
         threading.Thread(target=__interval_task, daemon=True).start()
         __interval_thread_started = True
-
 
 start_interval_task()

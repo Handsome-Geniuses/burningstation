@@ -8,6 +8,7 @@ from datetime import datetime
 import logging
 from route import *
 import argparse
+from prettyprint import STYLE, prettyprint as print
 
 #================================================================
 # parse arguments
@@ -52,8 +53,8 @@ def __before_req(**kwargs):
     method = flask.request.method
     
     t = datetime.now().strftime("%H:%M:%S")
-    print("[%s] %s//%s -- %s - %s" %(t, visitor, method ,path, params))
-    
+    print("[%s] %s//%s -- %s - %s" %(t, visitor, method ,path, params), fg="#888888", style=STYLE.DIM)
+	# print("Press Enter to close ...", fg="#888888", style=STYLE.DIM)
     
     
 #================================================================
@@ -70,8 +71,11 @@ context = (args.cert_file,  args.key_file) if args.key_file and args.cert_file e
 # context = ("/home/nosnhoj/.cert/cert.pem","/home/nosnhoj/.cert/key.pem")
 
 if __name__ == "__main__": 
-    print("=========================================================================")
-    print(f">> Server running at {args.host}:{args.port}")
+    print("=========================================================================", fg="#888888", style=STYLE.DIM)
+    print(f">> Server running at {args.host}:{args.port}", fg="#888888", style=STYLE.DIM)
+    print("=========================================================================", fg="#888888", style=STYLE.DIM)
+    import click
+    click.echo = lambda *args, **kwargs: None
     app.run(host=args.host, port=args.port, ssl_context=context, use_reloader=False)
         
     

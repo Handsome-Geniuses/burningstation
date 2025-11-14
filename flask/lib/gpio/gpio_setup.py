@@ -1,3 +1,7 @@
+# this file is mostly for labeling 
+# all pin values should be placed here so we know what is used
+
+
 # from lib.gpio.pcf8574int import PCF8574
 from pcf8574 import PCF8574
 from pigpiod import HWGPIO, HWGPIO_MONITOR
@@ -18,7 +22,6 @@ i2c = None if secrets.MOCK else NosI2C()
 HWGPIO.MOCK = secrets.MOCK
 PCF8574.MOCK = secrets.MOCK
 
-emergency = HWGPIO(23, "in", "pull_up")
 
 pcfio = [
     PCF8574(addr=0x20, invert=True, i2c=i2c),
@@ -27,19 +30,21 @@ pcfio = [
 ]
 
 
-HWGPIOMDS = HWGPIO if secrets.MOCK else HWGPIO_INVERTED
-mds = [HWGPIOMDS(pin, "in", "pull_up") for pin in [17, 27, 22, 10, 9, 11, 5, 6, 13]]
-
-motors = [
-    HBridge(pcfio[1], 2, 3),
-    HBridge(pcfio[1], 4, 5),
-    HBridge(pcfio[1], 6, 7),
+# pin values here so we know whats used and unused
+pin_emergency = 23
+pins_mds = [17, 27, 22, 10, 9, 11, 5, 6, 13]
+pin_buzzer = 12
+pcfio_motors = [
+    (pcfio[1], 2, 3),
+    (pcfio[1], 4, 5),
+    (pcfio[1], 6, 7)
 ]
+pcfio_tower = (pcfio[0], 0, 1, 2)
 
-buzzer = HWGPIO(12, 'out')
-# pcfio interface and r g b b pins
-tower_interface = (pcfio[0], 0,1,2, buzzer)
+lamp_pwm_channels=[2,3] #0:12, 1:13, 2:18, 3:19
+lamp_interface = (pcfio[0], 4, 5)
 
-lamp_interface = (pcfio[0], 4,5)
+
+emergency = HWGPIO(pin_emergency, "in", "pull_up")
 
 HWGPIO_MONITOR.start()

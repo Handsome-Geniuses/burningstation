@@ -282,11 +282,11 @@ def mock_station_load(**kwargs):
             }
     elif option == 'ALL':
         steps = {
-            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-            2: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 0)|(0b1001 << 4))),
-            3: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 1)|(0b1001 << 5))),
-            4: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-            5: lambda: mdm.set_ch_bit(2,0,False),
+            # 1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
+            # 2: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 0)|(0b1001 << 4))),
+            # 3: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 1)|(0b1001 << 5))),
+            # 4: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
+            # 5: lambda: mdm.set_ch_bit(2,0,False),
         }
     elif option == 'ML':
         steps = {

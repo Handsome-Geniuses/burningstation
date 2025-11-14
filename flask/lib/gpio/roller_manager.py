@@ -1,7 +1,13 @@
-from lib.gpio.gpio_setup import motors, HBridge
+from lib.gpio.gpio_setup import HBridge, pcfio_motors
 from lib.utils import packer, unpacker
 from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.system.states import states
+
+motors = [
+    HBridge(*pcfio_motors[0]),
+    HBridge(*pcfio_motors[1]),
+    HBridge(*pcfio_motors[2]),
+]
 
 class ROLLER_MANAGER:
     FORWARD = HBridge.FORWARD

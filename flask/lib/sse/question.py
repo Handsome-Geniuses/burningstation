@@ -2,7 +2,7 @@ from typing import Literal
 from lib.sse.sse_queue_manager import SSEQM
 import threading
 from lib.utils import literalValidGenerator
-
+from prettyprint import STYLE, prettyprint as print
 
 QTypes = Literal["boolean", "string", "number"]
 validQType = literalValidGenerator(QTypes)
@@ -30,7 +30,7 @@ def isValidResponse(response, qtype: QTypes = None):
 
 def setResponse(response):
     if not isValidResponse(response):
-        print("not valid")
+        print("⚠️[QUESTION] invalid response!", fg="#ffaa00")
         return False
     global confirmation_value
     if not confirmation_event.is_set():
@@ -59,7 +59,7 @@ def ask_clients(
     if not confirmation_event.is_set():
         confirmation_event.set()  # unblocks all old .wait()
         confirmation_event = threading.Event()
-        print("WARNING! Previous question unanswered. Clearing it.")
+        print("⚠️ [QUESTION] Previous question unanswered. Clearing it.", fg="#ffaa00")
 
     # reset values
     confirmation_event.clear()
@@ -80,7 +80,7 @@ def ask_clients(
 
     # broadcast the question
     SSEQM.broadcast("question", payload)
-    print(f"[QUESTION] asking --> {title} | {msg}")
+    print(f"🔧[QUESTION] asking --> {title} | {msg}", fg="#00ffff", style=STYLE.BOLD)
 
     # wait until any client responds
     confirmation_event.wait()
@@ -90,7 +90,7 @@ def ask_clients(
     # tell clients response
     payload["response"] = confirmation_value
     SSEQM.broadcast("question", payload)
-    print(f"[QUESTION] response --> {confirmation_value}")
+    print(f"✅[QUESTION] response --> {confirmation_value}", fg="#00ff00", style=STYLE.BOLD)
 
     return confirmation_value
 

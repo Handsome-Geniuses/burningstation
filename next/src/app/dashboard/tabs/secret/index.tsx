@@ -1,4 +1,5 @@
 import { SnapBar } from "@/components/ui/snap-bar"
+import { Indicators } from "../monitor"
 import { MeterSlots } from "../controls/meter-slots"
 import { flask } from "@/lib/flask"
 import { Button } from "@/components/ui/button"
@@ -79,15 +80,25 @@ const MotorControls = () => {
 
 export const SecretTab = () => {
     return (
-        <div className="flex flex-col gap-4 flex-1">
-            <TowerLampControls />
-            <MeterLoadControls />
+        // <div className="flex flex-col gap-4 flex-1">
+        //     <TowerLampControls />
+        //     <MeterLoadControls />
 
-            <div className="items-end h-full p-2 flex justify-center gap-4">
+        //     <div className="items-end h-full p-2 flex justify-center gap-4">
+        //         <MeterSlots classname="border border-border p-1" />
+        //         <MotorControls />
+        //     </div>
+        // </div>
+        <div className="flex items-center justify-around">
+            <div className="bg-muted/70 gap-2 p-4 flex flex-col items-center">
+                <Indicators />
                 <MeterSlots classname="border border-border p-1" />
+            </div>
+            <div className="bg-muted/70 gap-2 p-4 flex flex-col items-center">
+                <TowerLampControls />
+                <MeterLoadControls />
                 <MotorControls />
             </div>
-
         </div>
     )
 }

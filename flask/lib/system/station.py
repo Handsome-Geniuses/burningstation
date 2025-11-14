@@ -3,20 +3,24 @@
 # controls turning on/off motors to move meters
 # ====================================================
 from lib.gpio import *
+from lib.sse.sse_queue_manager import SSEQM
 from lib.system import states
 import time
-
-from lib.utils.async_tools import AsyncManager, async_fire_and_forget
-ar_station = AsyncManager("AR_STATION")
+from asyncdec import AsyncManager, async_fire_and_forget
+am_station = AsyncManager("am_station")
 
 def emergency_event(p:HWGPIO):
-    if p.state: ar_station.emergency_stop()
-    else: ar_station.emergency_reset()
+    if p.state: am_station.emergency_stop()
+    else: am_station.emergency_reset()
 HWGPIO_MONITOR.add_listener(emergency,emergency_event)
 
 
+@async_fire_and_forget
 def on_load_start():
     tm.set_value_list([0,1,0,0])
+    tm.buzz(1)
+    time.sleep(1)
+    tm.buzz(0)
 
 @async_fire_and_forget
 def on_load_done(stopped):
@@ -31,12 +35,16 @@ def on_load_done(stopped):
             time.sleep(0.1)
     else:
         tm.red(True)
+        SSEQM.broadcast('notify', {'ntype': 'error','msg': 'meter move error/timeout'})
         for i in range(3):
             tm.buzz(1)
             time.sleep(1)
             tm.buzz(0)
             time.sleep(1)
 
+@async_fire_and_forget
+def on_load_timeout():
+    pass
 # ----------------------------------------------------
 # Align meter in loading bay
 # ----------------------------------------------------
@@ -48,7 +56,7 @@ def load_L_precheck(**kwargs):
         return "Nothing to load", 409
     return None     # passed pre-check
 
-@ar_station.operation(timeout=20.0, precheck=load_L_precheck, on_start=on_load_start, on_done=on_load_done)
+@am_station.operation(timeout=20.0, precheck=load_L_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
 def load_L(**kwargs):
     """Meter was loaded onto station1. Needs alignment"""
     rm.set_value_list([rm.FORWARD, rm.COAST, rm.COAST])
@@ -68,7 +76,7 @@ def load_M_precheck(**kwargs):
         return "M is occupied", 409
     return None     # passed pre-check
 
-@ar_station.operation(timeout=20.0, precheck=load_M_precheck, on_start=on_load_start, on_done=on_load_done)
+@am_station.operation(timeout=20.0, precheck=load_M_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
 def load_M(**kwargs):
     """Moves meter from station1 to station2"""
     rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.COAST])
@@ -87,7 +95,7 @@ def load_R_precheck(**kwargs):
         return "R is occupied", 409
     return None     # passed pre-check
 
-@ar_station.operation(timeout=20.0, precheck=load_R_precheck, on_start=on_load_start, on_done=on_load_done)
+@am_station.operation(timeout=20.0, precheck=load_R_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
 def load_R(**kwargs):
     """Moves meter from station2 to station3"""
     rm.set_value_list([rm.COAST, rm.FORWARD, rm.FORWARD])
@@ -110,7 +118,7 @@ def load_ALL_precheck(**kwargs):
         return "[load_ALL] R occupied", 204
     return None     # passed pre-check
 
-@ar_station.operation(timeout=20.0, precheck=load_ALL_precheck, on_start=on_load_start, on_done=on_load_done)
+@am_station.operation(timeout=3.0, precheck=load_ALL_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
 def load_ALL(**kwargs):
     value = mdm.get_value()
     rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.FORWARD])
@@ -137,7 +145,7 @@ def load_M_to_L_precheck(**kwargs):
         return "L is occupied", 409
     return None  # passed pre-check
 
-@ar_station.operation(timeout=20.0, precheck=load_M_to_L_precheck, on_start=on_load_start, on_done=on_load_done)
+@am_station.operation(timeout=20.0, precheck=load_M_to_L_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
 def load_M_to_L(**kwargs):
     """Moves meter from middle station (M) back to left station (L)"""
     rm.set_value_list([rm.REVERSE, rm.REVERSE, rm.COAST])
@@ -154,7 +162,7 @@ def load_R_to_M_precheck(**kwargs):
         return "M is occupied", 409
     return None  # passed pre-check
 
-@ar_station.operation(timeout=20.0, precheck=load_R_to_M_precheck, on_start=on_load_start, on_done=on_load_done)
+@am_station.operation(timeout=20.0, precheck=load_R_to_M_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
 def load_R_to_M(**kwargs):
     """Moves meter from right station (R) back to middle station (M)"""
     rm.set_value_list([rm.COAST, rm.REVERSE, rm.REVERSE])
@@ -201,14 +209,26 @@ def on_tower(**kwargs):
 # ----------------------------------------------------
 def on_lamp(**kwargs):
     option = kwargs.get('type', None)
+    dc = kwargs.get('dc', None)
     if option==None: return
-    elif option=='L1': lm.lamp1(not states['lamp'][0])
-    elif option=='L2': lm.lamp2(not states['lamp'][1])
-    elif option=='+L1': lm.lamp1(True)
-    elif option=='-L1': lm.lamp1(False)
-    elif option=='+L2': lm.lamp2(True)
-    elif option=='-L2': lm.lamp2(False)
+    # elif option=='L1': lm.lamp1(not states['lamp'][0])
+    # elif option=='L2': lm.lamp2(not states['lamp'][1])
+    # elif option=='+L1': lm.lamp1(True)
+    # elif option=='-L1': lm.lamp1(False)
+    # elif option=='+L2': lm.lamp2(True)
+    # elif option=='-L2': lm.lamp2(False)
 
+
+
+    # elif option=='L1': lm.lamp1_enable(not states['lamp'][0])
+    # elif option=='L2': lm.lamp2_enable(not states['lamp'][1])
+    # elif option=='L1DC' and dc!=-1: lm.lamp1_dc(dc)
+    # elif option=='L2DC' and dc!=-1: lm.lamp2_dc(dc)
+
+    elif option=='L1': lm.lamp(0, state=not states['lamp'][0], dc=dc)
+    elif option=='L2': lm.lamp(1, state=not states['lamp'][1], dc=dc)
+    # elif option=='L1DC' and dc!=-1: lm.lamp1_dc(dc)
+    # elif option=='L2DC' and dc!=-1: lm.lamp2_dc(dc)
 
 # ----------------------------------------------------
 # determine action and go!

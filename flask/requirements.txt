@@ -11,8 +11,9 @@ requests
 git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/hardware/i2c/i2c
 git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/hardware/i2c/pcf8574
 git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/hardware/pigpiod
-
-
+git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/hardware/pipwm
+git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/utils/prettyprint
+git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/utils/asyncdec
 # GitHub SSH
 # git+ssh://git@github.com/ElNosnhoj/pythonmodules.git@main#egg=i2c&subdirectory=lib/hardware/i2c/i2c
 

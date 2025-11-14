@@ -1,5 +1,9 @@
-from lib.gpio.gpio_setup import mds, HWGPIO
+from lib.gpio.gpio_setup import HWGPIO, pins_mds, HWGPIO_INVERTED
 from lib.utils import packer, unpacker
+from lib.utils import secrets
+
+HWGPIOMDS = HWGPIO if secrets.MOCK else HWGPIO_INVERTED
+mds = [HWGPIOMDS(pin, "in", "pull_up") for pin in pins_mds]
 
 class METER_DETECTION_MANAGER:
     @staticmethod

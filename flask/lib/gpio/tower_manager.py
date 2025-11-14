@@ -1,8 +1,11 @@
-from lib.gpio.gpio_setup import tower_interface
+from pigpiod import HWGPIO
+from lib.gpio.gpio_setup import pcfio_tower, pin_buzzer
 from lib.system.states import states
 from lib.sse.sse_queue_manager import SSEQM, key_payload
 
-pcfio, r, y, g, buzzer = tower_interface
+# pcfio, r, y, g, buzzer = tower_interface
+pcfio,r,y,g = pcfio_tower
+buzzer = HWGPIO(pin_buzzer, 'out')
 
 def __broadcast_change():
     """Broadcast the current tower state via SSE."""
