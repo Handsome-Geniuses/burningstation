@@ -40,7 +40,7 @@ def sim_operation(delay: float = 1.0):
             
             with _sim_lock:
                 if _sim_emergency_stop:
-                    print("sim emergency stop active!")
+                    print("🕯️ [sim] emergency stop active!", fg="#ffaa00")
                     return "Emergency stop active", 500
                 if _sim_running:
                     return "Already running", 409
@@ -87,7 +87,7 @@ def sim_emergency_stop():
     with _sim_lock:
         _sim_emergency_stop = True
         _sim_running = False
-    print("Sim emergency stop activated!")
+    print("🕯️ [sim] emergency stop activated!", fg="#ffaa00")
 
 def sim_emergency_reset():
     """Reset emergency stop flag - call this to allow sim operations again"""
@@ -96,7 +96,7 @@ def sim_emergency_reset():
     with _sim_lock:
         _sim_emergency_stop = False
         _sim_running = False
-    print("Sim emergency stop cleared!")
+    print("🕯️ [sim] emergency stop cleared!", fg="#ffaa00")
 
 def emergency_event(p:HWGPIO):
     if p.state:  sim_emergency_stop()
@@ -127,7 +127,7 @@ def user_loading_meter(**kwargs):
     """ pretend that a user put meter on belt """
     value = mdm.get_value()
     if not mdm.is_ch_empty(0, value):
-        print("[person_loading_meter] not empty to pretend load")
+        print("🕯️ [sim] not empty to pretend load", fg="#ffaa00")
         return
     steps = {
         0: lambda: mdm.set_value(mdm.get_value() | 0b1),
@@ -140,7 +140,7 @@ def user_unloading_meter(**kwargs):
     """ user unloaded meter from 3rd station """
     value = mdm.get_value()
     if mdm.is_ch_empty(2, value):
-        print("[user_unloading_meter] nothing to unload")
+        print("🕯️ [sim] nothing to unload")
         return
     steps = {
         0: lambda: mdm.set_ch_bit(2,0,False),
@@ -237,7 +237,7 @@ def on_meter(**kwargs):
 
 def on_action(action, **kwargs):
     res = None
-    if not secrets.MOCK: print("[sim] not mock so not safe to sim")
+    if not secrets.MOCK: print("🕯️ [sim] not mock so not safe to sim", fg="#ffaa00")
     elif action == "roller":
         res = roller_move(**kwargs)
     elif action == "meter":

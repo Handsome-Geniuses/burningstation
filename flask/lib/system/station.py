@@ -6,6 +6,7 @@ from lib.gpio import *
 from lib.sse.sse_queue_manager import SSEQM
 from lib.system import states
 import time
+from prettyprint import STYLE, prettyprint as print
 from asyncdec import AsyncManager, async_fire_and_forget
 am_station = AsyncManager("am_station")
 
@@ -62,7 +63,7 @@ def load_L(**kwargs):
     rm.set_value_list([rm.FORWARD, rm.COAST, rm.COAST])
     while not states['mds'][2]:
         time.sleep(0.1)
-    print("[load_L] Load completed")
+    print("✅[Station] load_L completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_L] Load completed", 200
 
 # ----------------------------------------------------
@@ -102,7 +103,7 @@ def load_R(**kwargs):
     while not states["mds"][8]: time.sleep(0.1)
     rm.set_value_list([rm.COAST, rm.COAST, rm.FORWARD])
     while states["mds"][6]: time.sleep(0.1)
-    print("[load_R] Load completed")
+    print("✅[Station] load_R completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_R] Load completed", 200
 
 # ----------------------------------------------------
@@ -129,7 +130,7 @@ def load_ALL(**kwargs):
     rm.set_value_list([rm.COAST, rm.COAST, rm.FORWARD])
     while states['mds'][6]:
         time.sleep(0.1)
-    print("[load_ALL] Load completed")
+    print("✅[Station] load_ALL completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_ALL] Load completed", 200
 
 
@@ -151,7 +152,7 @@ def load_M_to_L(**kwargs):
     rm.set_value_list([rm.REVERSE, rm.REVERSE, rm.COAST])
     while not states['mds'][0]: 
         time.sleep(0.1)
-    print("[load_M_to_L] completed")
+    print("✅[Station] load_M_to_L completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_M_to_L] completed", 200
 
 def load_R_to_M_precheck(**kwargs):
@@ -168,7 +169,7 @@ def load_R_to_M(**kwargs):
     rm.set_value_list([rm.COAST, rm.REVERSE, rm.REVERSE])
     while not states['mds'][3]: 
         time.sleep(0.1)
-    print("[load_R_to_M] completed")
+    print("✅[Station] load_R_to_M completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_R_to_M] completed", 200
 
 
@@ -210,6 +211,7 @@ def on_tower(**kwargs):
 def on_lamp(**kwargs):
     option = kwargs.get('type', None)
     dc = kwargs.get('dc', None)
+    state = kwargs.get('state', None)
     if option==None: return
     # elif option=='L1': lm.lamp1(not states['lamp'][0])
     # elif option=='L2': lm.lamp2(not states['lamp'][1])
@@ -225,8 +227,8 @@ def on_lamp(**kwargs):
     # elif option=='L1DC' and dc!=-1: lm.lamp1_dc(dc)
     # elif option=='L2DC' and dc!=-1: lm.lamp2_dc(dc)
 
-    elif option=='L1': lm.lamp(0, state=not states['lamp'][0], dc=dc)
-    elif option=='L2': lm.lamp(1, state=not states['lamp'][1], dc=dc)
+    elif option=='L1': lm.lamp(0, state=state, dc=dc)
+    elif option=='L2': lm.lamp(1, state=state, dc=dc)
     # elif option=='L1DC' and dc!=-1: lm.lamp1_dc(dc)
     # elif option=='L2DC' and dc!=-1: lm.lamp2_dc(dc)
 

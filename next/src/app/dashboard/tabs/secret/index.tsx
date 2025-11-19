@@ -3,8 +3,33 @@ import { Indicators } from "../monitor"
 import { MeterSlots } from "../controls/meter-slots"
 import { flask } from "@/lib/flask"
 import { Button } from "@/components/ui/button"
+import { Slider } from "@/components/ui/slider"
+import { useStoreContext } from "../../store"
+import React from "react"
 
 const TowerLampControls = () => {
+    const { systemState } = useStoreContext()
+    const [value1, setValue1] = React.useState(50)
+    const [value2, setValue2] = React.useState(50)
+    const timeoutRef = React.useRef<NodeJS.Timeout | null>(null)
+
+    const updateDC1 = (v:number) => {
+        setValue1(v)
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        timeoutRef.current = setTimeout(() => {
+            flask.handleAction('station', 'lamp', { type: 'L1', dc: Math.floor(v) })
+        }, 100)
+    }
+    const updateDC2 = (v:number) => {
+        setValue2(v)
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        timeoutRef.current = setTimeout(() => {
+            flask.handleAction('station', 'lamp', { type: 'L2', dc: Math.floor(v) })
+        }, 100)
+    }
+
+
+
     return (
         <div className="flex flex-col items-center justify-center">
             <div>Tower Lamp Controls</div>
@@ -20,12 +45,28 @@ const TowerLampControls = () => {
                 {['L1', 'L2'].map((type, i) => (
                     <Button
                         key={i}
-                        onClick={() => flask.handleAction('station', 'lamp', { type: type })}
+                        onClick={() => flask.handleAction('station', 'lamp', { type: type, state: !systemState.lamp[i] })}
                     >
                         {type}
                     </Button>
                 ))}
             </div>
+            <Slider
+                className="h-4 mt-1"
+                value={value1}
+                onValueChange={updateDC1}
+                min={0}
+                max={100}
+                thumb={"ball"}
+            />
+            <Slider
+                className="h-4 mt-1"
+                value={value2}
+                onValueChange={updateDC2}
+                min={0}
+                max={100}
+                thumb={"ball"}
+            />
         </div>
     )
 }
@@ -36,15 +77,15 @@ const MeterLoadControls = () => {
             <div>Meter Load Controls</div>
             <div className="grid grid-cols-3 gap-1 p-1">
                 {['L', 'M', 'R', 'ALL'].map((s, i) => (
-                    <Button 
+                    <Button
                         key={s}
-                        onClick={()=>flask.handleAction('station','load', {type: s})}
+                        onClick={() => flask.handleAction('station', 'load', { type: s })}
                     >
                         load {s}
                     </Button>
                 ))}
-                <Button onClick={()=>flask.handleAction('station','load', {type: 'ML'})}>M to L</Button>
-                <Button onClick={()=>flask.handleAction('station','load', {type: 'RM'})}>R to M</Button>
+                <Button onClick={() => flask.handleAction('station', 'load', { type: 'ML' })}>M to L</Button>
+                <Button onClick={() => flask.handleAction('station', 'load', { type: 'RM' })}>R to M</Button>
             </div>
 
         </div>

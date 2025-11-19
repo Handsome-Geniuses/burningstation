@@ -44,7 +44,7 @@ const Thumb = React.forwardRef<HTMLDivElement, ThumbProps>(
 
 
 const sliderCVA = cva(
-    `relative w-100 h-10 border border-border bg-red-100`,
+    `relative w-40 h-8 border border-border bg-red-100`,
     {
         variants: {
             rounded: {
@@ -71,29 +71,36 @@ interface SliderProps extends VariantProps<typeof sliderCVA>, React.HTMLAttribut
 }
 
 export const Slider = ({
-    value = 50,
+    value,
     min = 0,
     max = 100,
     onValueChange,
     className,
-    rounded = false,
+    rounded,
     bg = "bg-background",
     fg = "bg-foreground",
     thumb = "none",
     thumbClass = "",
     ...divProps
 }: SliderProps) => {
+    const [_value, _setValue] = React.useState(Math.floor(max/2))
     const [isDragging, setIsDragging] = React.useState(false)
     const ref = React.useRef<HTMLDivElement>(null)
     const tref = React.useRef<HTMLDivElement>(null)
-    const percentage = ((value - min) / (max - min)) * 100
+
+
+    const currentValue = value==null?_value:value
+    const currentHandle = onValueChange==null?_setValue:onValueChange
+    const percentage = ((currentValue - min) / (max - min)) * 100
+
 
     const updateValue = (clientX: number) => {
         const rect = ref.current!.getBoundingClientRect()
         let percent = (clientX - rect.left) / rect?.width
         percent = Math.max(0, Math.min(1, percent))
         const newValue = min + percent * (max - min)
-        onValueChange?.(newValue)
+        // onValueChange?.(newValue)
+        currentHandle(newValue)
     }
     const move = (e: React.PointerEvent) => updateValue(e.clientX)
     const handlePointerDown = (e: React.PointerEvent) => {
@@ -106,7 +113,6 @@ export const Slider = ({
         e.currentTarget.releasePointerCapture(e.pointerId)
         updateValue(e.clientX)
         setIsDragging(false)
-        console.log("yo")
     }
     const handlePointerMove = (e: React.PointerEvent) => {
         if (isDragging) move(e)

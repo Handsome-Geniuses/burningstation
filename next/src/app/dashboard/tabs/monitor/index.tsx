@@ -10,15 +10,15 @@ const MotorStateLedMap:Record<number, LedState> = {
 }
 
 const lampBg = (state:number|boolean, dc:number)=>{
-    if (!state) return 'bg-[rgb(105,105,105,0.15)]'
-    const intensity = dc>20?(dc/100).toFixed(1):0.2
-    return `bg-[rgba(255,255,0,${intensity})]`
+    if (!state) return "rgba(105,105,105,0.15"
+    const intensity = dc>20?(dc/100).toFixed(1):0.1
+    return `rgba(255,255,0,${intensity})`
 }
 const LampIndicator = ({lamp}:{lamp:[number, number, number, number]})=>{
     return (
         <div className="flex gap-1 items-center w-fit">
-            <Led state="neutral" className={lampBg(lamp[0],lamp[2])} />
-            <Led state="neutral" className={lampBg(lamp[1],lamp[3])} />
+            <Led style={{ backgroundColor: lampBg(lamp[0],lamp[2]) }} />
+            <Led style={{ backgroundColor: lampBg(lamp[1],lamp[3]) }} />
         </div>
     )
 }
