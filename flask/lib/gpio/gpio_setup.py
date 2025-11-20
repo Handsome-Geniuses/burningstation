@@ -25,7 +25,7 @@ PCF8574.MOCK = secrets.MOCK
 
 pcfio = [
     PCF8574(addr=0x20, invert=True, i2c=i2c),
-    PCF8574(addr=0x21, invert=True, i2c=i2c),
+    PCF8574(addr=0x21, invert=False, i2c=i2c),
     PCF8574(addr=0x22, invert=True, i2c=i2c),
 ]
 
