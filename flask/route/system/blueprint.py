@@ -8,6 +8,7 @@ import signal
 from lib.sse.question import setResponse
 from lib.utils import secrets
 from .manager import *
+from lib.gpio.gpio_setup import hardware_map
 
 from lib.system import sim,override,station,program
 
@@ -38,6 +39,10 @@ def __suicide():
 def __stream():
     if flask.request.headers.get("accept") == "text/event-stream":
         return flask.Response(event_stream(), content_type="text/event-stream")
+
+@bp.get("hardware")
+def __hardware():
+    return flask.jsonify(hardware_map)
 
 
 @bp.post("/question/response")

@@ -4,3 +4,59 @@ npm install lucide-react
 
 for driz->
 npm install drizzle-orm pg
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+npx github:yourname/yourrepo add slider
+
+
+my-ui/
+  package.json
+  bin/
+    cli.js
+
+-- package.json
+{
+  "name": "my-ui-cli",
+  "version": "0.0.0",
+  "bin": {
+    "my-ui": "./bin/cli.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
+
+-- bin/cli.js
+#!/usr/bin/env node
+console.log("Hello from CLI!");
+
+npx github:yourname/my-ui slider
+
+
+
+
+
+
+
+
+## testing kiosk mode edge
+"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --kiosk "http://localhost:8010/dashboard?handsome" --edge-kiosk-type=fullscreen
+
+## to move the kiosk to new window
+press win + shift + arrow key 
+

@@ -7,6 +7,7 @@ import { Slider } from "@/components/ui/slider"
 import { useStoreContext } from "../../store"
 import React from "react"
 import { useDebounce } from "@/hooks/useDebounce"
+import { Pinout } from "./Pinout"
 
 const TowerLampControls = () => {
     const { systemState } = useStoreContext()
@@ -117,16 +118,8 @@ const MotorControls = () => {
 
 export const SecretTab = () => {
     return (
-        // <div className="flex flex-col gap-4 flex-1">
-        //     <TowerLampControls />
-        //     <MeterLoadControls />
-
-        //     <div className="items-end h-full p-2 flex justify-center gap-4">
-        //         <MeterSlots classname="border border-border p-1" />
-        //         <MotorControls />
-        //     </div>
-        // </div>
         <div className="flex items-center justify-around">
+            <Pinout />
             <div className="bg-muted/70 gap-2 p-4 flex flex-col items-center">
                 <Indicators />
                 <MeterSlots classname="border border-border p-1" />
