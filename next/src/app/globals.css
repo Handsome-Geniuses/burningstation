@@ -15,6 +15,7 @@
     *::after {
         /* box-sizing: border-box; */
         @apply box-border border-border outline-ring/50 antialiased;
+        touch-action: none;
     }
 
     html {

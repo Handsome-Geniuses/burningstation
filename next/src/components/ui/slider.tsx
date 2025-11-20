@@ -11,7 +11,7 @@ export const thumbCVA = cva(
         variants: {
             type: {
                 ball: "h-[140%] aspect-square rounded-full",
-                bar: "h-full w-1 rounded ",
+                bar: "h-[110%] w-1 rounded-full",
                 none: "hidden display-none"
             },
             active: {
@@ -83,16 +83,14 @@ export const Slider = ({
     thumbClass = "",
     ...divProps
 }: SliderProps) => {
-    const [_value, _setValue] = React.useState(Math.floor(max/2))
+    const [_value, _setValue] = React.useState(Math.floor(max / 2))
     const [isDragging, setIsDragging] = React.useState(false)
     const ref = React.useRef<HTMLDivElement>(null)
     const tref = React.useRef<HTMLDivElement>(null)
 
-
-    const currentValue = value==null?_value:value
-    const currentHandle = onValueChange==null?_setValue:onValueChange
+    const currentValue = value == null ? _value : value
+    const currentHandle = onValueChange == null ? _setValue : onValueChange
     const percentage = ((currentValue - min) / (max - min)) * 100
-
 
     const updateValue = (clientX: number) => {
         const rect = ref.current!.getBoundingClientRect()
@@ -118,48 +116,82 @@ export const Slider = ({
         if (isDragging) move(e)
     }
 
-    let clampedPercentage = percentage; 
+    let clampedPercentage = percentage;
+    let clampedHeight;
     if (ref.current && tref.current) {
-        const trackWidth = ref.current.offsetWidth;
-        const thumbWidth = tref.current.offsetWidth;
-        const buffer = 1;
+        const trackWidth = ref.current.offsetWidth
+        const trackHeight = ref.current.offsetHeight
+        const W = trackWidth
+        const H = trackHeight
+        const thumbWidth = thumb == "ball"
+            ? Math.floor(tref.current.offsetWidth / 1.75)
+            : Math.floor(tref.current.offsetWidth - 4)
+        const minPerc = ((thumbWidth / 2) / trackWidth) * 100
+        const maxPerc = ((trackWidth - thumbWidth / 2) / trackWidth) * 100
+        clampedPercentage = Math.min(maxPerc, Math.max(minPerc, percentage))
 
-        // const minPerc = (thumbWidth / 2 / trackWidth) * 100; 
-        // const maxPerc = 100 - minPerc+ 1;
-        // clampedPercentage = Math.min(maxPerc, Math.max(minPerc, percentage));
 
-        const minPerc = ((thumbWidth / 2 - buffer) / trackWidth) * 100;
-        const maxPerc = ((trackWidth - thumbWidth / 2 + buffer) / trackWidth) * 100;
-        clampedPercentage = Math.min(maxPerc, Math.max(minPerc, percentage));
+        const cs = getComputedStyle(ref.current)
+        const br = Math.floor(Math.min(parseFloat(cs.borderRadius), W / 2, H /2))
+        
+        const x = (clampedPercentage / 100) * W;
+        let topLimit = 0;
+        if (x < br) {
+            // left rounded corner
+            topLimit = br - Math.sqrt(br ** 2 - (br - x) ** 2);
+        } else if (x > W - br) {
+            // right rounded corner
+            const dx = x - (W - br);
+            topLimit = br - Math.sqrt(br ** 2 - dx ** 2);
+        } else {
+            topLimit = 0;
+        }
+
+        const height = (H - topLimit*2)*1.1;
+        clampedHeight = Math.floor(height)
+
     }
+
     return (
         <div
             ref={ref}
+            className={cn(sliderCVA({ rounded }), bg, className, "touch-none")}
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
             onPointerMove={handlePointerMove}
-            className={cn(sliderCVA({ rounded }), bg, className)}
+            onContextMenu={e => e.preventDefault()}
             {...divProps}
         >
-            <div className="w-full h-full relative overflow-hidden rounded-[inherit]">
+            <div className="w-full h-full relative overflow-hidden rounded-[inherit] p-2">
                 <div
                     className={cn(
                         "absolute inset-0 h-full bg-blue-500 duration-150 ease-out pointer-events-none ",
                         isDragging ? 'transition-none' : 'transition-all',
                         fg
                     )}
-                    style={{ width: `${percentage}%` }}
+                    style={{ width: `${clampedPercentage}%` }}
                 />
             </div>
-
-            <Thumb
-                ref={tref}
-                type={thumb}
-                active={isDragging}
-                // style={{ left: `${Math.min(99, Math.max(1, percentage))}%` }}
-                style={{ left: `${clampedPercentage}%` }}
-                className={cn(thumbClass, "transform -translate-x-1/2")}
-            />
+            {
+                thumb == "ball" &&
+                <Thumb
+                    ref={tref}
+                    type={thumb}
+                    active={isDragging}
+                    style={{ left: `${clampedPercentage}%`}}
+                    className={cn(thumbClass, "transform -translate-x-1/2")}
+                />
+            }
+            {
+                thumb == "bar" &&
+                <Thumb
+                    ref={tref}
+                    type={thumb}
+                    active={isDragging}
+                    style={{ left: `${clampedPercentage}%`, height: `${clampedHeight}px`}}
+                    className={cn(thumbClass, "transform -translate-x-1/2")}
+                />
+            }
         </div>
     )
 }

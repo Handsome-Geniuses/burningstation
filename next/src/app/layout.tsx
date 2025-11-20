@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
+import { Globals } from "./globals";
 
 export const metadata: Metadata = {
     title: "Burning Station!",
@@ -23,6 +24,7 @@ export default function RootLayout({
             <body
                 className={`antialiased overflow-hidden relative`}
             >
+                <Globals/>
                 {children}
                 <Toaster position="bottom-left" className="" expand={true}/>
             </body>

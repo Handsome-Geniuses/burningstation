@@ -6,29 +6,25 @@ import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { useStoreContext } from "../../store"
 import React from "react"
+import { useDebounce } from "@/hooks/useDebounce"
 
 const TowerLampControls = () => {
     const { systemState } = useStoreContext()
-    const [value1, setValue1] = React.useState(50)
-    const [value2, setValue2] = React.useState(50)
+    const [value1, setValue1] = React.useState(systemState.lamp[2])
+    const [value2, setValue2] = React.useState(systemState.lamp[3])
     const timeoutRef = React.useRef<NodeJS.Timeout | null>(null)
 
-    const updateDC1 = (v:number) => {
+    const dbdc1 = useDebounce((v) => flask.handleAction('station', 'lamp', { type: 'L1', dc: Math.floor(v) }), 100)
+    const dbdc2 = useDebounce((v) => flask.handleAction('station', 'lamp', { type: 'L2', dc: Math.floor(v) }), 100)
+
+    const updateDC1 = (v: number) => {
         setValue1(v)
-        if (timeoutRef.current) clearTimeout(timeoutRef.current)
-        timeoutRef.current = setTimeout(() => {
-            flask.handleAction('station', 'lamp', { type: 'L1', dc: Math.floor(v) })
-        }, 100)
+        dbdc1(v)
     }
-    const updateDC2 = (v:number) => {
+    const updateDC2 = (v: number) => {
         setValue2(v)
-        if (timeoutRef.current) clearTimeout(timeoutRef.current)
-        timeoutRef.current = setTimeout(() => {
-            flask.handleAction('station', 'lamp', { type: 'L2', dc: Math.floor(v) })
-        }, 100)
+        dbdc2(v)
     }
-
-
 
     return (
         <div className="flex flex-col items-center justify-center">
@@ -52,7 +48,7 @@ const TowerLampControls = () => {
                 ))}
             </div>
             <Slider
-                className="h-4 mt-1"
+                className="h-8 w-60 mt-1"
                 value={value1}
                 onValueChange={updateDC1}
                 min={0}
@@ -60,7 +56,7 @@ const TowerLampControls = () => {
                 thumb={"ball"}
             />
             <Slider
-                className="h-4 mt-1"
+                className="h-8 w-60 mt-4"
                 value={value2}
                 onValueChange={updateDC2}
                 min={0}
