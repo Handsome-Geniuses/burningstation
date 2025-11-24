@@ -14,6 +14,8 @@ git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/hardwar
 git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/hardware/pipwm
 git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/utils/prettyprint
 git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/utils/asyncdec
+git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/network/ip_scanner
+git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/network/sshkit
 # GitHub SSH
 # git+ssh://git@github.com/ElNosnhoj/pythonmodules.git@main#egg=i2c&subdirectory=lib/hardware/i2c/i2c
 

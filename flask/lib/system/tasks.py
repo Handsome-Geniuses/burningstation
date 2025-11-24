@@ -5,6 +5,7 @@
 # ================================================================
 import threading
 import time
+from lib.meter.meter_manager import METERMANAGER as mm
 
 def __interval_task():
     count = 0
@@ -16,6 +17,7 @@ def __interval_task():
             # 10 minute
             if count % 600:
                 pass
+            if count % 6: mm.refresh()
         except:
             pass
         time.sleep(1)
