@@ -1,6 +1,7 @@
 # class to hold ssh-meter. for states or what not
 from typing import  Optional, Literal, TypedDict, Dict, Tuple
 # from lib.ssh.client import SSHClient
+from paramiko import SSHException
 import sshkit
 import requests
 import re
@@ -81,6 +82,23 @@ class SSHMeter(sshkit.Client):
         self._module_info_cache: Optional[Dict[str, ModuleInfo]] = None
         self._system_versions_cache: Optional[SystemVersions] = None
 
+    def connect(self):
+        with self._lock:
+            try:
+                if self.id_rsa: super(sshkit.Client, self).connect(self.host, username=self.user, key_filename=self.id_rsa, timeout=0.5, )
+                else: super(sshkit.Client, self).connect(self.host, username=self.user, password=self.pswd, timeout=0.5)
+                self.connected = True
+            except OSError as e:
+                if e.errno == 9 or "Bad file descriptor" in str(e): 
+                    print(f"[{self.host}] BAD FILE DESCRIPTOR?")
+                    raise Exception(f"[{self.host}] BAD FILE DESCRIPTOR?")
+            except SSHException as e:
+                print(f"[{self.host}] ssh not ready?")
+                raise Exception(f"[{self.host}] ssh not ready?")
+            except:
+                print("yoyoyo")
+                raise Exception(f"connect to {self.host} failed due to timeout")
+
     def get_info(self):
         return {
             'ip': self.host,
@@ -118,6 +136,7 @@ class SSHMeter(sshkit.Client):
     def force_diagnostics(self):
         if self.in_diagnostics():
             self.press('diagnostics')
+            time.sleep(0.1)
             self.press('diagnostics')
         else:
             self.press('diagnostics')
@@ -506,6 +525,19 @@ class SSHMeter(sshkit.Client):
             return False
         except:
             return True
+        
+    def reset_uipage(self):
+        content="""\
+<?php
+$myfile = fopen("UI_0.html", "r") or die("Unable to open file!");
+echo fread($myfile,filesize("UI_1.html"));
+fclose($myfile);
+?>
+"""
+        fp_vuipage = "/var/volatile/html/UIPage.php"
+        cmd = f"cat << 'EOF' > {fp_vuipage}\n{content}\nEOF"
+        code, out, err = self.exec_parse(cmd)
+
 
 if __name__ == "__main__":
     # meter = SSHMeter("192.168.137.159")

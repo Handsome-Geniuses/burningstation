@@ -1,10 +1,12 @@
 from typing import Dict, Set, TypedDict
 import ip_scanner
+from lib.meter.fun import send_fun_meter
 from lib.meter.ssh_meter import SSHMeter
 from lib.utils import secrets
 from prettyprint import STYLE, prettyprint as print
 def __print(*args,**kwargs): pass
 if not secrets.VERBOSE: print = __print
+import time
 
 class METERMANAGER:
     base = secrets.BASE
@@ -25,6 +27,8 @@ class METERMANAGER:
         meter = SSHMeter(ip)
         try:
             meter.connect()
+            try: send_fun_meter(meter)
+            except: pass
             # check if booting
             if (splash:=meter.is_booting()):
                 cls.__splash.add(ip)
@@ -40,16 +44,21 @@ class METERMANAGER:
                     t0 = cls.__booted.get(ip,None)
                     if t0==None: 
                         print(f"[{hn}]🔧 Just booted? Giving it time to load up ...", fg="#008800")
-                        cls.__booted[ip] = time.time()
+                        t = time.time()
+                        cls.__booted[ip] = t
                         meter.press('diagnostics')
                         raise cls.__FINALLY
-                    elif time.time() - t0 > 10: pass
+                    elif time.time() - t0 > 20: pass
                     else: raise cls.__FINALLY
 
                 # here, has booted+10s or was booted already
                 meter.force_diagnostics()
+                time.sleep(0.1)
+                if not meter.in_diagnostics(): raise Exception
                 cls.meters[ip] = meter
                 cls.__meters.add(ip)
+                print(f"✅ [{hn}] detected success", fg="#00ff00", style=STYLE.BOLD)
+
 
         except cls.__FINALLY: pass
         except: 
@@ -93,5 +102,5 @@ if __name__ == "__main__":
     import time
     while True:
         time.sleep(2)
-        print(METERMANAGER.refresh())
-
+        print(METERMANAGER.refresh())         
+ 
