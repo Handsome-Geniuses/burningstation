@@ -35,7 +35,7 @@ const Meter = ({ powered = false, sections = [false, false, false] }) => {
     return (
         <div className="relative z-1">
             <div className="relative">
-                <MeterSvg className={cn(meterCssBase, "opacity-10")} />
+                <MeterSvg className={cn(meterCssBase, "opacity-10")} meterColor="fill-background" baseColor="fill-border"/>
                 <MeterSvg
                     className={cn(meterCssBase, "absolute inset-0")}
                     style={{
@@ -76,8 +76,8 @@ const MeterSlot = ({ index, systemState }: { index: number, systemState: SystemS
 }
 
 const Lamp = ({ systemState }: { systemState: SystemState }) => {
-    const back = systemState.lamp[0]
-    const front = systemState.lamp[1]
+    const back = Boolean(systemState.lamp[0])
+    const front = Boolean(systemState.lamp[1])
     const isOn = back || front
     const light = `blur-3xl absolute top-0 left-1/2 -translate-x-1/2 w-40 h-[105%] bg-gradient-to-b from-yellow-200/80 to-yellow-100/10 [clip-path:polygon(30%_10px,70%_10px,100%_100%,0%_100%)]`;
     const lamp = `z-3 absolute left-1/2 -translate-x-1/2 top-0 w-20 h-2 rounded-b-2xl border-border border-2 border-t-0 bg-yellow-200/20 ${isOn ? 'bg-yellow-200/50' : ''} ${back && front ? 'bg-yellow-300/50' : ''}`;
