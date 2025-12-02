@@ -208,14 +208,3 @@ def job_status(meter_ip):
 
 
 
-if __name__ == "__main__":
-    # print(job_status("192.168.137.157"))
-    mm.refresh()
-
-
-    start_job("192.168.137.157","cycle_print",{"count":1})
-    import time
-    while True:
-        time.sleep(1)
-        print(job_status("192.168.137.157"))
-        
