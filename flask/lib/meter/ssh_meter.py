@@ -83,21 +83,8 @@ class SSHMeter(sshkit.Client):
         self._system_versions_cache: Optional[SystemVersions] = None
 
     def connect(self):
-        with self._lock:
-            try:
-                if self.id_rsa: super(sshkit.Client, self).connect(self.host, username=self.user, key_filename=self.id_rsa, timeout=0.5, )
-                else: super(sshkit.Client, self).connect(self.host, username=self.user, password=self.pswd, timeout=0.5)
-                self.connected = True
-            except OSError as e:
-                if e.errno == 9 or "Bad file descriptor" in str(e): 
-                    print(f"[{self.host}] BAD FILE DESCRIPTOR?")
-                    raise Exception(f"[{self.host}] BAD FILE DESCRIPTOR?")
-            except SSHException as e:
-                print(f"[{self.host}] ssh not ready?")
-                raise Exception(f"[{self.host}] ssh not ready?")
-            except:
-                print("yoyoyo")
-                raise Exception(f"connect to {self.host} failed due to timeout")
+        # need to increase timeout for wireless
+        super(sshkit.Client, self).connect(self.host, username=self.user, password=self.pswd, timeout=1.0, banner_timeout=2)
 
     def get_info(self):
         return {
@@ -538,6 +525,43 @@ fclose($myfile);
         cmd = f"cat << 'EOF' > {fp_vuipage}\n{content}\nEOF"
         code, out, err = self.exec_parse(cmd)
 
+
+    def coin_shutter_pulse(self, count: int=1, on_delay:int=0.1, off_delay:int=0.3):
+        # cmd = f"(echo 'cmd.main.coinshutter:setflags=15' | socat - UDP:127.0.0.1:8008) & (sleep {on_delay}; echo 'cmd.main.coinshutter:setflags=14' | socat - UDP:127.0.0.1:8008) & wait"
+        # send = f"bash -c 'for i in {{1..{count}}}; do {cmd} done'"
+        # if off_delay: send = "&".join(f"(sleep {i*off_delay}; {cmd})" for i in range(count))+" & wait"
+
+        cmd = f"(echo 'cmd.main.coinshutter:setflags=15' | socat - UDP:127.0.0.1:8008) & (sleep {on_delay}; echo 'cmd.main.coinshutter:setflags=14' | socat - UDP:127.0.0.1:8008)"
+        send = "&".join(f"(sleep {i*(on_delay+off_delay)}; {cmd})" for i in range(count))+" & wait"
+        if count==1: send=cmd+' & wait'
+    
+        _, out, err = self.safe_exec_command(send)
+
+
+    def printer_test(self, code="0,123"):
+        cmd = f"echo 'cmd.main.printer:pt={code}' | socat - UDP:127.0.0.1:8008"
+        _, out, err = self.safe_exec_command(cmd)
+        
+    def toggle_printer(self, b: bool):
+        s = "on" if b else "off"
+        cmd = f"echo 'cmd.main.printer:{s}' | socat - UDP:127.0.0.1:8008"
+        _, out, err = self.safe_exec_command(cmd)
+
+    def toggle_coin_shutter(self, b: bool):
+        s = "15" if b else "14"
+        cmd = f"echo 'cmd.main.coinshutter:setflags={s}' | socat - UDP:127.0.0.1:8008"
+        _, out, err = self.safe_exec_command(cmd)
+
+    def toggle_nfc(self, b: bool):
+        s = "emvOn" if b else "emvOff"
+        cmd = f"echo 'cmd.main.bus:{s}' | socat - UDP:127.0.0.1:8008"
+        _, out, err = self.safe_exec_command(cmd)
+
+    def toggle_modem(self, b: bool):
+        s = "connect" if b else "disconnect"
+        cmd = f"echo 'cmd.main.modem:{s}' | socat - UDP:127.0.0.1:8008"
+        _, out, err = self.safe_exec_command(cmd)
+    
 
 if __name__ == "__main__":
     # meter = SSHMeter("192.168.137.159")

@@ -5,6 +5,7 @@
 import flask
 import os
 import signal
+from lib.automation.jobs import start_job
 from lib.sse.question import setResponse
 from lib.utils import secrets
 from .manager import *
@@ -76,3 +77,31 @@ def handle_action(type, action):
     # if secrets.MOCK and handler!=sim: sim.on_action(action, **data)
     if secrets.MOCK and handler!=sim: return sim.on_mock(handler,action,**data)
     return handler.on_action(action, **data)
+
+
+@bp.get("/testing")
+def __testing():
+    # args = flask.request.get_json()
+    args = flask.request.args.to_dict()
+    ip = args.get("ip")  # ip address
+    prog = args.get("prog")  # program number
+    extra = args.get("args")  # additional arguments for configurations
+
+    print(args)
+    if ip is None:
+        return "could not find device", 404
+
+    if prog is None:
+        return "no prog number specified", 404
+    
+    ok, msg = start_job(
+        meter_ip="192.168.137.157",
+        program_name=prog,
+        kwargs={"count":1},
+    )
+
+    if not ok:
+        return {"error": msg}, 409  # Conflict: already running, etc.
+    return {"status": "started"}, 200
+
+    return "testing", 200

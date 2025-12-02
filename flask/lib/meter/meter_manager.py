@@ -10,6 +10,7 @@ import time
 
 class METERMANAGER:
     base = secrets.BASE
+    address_range = secrets.RANGE
     __limit = 30
     __meters: Set[str] = set()
     __splash: Set[str] = set()
@@ -21,14 +22,21 @@ class METERMANAGER:
     class __FINALLY(Exception): pass
 
     @classmethod
+    def __on_stale(cls, ip: str):
+        cls.meters[ip].close()
+        cls.meters.pop(ip,None)
+        cls.__meters.discard(ip)
+        cls.__splash.discard(ip)
+        cls.__booted.pop(ip,None)
+
+    @classmethod
     def __on_fresh(cls, ip: str):
         if ip in cls.__meters: return
         if cls.__attempts.get(ip,0) >= cls.__limit: return
         meter = SSHMeter(ip)
         try:
             meter.connect()
-            try: send_fun_meter(meter)
-            except: pass
+            
             # check if booting
             if (splash:=meter.is_booting()):
                 cls.__splash.add(ip)
@@ -44,9 +52,7 @@ class METERMANAGER:
                     t0 = cls.__booted.get(ip,None)
                     if t0==None: 
                         print(f"[{hn}]🔧 Just booted? Giving it time to load up ...", fg="#008800")
-                        t = time.time()
-                        cls.__booted[ip] = t
-                        meter.press('diagnostics')
+                        cls.__booted[ip] = time.time()
                         raise cls.__FINALLY
                     elif time.time() - t0 > 20: pass
                     else: raise cls.__FINALLY
@@ -57,11 +63,13 @@ class METERMANAGER:
                 if not meter.in_diagnostics(): raise Exception
                 cls.meters[ip] = meter
                 cls.__meters.add(ip)
+                try: send_fun_meter(meter)
+                except: pass
                 print(f"✅ [{hn}] detected success", fg="#00ff00", style=STYLE.BOLD)
 
 
         except cls.__FINALLY: pass
-        except: 
+        except Exception as e: 
             if ip not in cls.__attempts:
                 print(f"[{ip}]⚠️ couldn't connect. Meter booting or not a meter.", fg="#880000")
                 print(f"[{ip}]ℹ️ will continue to try in background ...", fg="#888888", style=STYLE.DIM)
@@ -69,21 +77,16 @@ class METERMANAGER:
             if cls.__attempts[ip] >= cls.__limit:
                 print(f"[{ip}] failed to many times. gonna stop trying", fg="#ff0000")
 
+            # print("----------------------------", fg="#444444", style=STYLE.DIM)
+            # print(e, fg="#444444", style=STYLE.DIM)
+            # print("----------------------------", fg="#444444", style=STYLE.DIM)
+
         finally:
             meter.close()
 
-
-    @classmethod
-    def __on_stale(cls, ip: str):
-        cls.meters[ip].close()
-        cls.meters.pop(ip,None)
-        cls.__meters.discard(ip)
-        cls.__splash.discard(ip)
-        cls.__booted.pop(ip,None)
-
     @classmethod
     def refresh(cls):
-        current = set(ip_scanner.get_ips(base=cls.base, start=2, end=254))
+        current = set(ip_scanner.get_ips(base=cls.base, start=cls.address_range[0], end=cls.address_range[1], timeout=1, concurrency=500))
         fresh = current - cls.__meters
         stale = cls.__meters - current
 
@@ -100,7 +103,9 @@ class METERMANAGER:
 
 if __name__ == "__main__":
     import time
+    _res = []
     while True:
-        time.sleep(2)
-        print(METERMANAGER.refresh())         
+        time.sleep(1)
+        METERMANAGER.refresh()
+
  

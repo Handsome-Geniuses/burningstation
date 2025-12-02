@@ -41,19 +41,17 @@ pwm_lamps = [2, 3]
 
 __pcfio_motor_index = 1
 __pcfio_motor_pins = [2, 3, 4, 5, 6, 7]
+
+__pcfio_tower_index = 0
+__pcfio_tower_pins = [0, 1, 2]
+
+
+
+# 
 pcfio_motors = [
     (pcfio[__pcfio_motor_index], __pcfio_motor_pins[i], __pcfio_motor_pins[i + 1])
     for i in range(0, len(__pcfio_motor_pins), 2)
 ]
-
-# pcfio_motors = [
-#     (pcfio[1], 2, 3),
-#     (pcfio[1], 4, 5),
-#     (pcfio[1], 6, 7)
-# ]
-
-__pcfio_tower_index = 0
-__pcfio_tower_pins = [0, 1, 2]
 pcfio_tower = (pcfio[__pcfio_tower_index], *__pcfio_tower_pins)
 
 

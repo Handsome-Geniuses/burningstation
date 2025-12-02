@@ -7,6 +7,7 @@ import lib.system.station as station
 import lib.system.override as override
 from lib.system.states import states
 from lib.utils import packer, secrets
+from prettyprint import STYLE, prettyprint as print
 
 _sim_lock = threading.Lock()
 _sim_running = False
