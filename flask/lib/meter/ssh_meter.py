@@ -390,7 +390,7 @@ class SSHMeter(sshkit.Client):
     module_info = property(get_module_info)
 
     def get_firmware_versions(self, *, force_refresh: bool=False,
-                            delay: float=0.3, timeout: float=5.0,
+                            delay: float=0.1, timeout: float=5.0,
                             verbose: bool=False) -> Dict[str, str]:
         if self._firmwares is not None and not force_refresh:
             return self._firmwares
@@ -567,8 +567,10 @@ if __name__ == "__main__":
     # meter = SSHMeter("192.168.137.159")
     # print(meter.get_hostname())
 
-    client = SSHMeter("192.168.137.158")
+    client = SSHMeter("192.168.137.42")
     client.connect()
-    res = client.exec_parse("echo hello")
-    print(res)
+    # res = client.exec_parse("echo hello")
+    # print(res)
+    firmwares = client.system_versions
+    print("Firmwares:", firmwares)
     client.close()

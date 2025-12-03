@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS meter (
     system_version INT NOT NULL DEFAULT -1 ,
     subsystem_version INT NOT NULL DEFAULT -1,
     created_at TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP
+    last_updated TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP
 );
 
 -- meter firmwares
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS meter_firmware (
     modfunc INT NOT NULL DEFAULT -1,
     fullid INT NOT NULL DEFAULT -1,
     created_at TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP,
+    last_updated TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP
     UNIQUE(meter_id, name)
 );
 

@@ -3,6 +3,7 @@ import ip_scanner
 from lib.meter.fun import send_fun_meter
 from lib.meter.ssh_meter import SSHMeter
 from lib.utils import secrets
+from lib.database import insert_sshmeter
 from prettyprint import STYLE, prettyprint as print
 def __print(*args,**kwargs): pass
 if not secrets.VERBOSE: print = __print
@@ -61,10 +62,26 @@ class METERMANAGER:
                 meter.force_diagnostics()
                 time.sleep(0.1)
                 if not meter.in_diagnostics(): raise Exception
+
+
+                # successfully entered diagnostics, add information to database?
+                try: 
+                    res = insert_sshmeter(meter)
+                    meter_id = res[0][0]  # meter row id
+                    print(f"💾[{hn}]database insert success (id={meter_id})", fg="#00aa00")
+                    meter.db_id = meter_id
+
+                except Exception as e:
+                    print(f"⚠️[{hn}]database insert failed: {e}", fg="#880000")
+                    raise e
+
+                # add to known meters
                 cls.meters[ip] = meter
                 cls.__meters.add(ip)
-                try: send_fun_meter(meter)
-                except: pass
+
+                # send FUN data
+                # try: send_fun_meter(meter)
+                # except: pass
                 print(f"✅ [{hn}] detected success", fg="#00ff00", style=STYLE.BOLD)
 
 
