@@ -10,6 +10,9 @@ from lib.utils import secrets
 
 import json
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 
 DEVICE_TO_MODULE = {
     'printer': 'PRINTER',
@@ -89,6 +92,7 @@ class SSHMeter(sshkit.Client):
 
     def get_info(self, force=False)->InfoDict:
         if force:
+            self._firmwares = None
             self._module_details_cache = None
             self._module_info_cache = None
             self._system_versions_cache = None
@@ -96,6 +100,7 @@ class SSHMeter(sshkit.Client):
             'ip': self.host,
             'status': self.status,
             'hostname': self.hostname,
+            'firmwares': self.firmwares,
             'meter_type': self.meter_type,
             'module_info': self.module_info,
             'system_versions': self.system_versions
@@ -121,16 +126,26 @@ class SSHMeter(sshkit.Client):
         
     meter_type = property(lambda self: self.get_meter_type())
     
-    def __uipage(self, url, timeout=1):
+    # def __uipage(self, url, timeout=1):
+    #     resp = requests.get(url, timeout=0.2)
+    #     resp.raise_for_status()
+    #     page_text = resp.text.lower()
+    #     return page_text
+    
+    # def in_splash(self):
+    #     """ Checks if the meter is in splash screen """
+    #     page_text = self.__uipage(f"http://{self.host}:8005/UIPage.php", 0.5)
+    #     return 'unable to open file' in page_text
+
+    def in_splash(self):
+        """ Checks if the meter is in splash screen """
+        url = f"http://{self.host}:8005/UIPage.php"
         resp = requests.get(url, timeout=0.2)
         resp.raise_for_status()
         page_text = resp.text.lower()
-        return page_text
-    
-    def in_splash(self):
-        """ Checks if the meter is in splash screen """
-        page_text = self.__uipage(f"http://{self.host}:8005/UIPage.php", 0.5)
-        return 'unable to open file' in page_text
+        if 'unable to open file' in page_text:
+            return True
+        return False
 
     def in_diagnostics(self):
         """Returns True if the meter is in diagnostics mode, False otherwise."""
@@ -418,6 +433,18 @@ class SSHMeter(sshkit.Client):
     module_info = property(lambda self: self.get_module_info())
 
 
+    def get_firmware_versions(self, *, force_refresh: bool=False,
+                            delay: float=0.3, timeout: float=5.0,
+                            verbose: bool=False) -> Dict[str, str]:
+        if self._firmwares is not None and not force_refresh:
+            return self._firmwares
+
+        _ = self.get_module_details(force_refresh=force_refresh, delay=delay, timeout=timeout, verbose=verbose)
+        return self._firmwares or {}
+    
+    firmwares = property(lambda self: self.get_firmware_versions())
+
+
     def get_system_versions(self, *, force_refresh: bool = False, timeout: float = 2.0) -> SystemVersions:
         """
         Cached fetch of system version info from /web/config_main.php.
@@ -596,7 +623,185 @@ fclose($myfile);
 
         self.press('plus'); self.press('plus'); self.press('plus')
         self.press('ok')
+
+    def print_msg(self, msg):
+        msg  = re.sub(r'\n[ \t]+', '\n', msg)
+        url = f"http://{self.host}:8005/web/control_print_direct.php"
+        files = {"fileToUpload": ("hello.txt", msg, "text/plain")}
+        requests.post(url,files=files, timeout=1)
+
+        
+    def _custom_print(self):
+        # now = datetime.now()
+        now = datetime.now(ZoneInfo("America/Los_Angeles"))
+        _full = now.strftime("%m/%d/%Y %H:%M:%S")
+        _date = now.strftime("%m/%d/%Y")
+        _time = now.strftime("%H:%M:%S")
+        msg = ""
+        msg += "=====================\n"
+        msg += "= IPS BURN-IN TEST\n"
+        # msg += "=====================\n"
+        msg += f"= meterID: {self.hostname}\n"
+        msg += "=====================\n"
+        msg += f"date: {_date}\n"
+        msg += f"time: {_time}\n"
+        # msg += ".\n"
+
+        # firmware
+        msg += "=====================\n"
+        msg += "= firmware\n"
+        msg += "=====================\n"
+        msg += "\n".join(f"{k}: {v}" for k, v in self.firmwares.items())
+        msg += "\n"
+        # msg += ".\n"
+
+        # tests
+        msg += "=====================\n"
+        msg += "= test results\n"
+        msg += "=====================\n"
+        # msg += f"printer: {'PASS'}\n"
+        # msg += f"coin shutter: {'PASS'}\n"
+        # msg += f"screen test: {'PASS'}\n"
+        # msg += f"nfc: {'FAIL'}\n"
+        # msg += f"modem: {'PASS'}\n"
+
+        # msg += f"printer: {self.results.get('cycle_print', 'n/a')}\n"
+        # msg += f"coin shutter: {self.results.get('cycle_coin_shutter', 'n/a')}\n"
+        # msg += f"nfc: {self.results.get('cycle_nfc', 'n/a')}\n"
+        # msg += f"modem: {self.results.get('cycle_modem', 'n/a')}\n"
+        # msg += f"screen: {self.results.get('cycle_meter_ui', 'n/a')}\n"
+
+        keys = ["printer", "coin shutter", "screen test", "nfc" , "modem"]
+        msg += "\n".join(f"{k}: {self.results.get(k, 'n/a').upper()}" for k in keys)
+        msg += "\n"
+        # msg += ".\n"
+
+        line_count = len(msg.splitlines())
+        print(f'msg has {line_count} lines')
+        # print(msg)
+        # self.print_msg(msg)
+
+    def custom_print(self):
+        now = datetime.now(ZoneInfo("America/Los_Angeles"))
+        _full = now.strftime("%m/%d/%Y %H:%M:%S")
+        _date = now.strftime("%m/%d/%Y")
+        _time = now.strftime("%H:%M:%S")
+        WIDTH = 25
+
+        def hdr(title: str, pad: str = '=') -> str:
+            """
+            Left-anchored single-line header:
+            '== system ===================='
+            """
+            prefix = "== "
+            core = f"{prefix}{title.upper().strip()} "
+            if len(core) >= WIDTH:
+                return core[:WIDTH]
+            return core + pad * (WIDTH - len(core))
+
+        msg = ""
+        msg += hdr("IPS BURN-IN TEST") + "\n"
+        msg += f" {_date}, {_time}\n"
+
+        # system
+        msg += hdr("system") + "\n"
+        msg += f"meterID: {self.hostname}\n"
+        msg += f"system version: {self.system_versions.get('system_version', '')}\n"
+        msg += f"system sub version: {self.system_versions.get('system_sub_version', '')}\n"
+
+        # firmware
+        msg += hdr("firmware") + "\n"
+
+        for k, v in sorted((self.module_info or {}).items()):
+            fw = (v.get('fw') or '').strip()
+            mf = v.get('mod_func')
+
+            line = f"{k.lower()}: {fw}, {mf}"
+            if k.upper() == "KIOSK_NFC":
+                full_id = v.get('full_id')
+                line += f", {full_id}"
+        
+            msg += line + "\n"
+        
+        # tests
+        msg += hdr("test results") + "\n"
+
+        keys = ["printer", "coin shutter", "nfc" , "modem"]
+        msg += "\n".join(f"{k}: {self.results.get(k, 'n/a').lower()}" for k in keys)
+        msg += "\n"
+
+        line_count = len(msg.splitlines())
+        chars_per_line = [len(line) for line in msg.splitlines()]
+
+        # print(msg)
+        # print(f'msg has {line_count} lines')
+        # print(f'chars per line: {chars_per_line}')
+        self.print_msg(msg)
     
+
+    def reboot_meter(self, delay_s: float = 0.2, close_after: bool = True) -> None:
+        """ Schedule a reboot and return immediately. No waiting. """
+        inner = f"sleep {max(0.0, float(delay_s))}; (reboot || /sbin/reboot || busybox reboot)"
+        self._fire_and_forget(inner)
+        if close_after:
+            try: self.close()
+            except: pass
+
+    def shutdown_meter(self, delay_s: float = 0.2, close_after: bool = True) -> None:
+        """ Schedule a clean poweroff and return immediately. No waiting. """
+        inner = (
+            f"sleep {max(0.0, float(delay_s))}; "
+            f"(poweroff || /sbin/poweroff || busybox poweroff || "
+            f"halt || /sbin/halt || busybox halt)"
+        )
+        self._fire_and_forget(inner)
+        if close_after:
+            try: self.close()
+            except: pass
+
+    def get_brightness(self):
+        res = self.cli("cat /sys/class/backlight/backlight/actual_brightness")
+        return int(res)
+    
+    def set_brightness(self, val:int):
+        res = self.cli(f"echo {max(0,min(val,100))} > /sys/class/backlight/backlight/brightness")
+        return res
+
+    def insert_coin(self, value: int, delay: float = 0.1):
+        value_to_index = {
+            5: 2,  # nickel
+            10: 3,  # dime
+            25: 4,  # quarter
+            100: 5,  # dollar coin
+            1: 1,  # penny (if you have it)
+        }
+        index = value_to_index.get(value)
+        if index is None:
+            raise ValueError(f"Coin value {value} not supported.")
+
+        url = f"http://{self.host}:8005/web/busdev.php"
+        data = {f"coin,{index},{value}": str(value)}
+        resp = requests.post(url, data=data)
+        time.sleep(delay)
+
+        if getattr(self, "verbose", False):
+            print(
+                f"{self.host} Sent coin (index={index}, value={value}) | Status: {resp.status_code}"
+            )
+        return resp
+    
+    def custom_busdev(self, button_name, button_value, delay=0.1):
+        url = f"http://{self.host}:8005/web/busdev.php"
+        data = {button_name: button_value}
+        resp = requests.post(url, data=data)
+        time.sleep(delay)
+
+        if getattr(self, "verbose", False):
+            print(
+                f"{self.host} Sent custom busdev: {button_name} = {button_value} | status: {resp.status_code}"
+            )
+        return resp
+
 
 if __name__ == "__main__":
     # meter = SSHMeter("192.168.137.159")
