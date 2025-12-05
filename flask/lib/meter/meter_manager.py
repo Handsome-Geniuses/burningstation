@@ -10,6 +10,7 @@ if not secrets.VERBOSE: print = __print
 import time
 
 class METERMANAGER:
+    MeterClass = SSHMeter
     base = secrets.BASE
     address_range = secrets.RANGE
     __limit = 30
@@ -18,7 +19,7 @@ class METERMANAGER:
     __attempts:dict[str, int] = {}
     __booted:dict[str, int] = {}
 
-    meters: Dict[str, SSHMeter] = {}
+    meters: Dict[str, MeterClass] = {}
 
     class __FINALLY(Exception): pass
 
@@ -34,7 +35,7 @@ class METERMANAGER:
     def __on_fresh(cls, ip: str):
         if ip in cls.__meters: return
         if cls.__attempts.get(ip,0) >= cls.__limit: return
-        meter = SSHMeter(ip)
+        meter = METERMANAGER.MeterClass(ip)
         try:
             meter.connect()
             
@@ -67,12 +68,12 @@ class METERMANAGER:
                 # successfully entered diagnostics, add information to database?
                 try: 
                     res = insert_sshmeter(meter)
-                    meter_id = res[0][0]  # meter row id
-                    print(f"💾[{hn}]database insert success (id={meter_id})", fg="#00aa00")
+                    meter_id = res[0]  # meter row id
+                    print(f"💾 [{hn}] database insert success (id={meter_id})", fg="#00aa00")
                     meter.db_id = meter_id
 
                 except Exception as e:
-                    print(f"⚠️[{hn}]database insert failed: {e}", fg="#880000")
+                    print(f"⚠️ [{hn}] database insert failed: {e}", fg="#880000")
                     raise e
 
                 # add to known meters

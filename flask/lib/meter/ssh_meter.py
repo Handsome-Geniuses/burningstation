@@ -78,6 +78,7 @@ class SSHMeter(sshkit.Client):
         self._firmwares: Firmwares = None 
 
         self.results = {}
+        self.__resolution = ""
         self._module_details_cache: Optional[Dict[str, Dict[str, str]]] = None
         self._module_info_cache: Optional[Dict[str, ModuleInfo]] = None
         self._system_versions_cache: Optional[SystemVersions] = None
@@ -86,13 +87,39 @@ class SSHMeter(sshkit.Client):
         # need to increase timeout for wireless
         super(sshkit.Client, self).connect(self.host, username=self.user, password=self.pswd, timeout=1.0, banner_timeout=2)
 
-    def get_info(self):
+    def get_info(self, force=False)->InfoDict:
+        if force:
+            self._module_details_cache = None
+            self._module_info_cache = None
+            self._system_versions_cache = None
         return {
             'ip': self.host,
             'status': self.status,
             'hostname': self.hostname,
-            'firmwares': self.firmwares
+            'meter_type': self.meter_type,
+            'module_info': self.module_info,
+            'system_versions': self.system_versions
         }
+
+    def cli(self, cmd:str):
+        isConnected = self.connected
+        if (not isConnected): self.connect()
+        stdin, stdout, stderr = self.exec_command(cmd)
+        res = stdout.read().decode().strip()
+        if (not isConnected): self.close()
+        return res
+    
+    def get_meter_type(self)-> MeterType:
+        if (self.__resolution == ""):
+            self.__resolution = self.cli("""fbset -s | grep mode | awk -F'"' '{print $2}' | cut -d- -f1""")
+
+        meter_type:MeterType = ""
+        if self.__resolution == "1024x768": meter_type = "msx"
+        elif self.__resolution == "800x480": meter_type = "ms2.5"
+        if meter_type == "msx" and self.firmwares.get("PRINTER",None): meter_type = "ms3"
+        return meter_type
+        
+    meter_type = property(lambda self: self.get_meter_type())
     
     def __uipage(self, url, timeout=1):
         resp = requests.get(url, timeout=0.2)
@@ -364,7 +391,8 @@ class SSHMeter(sshkit.Client):
                 mf = int(mf_raw) if mf_raw.isdigit() else None
                 full_id = (det.get("full_id") or "").strip()
                 # combined[name] = {"fw": fw, "mod_func": mf, "full_id": full_id}
-                combined[name] = {"fw": int(fw), "mod_func": int(mf), "full_id": int(full_id)}
+                # combined[name] = {"fw": int(fw), "mod_func": int(mf), "full_id": int(full_id)}
+                combined[name] = {"ver": int(fw), "mod": int(mf), "id": int(full_id)}
             self._module_info_cache = combined
 
             # derive firmwares
@@ -372,7 +400,7 @@ class SSHMeter(sshkit.Client):
 
         return self._module_details_cache or {}
 
-    module_details = property(get_module_details)
+    module_details = property(lambda self: self.get_module_details())
 
     def get_module_info(self, *, force_refresh: bool=False,
                         delay: float=0.3, timeout: float=5.0,
@@ -387,18 +415,8 @@ class SSHMeter(sshkit.Client):
         _ = self.get_module_details(force_refresh=force_refresh, delay=delay, timeout=timeout, verbose=verbose)
         return self._module_info_cache or {}
 
-    module_info = property(get_module_info)
+    module_info = property(lambda self: self.get_module_info())
 
-    def get_firmware_versions(self, *, force_refresh: bool=False,
-                            delay: float=0.1, timeout: float=5.0,
-                            verbose: bool=False) -> Dict[str, str]:
-        if self._firmwares is not None and not force_refresh:
-            return self._firmwares
-
-        _ = self.get_module_details(force_refresh=force_refresh, delay=delay, timeout=timeout, verbose=verbose)
-        return self._firmwares or {}
-    
-    firmwares = property(get_firmware_versions)
 
     def get_system_versions(self, *, force_refresh: bool = False, timeout: float = 2.0) -> SystemVersions:
         """
@@ -448,7 +466,7 @@ class SSHMeter(sshkit.Client):
         self._system_versions_cache = result
         return result
 
-    system_versions = property(get_system_versions)
+    system_versions = property(lambda self: self.get_system_versions())
 
 
 
@@ -561,16 +579,43 @@ fclose($myfile);
         s = "connect" if b else "disconnect"
         cmd = f"echo 'cmd.main.modem:{s}' | socat - UDP:127.0.0.1:8008"
         _, out, err = self.safe_exec_command(cmd)
+
+
+    def goto_nfc(self):
+        if self.in_diagnostics():
+            self.press('diagnostics'); self.press('diagnostics')
+        else:
+            self.press('diagnostics')
+
+        self.press('minus')
+        self.press('ok')
+
+        for i in range(8):
+            self.press('plus')
+        self.press('ok')
+
+        self.press('plus'); self.press('plus'); self.press('plus')
+        self.press('ok')
     
 
 if __name__ == "__main__":
     # meter = SSHMeter("192.168.137.159")
     # print(meter.get_hostname())
 
-    client = SSHMeter("192.168.137.42")
-    client.connect()
-    # res = client.exec_parse("echo hello")
+    delay = 7
+    meter = SSHMeter("192.168.137.180")
+    meter.connect()
+    # meter.goto_nfc()
+    # print(meter.get_info())
+    # meter.press('plus')
+    # time.sleep(delay)
+    # meter.press('minus')
+    # time.sleep(delay)
+    # res = meter.get_info(force=True)
     # print(res)
-    firmwares = client.system_versions
-    print("Firmwares:", firmwares)
-    client.close()
+
+    # res = meter.exec_parse("echo hello")
+    # print(res)
+    # firmwares = meter.system_versions
+    # print("Firmwares:", firmwares)
+    meter.close()

@@ -11,7 +11,7 @@ from lib.automation.runner import run_test_job
 from lib.meter.meter_manager import METERMANAGER as mm
 from lib.sse.sse_queue_manager import SSEQM as master
 from typing import Literal
-from lib.meter.ssh_meter import ModuleInfo
+from lib.meter.ssh_meter import ModuleInfo, SSHMeter
 import json
 
 
@@ -26,6 +26,8 @@ PROG2DEVICE = {
     "cycle_meter_ui":"screen test", "screen test":"screen test",
     "cycle_all": None,
     "keypad": "keypad",
+    "passive:": None,
+    "test_passive": None,
 }
 
 PROG2MODULE = {
@@ -170,7 +172,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
                     payload['moduleId'] = int(module.get('full_id', -1))
                     
             # insertJobs(meter.hostname,[payload])
-
+            # print(payload)
         meter.beep(3)
 
         if program_name in ['cycle_all', 'all tests'] and meter.meter_type != 'msx':
@@ -207,4 +209,19 @@ def job_status(meter_ip):
         }
 
 
+
+if __name__ == "__main__":
+    import tools.mock
+    import time
+    ip = "192.168.137.180"
+    mm.refresh()
+    meter = mm.get_meter(ip)
+    # start_job(ip, "test_passive", {"numBurnCycles":1, 'printer':1}, log=False, verbose=False)
+    start_job(ip, "printer", {"count":1})
+
+    # input("press enter to stop\n")
+    while meter.status != "ready":
+        time.sleep(1)
+
+    
 

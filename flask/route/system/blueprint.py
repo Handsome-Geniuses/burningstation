@@ -95,9 +95,9 @@ def __testing():
         return "no prog number specified", 404
     
     ok, msg = start_job(
-        meter_ip="192.168.137.157",
+        meter_ip=ip,
         program_name=prog,
-        kwargs={"count":1},
+        kwargs={"numBurnCycles":1, 'printer':1, 'count': 1},
     )
 
     if not ok:

@@ -1,3 +1,4 @@
+# from lib.meter.ssh_metert SSHMeter
 from lib.meter.ssh_meter import SSHMeter
 from lib.automation.shared_state import SharedState
 from lib.automation.helpers import check_stop_event, StopAutomation
@@ -25,7 +26,3 @@ def test_cycle_print(meter: SSHMeter, shared: SharedState = None, **kwargs):
     
     time.sleep(delay)  # Final wait to ensure any last print operations complete
     check_stop_event(shared)
-
-
-if __name__ == "__main__":
-    test_cycle_print(SSHMeter("192.168.137.157"), count=1, delay=5)

@@ -71,6 +71,7 @@ context = (args.cert_file,  args.key_file) if args.key_file and args.cert_file e
 # context = ("/home/nosnhoj/.cert/cert.pem","/home/nosnhoj/.cert/key.pem")
 
 if __name__ == "__main__": 
+    # import tools.mock # for testing with mock meters
     print("=========================================================================", fg="#888888", style=STYLE.DIM)
     print(f">> Server running at {args.host}:{args.port}", fg="#888888", style=STYLE.DIM)
     print("=========================================================================", fg="#888888", style=STYLE.DIM)
