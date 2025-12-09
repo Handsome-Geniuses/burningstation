@@ -3,9 +3,10 @@ import os, re, time, json, threading
 import paramiko
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple, Iterable, Any
+
 from lib.automation.monitors.models import (
     LogEvent, Fault, StartWatch, CancelWatch, WatchdogManager, MarkSuccess, MetaUpdate,
-    ProgressUpdate, RESET, RED, GREEN, YELLOW, BLUE, DIM, GRAY
+    ProgressUpdate, Action, RESET, RED, GREEN, YELLOW, BLUE, DIM, GRAY
 )
 from lib.automation.monitors import create_monitor
 
@@ -141,6 +142,60 @@ class Listener:
         if self.shared and any(f.severity == "critical" for f in faults):
             self.shared.stop_event.set()
 
+    def _process_action(self, a: Action, dev_id: str) -> None:
+        allowed = (self.shared.allowed_monitors if self.shared else set())
+        is_allowed = dev_id in allowed
+
+        if isinstance(a, StartWatch):
+            if is_allowed:
+                self.wd.start(a)
+                if self.verbose:
+                    print(f"{BLUE}[{dev_id}] watch start {a.key} ({a.timeout_s}s){RESET}")
+            else:
+                if self.verbose:
+                    print(f"{YELLOW}[SUPPRESS][{dev_id}] watch start {a.key} ({a.timeout_s}s){RESET}")
+
+        elif isinstance(a, CancelWatch):
+            if is_allowed:
+                self.wd.cancel(a.key)
+                if self.verbose:
+                    print(f"{DIM}[{dev_id}] watch cancel {a.key}{RESET}")
+            else:
+                if self.verbose:
+                    print(f"{YELLOW}[SUPPRESS][{dev_id}] watch cancel {a.key}{RESET}")
+
+        elif isinstance(a, MarkSuccess):
+            if is_allowed:
+                if self.verbose:
+                    print(f"{GREEN}[{a.device}] success: {a.message}{RESET}")
+                if self.shared:
+                    self.shared.device_results[a.device] = "pass"
+                    if hasattr(self.shared, "success_event"):
+                        self.shared.success_event.set()
+            else:
+                if self.verbose:
+                    print(f"{YELLOW}[SUPPRESS][{a.device}] success: {a.message}{RESET}")
+
+        elif isinstance(a, MetaUpdate):
+            if is_allowed:
+                if self.shared:
+                    for k, v in (a.data or {}).items():
+                        self.shared.device_meta[k] = v
+            else:
+                if self.verbose:
+                    print(f"{YELLOW}[SUPPRESS][{dev_id}] meta: {a.data}{RESET}")
+
+        elif isinstance(a, ProgressUpdate):
+            if is_allowed:
+                if self.shared:
+                    ip = a.ip or self.host
+                    self.shared.broadcast_progress(
+                        ip, a.program, a.current_cycle, a.total_cycles
+                    )
+            else:
+                if self.verbose:
+                    print(f"{YELLOW}[SUPPRESS][{dev_id}] progress: {a.current_cycle}/{a.total_cycles}{RESET}")
+
     # ---- Main loop ----
     def run(self) -> None:
         client, stdout = self._open_ssh()
@@ -149,6 +204,16 @@ class Listener:
                 if not line:
                     time.sleep(0.05)
                     continue
+
+                # Check and process any _pending_actions
+                if self.shared:
+                    pending_actions = []
+                    with self.shared.lock:
+                        pending_actions = self.shared.__dict__.pop("_pending_actions", [])
+                    for a in pending_actions:
+                        dev_id = getattr(a, "device", None) or "unknown"
+                        self._process_action(a, dev_id)
+
                 if self.shared and (
                     self.shared.stop_event.is_set()
                     or (getattr(self.shared, "end_listener", None) and self.shared.end_listener.is_set())
@@ -189,59 +254,8 @@ class Listener:
                         continue
 
                     # Apply or suppress actions depending on allow-list
-                    allowed = (self.shared.allowed_monitors if self.shared else set())
                     for a in actions:
-                        is_allowed = dev.id in allowed
-
-                        if isinstance(a, StartWatch):
-                            if is_allowed:
-                                self.wd.start(a)
-                                if self.verbose:
-                                    print(f"{BLUE}[{dev.id}] watch start {a.key} ({a.timeout_s}s){RESET}")
-                            else:
-                                if self.verbose:
-                                    print(f"{YELLOW}[SUPPRESS][{dev.id}] watch start {a.key} ({a.timeout_s}s){RESET}")
-
-                        elif isinstance(a, CancelWatch):
-                            if is_allowed:
-                                self.wd.cancel(a.key)
-                                if self.verbose:
-                                    print(f"{DIM}[{dev.id}] watch cancel {a.key}{RESET}")
-                            else:
-                                if self.verbose:
-                                    print(f"{YELLOW}[SUPPRESS][{dev.id}] watch cancel {a.key}{RESET}")
-
-                        elif isinstance(a, MarkSuccess):
-                            if is_allowed:
-                                if self.verbose:
-                                    print(f"{GREEN}[{a.device}] success: {a.message}{RESET}")
-                                if self.shared:
-                                    self.shared.device_results[a.device] = "pass"
-                                    if hasattr(self.shared, "success_event"):
-                                        self.shared.success_event.set()
-                            else:
-                                if self.verbose:
-                                    print(f"{YELLOW}[SUPPRESS][{a.device}] success: {a.message}{RESET}")
-
-                        elif isinstance(a, MetaUpdate):
-                            if is_allowed:
-                                if self.shared:
-                                    for k, v in (a.data or {}).items():
-                                        self.shared.device_meta[k] = v
-                            else:
-                                if self.verbose:
-                                    print(f"{YELLOW}[SUPPRESS][{dev.id}] meta: {a.data}{RESET}")
-
-                        elif isinstance(a, ProgressUpdate):
-                            if is_allowed:
-                                if self.shared:
-                                    ip = a.ip or self.host
-                                    self.shared.broadcast_progress(
-                                        ip, a.program, a.current_cycle, a.total_cycles
-                                    )
-                            else:
-                                if self.verbose:
-                                    print(f"{YELLOW}[SUPPRESS][{dev.id}] progress: {a.current_cycle}/{a.total_cycles}{RESET}")
+                        self._process_action(a, dev.id)
 
                 # poll watchdogs
                 faults = self.wd.poll_timeouts()
@@ -270,7 +284,7 @@ def start_listener_thread(shared,
     lst = Listener(shared=shared, host=host, user=user, pswd=pswd, save_logs=save_logs,
                    verbose=verbose, trace_lines=trace_lines, **kkwargs)
     for dev_id, kwargs in devices:
-        dev = create_monitor(dev_id, verbose=verbose, **kwargs)
+        dev = create_monitor(dev_id, shared=shared, verbose=verbose, **kwargs)
         lst.register(dev)
 
     t = threading.Thread(target=lst.run, name=f"listener-{host}", daemon=True)
