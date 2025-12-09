@@ -1,5 +1,7 @@
 # shared_state.py
 import threading
+from typing import Any
+
 from lib.sse.sse_queue_manager import SSEQM
 
 class SharedState:
@@ -28,3 +30,14 @@ class SharedState:
             "current_cycle": current_cycle,
             "total_cycles": total_cycles
         })
+
+    def queue_action(self, action: Any):
+        """
+        Thread-safe way for monitors to emit StartWatch/CancelWatch from background threads.
+        Listener will pick these up and process them exactly like from handle().
+        """
+        with self.lock:
+            pending = getattr(self, "_pending_actions", None)
+            if pending is None:
+                pending = self._pending_actions = []
+            pending.append(action)

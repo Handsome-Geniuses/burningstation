@@ -6,12 +6,14 @@ import sshkit
 import requests
 import re
 import time
-from lib.utils import secrets
-
+import os
+import math
 import json
-
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+from lib.utils import secrets
+from lib.meter.display_utils import CHARUCO_PATHS, write_ui_page, write_ui_overlay, upload_charuco
 
 
 DEVICE_TO_MODULE = {
@@ -582,6 +584,24 @@ fclose($myfile);
     
         _, out, err = self.safe_exec_command(send)
 
+    def coin_shutter_hold_open(self, enabled_time: float, interval: float = 1.5):
+        """
+        Keeps the coin shutter open for `enabled_time` seconds by repeatedly
+        sending the enable command at a fixed interval (default 1.5s < 2-3s timeout).
+        """
+        if enabled_time <= 0:
+            return
+        enable_cmd = "echo 'cmd.main.coinshutter:setflags=15' | socat - UDP:127.0.0.1:8008"
+
+        num_pulses = max(1, math.ceil(enabled_time / interval))
+        cmd_parts = []
+        cmd_parts.append(f"({enable_cmd})")
+
+        for i in range(1, num_pulses):
+            cmd_parts.append(f"(sleep {i * interval:.3f}; {enable_cmd})")
+
+        send = " & ".join(cmd_parts) + " & wait"
+        _, out, err = self.safe_exec_command(send)
 
     def printer_test(self, code="0,123"):
         cmd = f"echo 'cmd.main.printer:pt={code}' | socat - UDP:127.0.0.1:8008"
@@ -801,6 +821,35 @@ fclose($myfile);
                 f"{self.host} Sent custom busdev: {button_name} = {button_value} | status: {resp.status_code}"
             )
         return resp
+
+    def set_ui_mode(self, mode: str) -> None:
+        """Set the UI mode on the meter (stock, banner, or charuco)."""
+        valid_modes = {"stock", "banner", "charuco"}
+        if mode.lower() not in valid_modes:
+            raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}.")
+        cmd = f"echo '{mode.lower()}' | tee /var/volatile/html/.ui_mode"
+        self.safe_exec_command(cmd)
+        time.sleep(0.2)
+        self.force_diagnostics()
+
+    def setup_custom_display(self) -> None:
+        """Automate uploading/writing UIPage.php, ui_overlay.json, and type-specific Charuco PNG."""
+        if self.status != "ready":
+            raise RuntimeError("Meter is not ready")
+        
+        self.status = "busy"
+        try:
+            write_ui_page(self)
+            write_ui_overlay(self)
+            meter_type = self.meter_type
+            local_charuco = CHARUCO_PATHS.get(meter_type)
+            if not local_charuco:
+                raise ValueError(f"No Charuco path defined for meter_type: {meter_type}")
+            if not os.path.exists(local_charuco):
+                raise FileNotFoundError(f"Local Charuco file not found: {local_charuco}")
+            upload_charuco(self, local_charuco)
+        finally:
+            self.status = "ready"
 
 
 if __name__ == "__main__":

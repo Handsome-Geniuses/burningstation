@@ -10,6 +10,11 @@ from .flash_brightness import flash_brightness as test_flash_brightness
 from .test_dummy import test_dummy
 from .refresh_meter import refresh_meter
 
+from .test_robot_coin_shutter import test_robot_coin_shutter
+from .test_robot_nfc_read import test_robot_nfc_read
+from .test_robot_keypad import test_robot_keypad
+
+
 PROGRAM_REGISTRY = {
     "cycle_print": test_cycle_print,
     "printer": test_cycle_print,    
@@ -38,6 +43,10 @@ PROGRAM_REGISTRY = {
     "identify": test_flash_brightness,
     "dummy": test_dummy,
     "refresh_meter": refresh_meter,
+
+    "test_robot_coin_shutter": test_robot_coin_shutter,
+    "test_robot_nfc_read": test_robot_nfc_read,
+    "test_robot_keypad": test_robot_keypad,
 }
 
 _PROGRAM_MONITORS = {
@@ -54,6 +63,8 @@ _PROGRAM_MONITORS = {
     # "test_keypad":       [("keypad",  {"inactivity_timeout_s": 15.0, "layouts": ["1x6"], "count": 1})],
     "test_keypad":       [("keypad",  {"inactivity_timeout_s": 15.0, "count": 1})],
     "test_nfc_read":     [("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
+    "test_robot_nfc_read":  [("nfc",  {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
+    "test_robot_keypad":    [("robot_keypad",  {"buttons": ["0", "1", "2", "3"]})],
 }
 
 def _build_alias_index(registry):
