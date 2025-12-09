@@ -9,7 +9,6 @@ from .test_nfc_read import test_nfc_read
 from .flash_brightness import flash_brightness as test_flash_brightness
 from .test_dummy import test_dummy
 from .refresh_meter import refresh_meter
-from .test_passive import test_passive
 
 PROGRAM_REGISTRY = {
     "cycle_print": test_cycle_print,
@@ -39,9 +38,6 @@ PROGRAM_REGISTRY = {
     "identify": test_flash_brightness,
     "dummy": test_dummy,
     "refresh_meter": refresh_meter,
-
-    "test_passive": test_passive,
-    "passive": test_passive,
 }
 
 _PROGRAM_MONITORS = {

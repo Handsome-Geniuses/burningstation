@@ -85,6 +85,8 @@ class METERMANAGER:
                 # except: pass
                 print(f"✅ [{hn}] detected success", fg="#00ff00", style=STYLE.BOLD)
 
+                
+
 
         except cls.__FINALLY: pass
         except Exception as e: 
@@ -111,7 +113,7 @@ class METERMANAGER:
         for ip in fresh: cls.__on_fresh(ip)
         for ip in stale: cls.__on_stale(ip)
 
-        return list(cls.__meters)
+        return fresh, stale, list(cls.__meters)
     
     @classmethod
     def list_meters(cls): return list(cls.__meters)

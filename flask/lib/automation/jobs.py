@@ -8,6 +8,7 @@ from lib.automation.shared_state import SharedState
 from lib.automation.runner import run_test_job
 # from lib.database import insertJobs
 # from lib.meter.meter_manager import METERMANAGER as mm
+from lib.database import insert_meter_jobs
 from lib.meter.meter_manager import METERMANAGER as mm
 from lib.sse.sse_queue_manager import SSEQM as master
 from typing import Literal
@@ -27,7 +28,6 @@ PROG2DEVICE = {
     "cycle_all": None,
     "keypad": "keypad",
     "passive:": None,
-    "test_passive": None,
 }
 
 PROG2MODULE = {
@@ -146,43 +146,51 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
         result = 'success' if st.result == 'pass' else 'error' if st.result == 'fail' else 'info'
         meter.results[program_name] = st.result
         master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': ''})
-        if (broadcast_job): 
-            master.broadcast('job', {'ip':meter_ip, 'name': program_name, 'result': result, 'msg': st.device_meta})
-            journalctl = '\n'.join(line.rstrip('\n') for line in st.logs)
-            jobNotes = { 'kwargs': kwargs }
-            if program_name=='all tests': jobNotes['results'] = st.device_results
-            jobNotes = json.dumps(jobNotes)
 
-            # removed this cause listener can stop too so wouldn't work. i'll deal with it later.
-            # userNotes = 'user stopped' if (st.stop_event.is_set()) else ''
 
-            payload = {
-                'name': program_name,
-                'status': st.result,
-                'jobNotes': jobNotes,   # string! use json.stringify if needed
-                # 'userNotes': userNotes, # string! use json.stringify if needed
-                'journalctl': journalctl
-            }
+        # this was the old meter jobs database insert logic gonna remove
+        # if (broadcast_job): 
+        #     master.broadcast('job', {'ip':meter_ip, 'name': program_name, 'result': result, 'msg': st.device_meta})
+        #     journalctl = '\n'.join(line.rstrip('\n') for line in st.logs)
+        #     jobNotes = { 'kwargs': kwargs }
+        #     if program_name=='all tests': jobNotes['results'] = st.device_results
+        #     jobNotes = json.dumps(jobNotes)
 
-            fwkey = PROG2MODULE.get(program_name)
-            if fwkey:
-                module:ModuleInfo = meter.module_info.get(fwkey)
-                if module:
-                    payload['moduleFw'] = int(module.get('fw',-1))
-                    payload['moduleId'] = int(module.get('full_id', -1))
+        #     # removed this cause listener can stop too so wouldn't work. i'll deal with it later.
+        #     # userNotes = 'user stopped' if (st.stop_event.is_set()) else ''
+
+        #     payload = {
+        #         'name': program_name,
+        #         'status': st.result,
+        #         'jobNotes': jobNotes,   # string! use json.stringify if needed
+        #         # 'userNotes': userNotes, # string! use json.stringify if needed
+        #         'journalctl': journalctl
+        #     }
+
+        #     fwkey = PROG2MODULE.get(program_name)
+        #     if fwkey:
+        #         module:ModuleInfo = meter.module_info.get(fwkey)
+        #         if module:
+        #             payload['moduleFw'] = int(module.get('fw',-1))
+        #             payload['moduleId'] = int(module.get('full_id', -1))
                     
-            # insertJobs(meter.hostname,[payload])
-            # print(payload)
+        #     # insertJobs(meter.hostname,[payload])
+        #     # print(payload)
+        #     print(journalctl)
+
+        job_done(meter_ip)
         meter.beep(3)
 
-        if program_name in ['cycle_all', 'all tests'] and meter.meter_type != 'msx':
-            meter.custom_print()
+        # if program_name in ['cycle_all', 'all tests'] and meter.meter_type != 'msx':
+            # meter.custom_print()
 
     t = threading.Thread(target=target, daemon=True)
     _threads[meter_ip] = t
     t.start()
     if (meter): meter.status = "busy"
     return True, "started"
+
+
 
 def stop_job(meter_ip):
     st = _state(meter_ip)
@@ -210,18 +218,67 @@ def job_status(meter_ip):
 
 
 
+
+def start_passive_job(meter_ip):
+    meter = mm.get_meter(meter_ip)
+    modules = meter.module_info
+    has_nfc = "KIOSK_NFC" in modules
+    has_modem = "MK7_XE910" in modules
+    has_printer = "PRINTER" in modules
+    has_coin_shutter = "COIN_SHUTTER" in modules
+    has_screen_test = True  # all meters have screen test
+
+    kwargs = {
+        "nfc": 1 if has_nfc else 0,
+        "modem": 1 if has_modem else 0 ,
+        "printer": 1 if has_printer else 0,
+        "coin shutter": 1 if has_coin_shutter else 0,
+        "screen test": 1 if has_screen_test else 0,
+        "numBurnCycles": 1,
+        "numBurnDelay": 10   
+    }
+
+    start_job(meter_ip, "cycle_all", kwargs)
+
+# using this to database?
+def job_done(meter_ip):
+    meter = mm.get_meter(meter_ip)
+    st = _state(meter_ip)
+    status = job_status(meter_ip)
+    current_program = status.get("current_program")
+    if current_program=='cycle_all':
+        if meter.db_id==None: return
+        meter.results.pop("cycle_all")
+
+        overall = "pass"
+        for key, val in meter.results.items():
+            if val == "fail":
+                overall = "fail"
+                break
+        jobs = [{
+            "name": current_program,
+            "status": overall,
+            "data": {
+                "results": meter.results,
+                "journalctl": '\n'.join(line.rstrip('\n') for line in st.logs)
+            }
+        }]
+        
+        insert_meter_jobs(meter.db_id,jobs)
+
 if __name__ == "__main__":
     import tools.mock
     import time
-    ip = "192.168.137.180"
-    mm.refresh()
-    meter = mm.get_meter(ip)
-    # start_job(ip, "test_passive", {"numBurnCycles":1, 'printer':1}, log=False, verbose=False)
-    start_job(ip, "printer", {"count":1})
+    fresh,stale,meters = mm.refresh()
+    for f in fresh: print(f)
+    # ip = meters[0]
+    # print(ip)
+    # meter = mm.get_meter(ip)
+    # start_passive_job(ip) 
+    # # start_job(ip, "screen test", {"count":1})
 
-    # input("press enter to stop\n")
-    while meter.status != "ready":
-        time.sleep(1)
 
+    # # input("press enter to stop\n")
+    # while meter.status != "ready": time.sleep(1)
     
 

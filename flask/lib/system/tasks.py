@@ -5,6 +5,7 @@
 # ================================================================
 import threading
 import time
+from lib.automation.jobs import start_passive_job
 from lib.meter.meter_manager import METERMANAGER as mm
 
 def __interval_task():
@@ -17,7 +18,10 @@ def __interval_task():
             # 10 minute
             if count % 600:
                 pass
-            if count % 6: mm.refresh()
+            if count % 6: 
+                fresh,stale,ips = mm.refresh()
+                for ip in fresh: 
+                    start_passive_job(ip)
         except:
             pass
         time.sleep(1)

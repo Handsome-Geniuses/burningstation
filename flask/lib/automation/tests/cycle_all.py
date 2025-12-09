@@ -12,24 +12,25 @@ import inspect
 
 DEVICES = [
     ("coin shutter", test_cycle_coin_shutter),
-    ("nfc",          test_cycle_nfc),
-    ("modem",        test_cycle_modem),
-    ("printer",      test_cycle_print),
-    ("screen test",  test_cycle_meter_ui)
+    ("nfc", test_cycle_nfc),
+    ("modem", test_cycle_modem),
+    ("printer", test_cycle_print),
+    ("screen test", test_cycle_meter_ui),
 ]
+
 
 def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, count):
     if count == 0:
         shared.device_results[device] = "n/a"
         return
-    
+
     if shared:
         shared.current_device = device
         if device in {"printer", "coin shutter", "nfc", "modem"}:
             shared.set_allowed({device}, reason=f"Running {device} subtest")
         else:
             shared.set_allowed(set(), reason=f"Running {device} (no monitors expected)")
-        
+
         if not meter.device_firmware(device):
             shared.device_results[device] = "missing"
             shared.current_device = None
@@ -43,15 +44,18 @@ def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, count):
         if shared and not shared.stop_event.is_set():
             shared.device_results[device] = "pass"
     except StopAutomation:
-        if shared: shared.device_results[device] = "fail"
+        if shared:
+            shared.device_results[device] = "fail"
         raise
     except Exception:
-        if shared: shared.device_results[device] = "fail"
+        if shared:
+            shared.device_results[device] = "fail"
         raise
     finally:
         if shared:
             shared.current_device = None
             shared.set_allowed(set(), reason=f"Finished {device} subtest")
+
 
 def test_cycle_all(meter: SSHMeter, shared: SharedState = None, **kwargs):
     func_name = inspect.currentframe().f_code.co_name
@@ -64,13 +68,13 @@ def test_cycle_all(meter: SSHMeter, shared: SharedState = None, **kwargs):
     for i in range(burn_count):
         print(f"{meter.host} {func_name} {i+1}/{burn_count}")
         if shared:
-            shared.broadcast_progress(meter.host, 'burn-in', i+1, burn_count)
+            shared.broadcast_progress(meter.host, "burn-in", i + 1, burn_count)
 
         for name, fn in DEVICES:
             if shared and shared.stop_event.is_set():
                 # leave remaining devices as 'pending' (or 'n/a')
                 return
-            
+
             count = kwargs.get(name, 0)
             _run_device(meter, shared, name, fn, count)
             time.sleep(0.5)
@@ -79,5 +83,4 @@ def test_cycle_all(meter: SSHMeter, shared: SharedState = None, **kwargs):
 
     time.sleep(0.5)
     if not meter.in_diagnostics():
-        meter.press('diagnostics')
-
+        meter.press("diagnostics")
