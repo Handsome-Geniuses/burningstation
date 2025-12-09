@@ -3,7 +3,7 @@ WORKDIR /app
 
 # System dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends git fping --fix-missing && \
+    apt-get install -y --no-install-recommends git fping libpq-dev --fix-missing && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

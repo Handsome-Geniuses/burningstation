@@ -21,6 +21,7 @@ def __interval_task():
             if count % 6: 
                 fresh,stale,ips = mm.refresh()
                 for ip in fresh: 
+                    mm.get_meter(ip).setup_custom_display()
                     start_passive_job(ip)
         except:
             pass
