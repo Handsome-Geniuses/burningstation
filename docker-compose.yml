@@ -6,6 +6,7 @@ services:
         container_name: burn_station_flask
         volumes:
             - ./flask:/app
+            - /sys/class/pwm:/sys/class/pwm
         privileged: true
         devices:
             - "/dev/i2c-1:/dev/i2c-1"

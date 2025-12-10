@@ -31,25 +31,21 @@ __hn = "30000269"
 __svs = {"system_version": "48792", "system_sub_version": "29"}
 __meter_type = "ms2.5"
 
-
-# patch.object(SSHMeter, "get_module_info", return_value=__modules).start()
-# patch.object(SSHMeter, "get_hostname", return_value=__hn).start()
-# patch.object(SSHMeter, "get_meter_type", return_value=__meter_type).start()
-# patch.object(SSHMeter, "get_system_versions", return_value=__svs).start()
-# patch.object(SSHMeter, "firmwares", return_value=__firmwares).start()
-
-
 original_init = SSHMeter.__init__
 def mock_init(self, host, **kwargs):
     original_init(self, host, **kwargs)
     # override all internal caches/state
+    self._Client__hostname = __hn
+
     self._module_info_cache = __modules
     self._firmwares = __firmwares
     self._system_versions_cache = __svs
     self.status = "ready"
     self.results = {}
     self._module_details_cache = __modules
-    self.__resolution = "800x480"  # so meter_type works
+    # self.__resolution = "800x480"  # so meter_type works
+    self._SSHMeter__resolution = "800x480"
     self._host = host  # if any code uses self.host
 
 patch.object(SSHMeter, "__init__", mock_init).start()
+

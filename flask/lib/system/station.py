@@ -239,9 +239,9 @@ def on_action(action, **kwargs):
     res = None
     # if secrets.MOCK: print("[station] is mock so skipping")
     if False: pass
-    elif action=="load":  return on_load(**kwargs)
-    elif action=="tower": return on_tower(**kwargs)
-    elif action=="lamp":  return on_lamp(**kwargs)
+    elif action=="load":  res = on_load(**kwargs)
+    elif action=="tower": res = on_tower(**kwargs)
+    elif action=="lamp":  res = on_lamp(**kwargs)
 
     return res if res is not None else ("", 200)
 
