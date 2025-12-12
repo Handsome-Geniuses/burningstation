@@ -25,7 +25,7 @@ class RobotClient:
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, host='192.168.8.181', port=42000, heartbeat_interval=60):
+    def __init__(self, host='192.168.169.3', port=42000, heartbeat_interval=60):
         if hasattr(self, "_initialized"):
             return
         
