@@ -1,5 +1,7 @@
 import os
 import base64
+import hashlib
+from typing import Optional
 
 BASE_DIR = os.path.join(os.path.dirname(__file__), "assets")
 UI_PAGE_PATH = os.path.join(BASE_DIR, "UIPage.php")
@@ -11,6 +13,9 @@ CHARUCO_PATHS = {
     "msx": os.path.join(BASE_DIR, "msx_charuco.png"),
 }
 
+# ------------------------------------------------------------------
+# Upload helpers
+# ------------------------------------------------------------------
 def ensure_remote_dir(meter: "SSHMeter", remote_dir: str) -> None:  # type: ignore [name-defined]
     """Create remote directories if they don't exist using SSH."""
     cmd = f"mkdir -p {remote_dir}"
@@ -21,14 +26,14 @@ def write_ui_page(meter: "SSHMeter") -> None:  # type: ignore [name-defined]
     if not os.path.exists(UI_PAGE_PATH):
         raise FileNotFoundError(f"Local UIPage.php not found at {UI_PAGE_PATH}")
     
-    with open(UI_PAGE_PATH, 'r') as f:
+    with open(UI_PAGE_PATH, "r", encoding="utf-8", newline="") as f:
         php_content = f.read()
     
     remote_path = "/var/volatile/html/UIPage.php"
     ensure_remote_dir(meter, "/var/volatile/html")
     
     # Use heredoc for multi-line text upload
-    cmd = f"cat <<'EOF' > {remote_path}\n{php_content}\nEOF"
+    cmd = f"cat <<'EOF' > {remote_path}\n{php_content}EOF"
     meter.cli(cmd)
 
 def write_ui_overlay(meter: "SSHMeter") -> None:  # type: ignore [name-defined]
@@ -36,14 +41,14 @@ def write_ui_overlay(meter: "SSHMeter") -> None:  # type: ignore [name-defined]
     if not os.path.exists(UI_OVERLAY_PATH):
         raise FileNotFoundError(f"Local ui_overlay.json not found at {UI_OVERLAY_PATH}")
     
-    with open(UI_OVERLAY_PATH, "r") as f:
+    with open(UI_OVERLAY_PATH, "r", encoding="utf-8", newline="") as f:
         json_content = f.read()
     
     remote_path = "/var/volatile/html/ui_overlay.json"
     ensure_remote_dir(meter, "/var/volatile/html")
     
     # Use heredoc for multi-line text upload
-    cmd = f"cat <<'EOF' > {remote_path}\n{json_content}\nEOF"
+    cmd = f"cat <<'EOF' > {remote_path}\n{json_content}EOF"
     meter.cli(cmd)
 
 def upload_charuco(meter: "SSHMeter", local_path: str) -> None:  # type: ignore [name-defined]
@@ -69,3 +74,52 @@ def upload_charuco(meter: "SSHMeter", local_path: str) -> None:  # type: ignore 
         printf_arg = ''.join(f'\\x{x}' for x in hex_pairs)
         cmd = f"printf '{printf_arg}' >> {remote_path}"
         meter.cli(cmd)
+
+# ------------------------------------------------------------------
+# Detection helpers
+# ------------------------------------------------------------------
+def _local_text_file_hash(path: str) -> str:
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        return hashlib.sha256(f.read().encode("utf-8")).hexdigest()
+
+def _remote_sha256(meter: "SSHMeter", remote_path: str) -> Optional[str]:  # type: ignore [name-defined]
+    """
+    Return SHA256 hexdigest of a remote file using the meter's built-in sha256sum.
+    Returns None if file missing or command fails.
+    """
+    out = meter.cli(f"sha256sum '{remote_path}' 2>/dev/null || echo ''").strip()
+    if not out:
+        return None
+    return out.split()[0]  # first column is the hash
+
+def is_custom_display_current(meter: "SSHMeter") -> bool:  # type: ignore [name-defined]
+    """
+    Return True only if:
+      • UIPage.php is present and byte-identical to local version
+      • charuco.png is present and byte-identical to the correct version for this meter_type
+    """
+    # UIPage.php
+    expected_ui_hash = _local_text_file_hash(UI_PAGE_PATH)
+    remote_ui_hash = _remote_sha256(meter, "/var/volatile/html/UIPage.php")
+
+    if remote_ui_hash != expected_ui_hash:
+        # print(f"expected_ui_hash: {expected_ui_hash}")
+        # print(f"remote_ui_hash: {remote_ui_hash}")
+        return False
+
+    # charuco.png
+    local_charuco = CHARUCO_PATHS.get(meter.meter_type)
+    if not local_charuco or not os.path.exists(local_charuco):
+        raise FileNotFoundError(f"No local Charuco PNG for meter_type='{meter.meter_type}'")
+
+    with open(local_charuco, "rb") as f:
+        expected_charuco_hash = hashlib.sha256(f.read()).hexdigest()
+
+    remote_charuco_hash = _remote_sha256(meter, "/var/volatile/html/content/Images/charuco.png")
+    if remote_charuco_hash != expected_charuco_hash:
+        # print(f"expected_charuco_hash: {expected_charuco_hash}")
+        # print(f"remote_charuco_hash: {remote_charuco_hash}")
+        return False
+
+    return True
+

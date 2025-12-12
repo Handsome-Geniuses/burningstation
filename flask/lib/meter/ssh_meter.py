@@ -13,7 +13,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from lib.utils import secrets
-from lib.meter.display_utils import CHARUCO_PATHS, write_ui_page, write_ui_overlay, upload_charuco
+from lib.meter.display_utils import (
+    CHARUCO_PATHS, write_ui_page, write_ui_overlay,
+    upload_charuco, is_custom_display_current
+)
 
 
 DEVICE_TO_MODULE = {
@@ -852,6 +855,10 @@ fclose($myfile);
         
         self.status = "busy"
         try:
+            if is_custom_display_current(self):
+                self.force_diagnostics()
+                return
+
             write_ui_page(self)
             write_ui_overlay(self)
             meter_type = self.meter_type
