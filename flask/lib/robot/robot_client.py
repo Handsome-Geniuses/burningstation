@@ -242,6 +242,18 @@ class RobotClient:
             # Not found
             return False, {}
 
+    def wait_until_ready(self, wait_timeout: float):
+        """Wait up to 'timeout' seconds for the robot to be ready (NOT busy)."""
+        log.info("waiting for robot ready with timeout=%s sec", wait_timeout)
+        start = time.time()
+        while time.time() - start < wait_timeout:
+            status = self.send_command("get_system_status")
+            if not status.get("robot_busy", True):
+                return
+            
+            time.sleep(0.5)
+        
+        raise TimeoutError(f"Timeout waiting for robot to be ready")
 
 
 if __name__ == "__main__":
@@ -251,6 +263,7 @@ if __name__ == "__main__":
         print("Robot status:", client.send_command("get_system_status", timeout=5))
 
         # job_id = client.run_program("run_move_home")
+        # job_id = client.run_program("run_find_meter", args={"meter_type": "ms2.5"})
 
         # client.wait_for_event("program_started", job_id=job_id, timeout=10)
         # print("Program started!")
@@ -261,6 +274,9 @@ if __name__ == "__main__":
         # # print("\nRecent events:")
         # # for ev in client.get_recent_events():
         # #     print(f"  {ev['event']} | job_id={ev.get('job_id')} | data={ev.get('data')}")
+
+        # print(client.send_command("get_system_status"))
+        print(client.send_command("get_charuco_frame"))
 
     except Exception as e:
         print("Error:", e)

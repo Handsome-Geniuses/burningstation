@@ -25,7 +25,7 @@ class RobotKeypadMonitor:
         shared = None,
         count: int = 1,
         inactivity_timeout_s: float = 30.0,
-        per_button_timeout_s: float = 15.0,   # how long to wait between robot pressing event and meter log confirmation
+        per_button_timeout_s: float = 20.0,   # how long to wait between robot pressing event and meter log confirmation
         verbose: bool = False,
         **kwargs
     ):
@@ -34,6 +34,7 @@ class RobotKeypadMonitor:
         self.inactivity_timeout_s = float(inactivity_timeout_s)
         self.per_button_timeout_s = float(per_button_timeout_s)
         self.required_per_key = max(1, int(count))
+        self.ignore_repeats = kwargs.get("ignore_reapeats", True)
 
         # Normalize expected buttons
         self.expected = {self._norm(b) for b in buttons if b.strip()}
@@ -178,7 +179,13 @@ class RobotKeypadMonitor:
     def handle(self, ev: LogEvent) -> Optional[Iterable[Action]]:
         if not (m := self._re_line.search(ev.msg)):
             return None
-
+        
+        if self.ignore_repeats and m.group("ar").lower() == "true":
+            print(f"[{self.id}] ignoring auto-repeat for key {m.group('key')}")
+            if self.verbose:
+                print(f"[{self.id}] ignoring auto-repeat for key {m.group('key')}")
+            return None
+    
         key = self._norm(m.group("key"))
         src = self._norm(m.group("src"))
         if src not in self._allowed_src:

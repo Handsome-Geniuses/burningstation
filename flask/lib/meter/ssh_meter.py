@@ -643,7 +643,20 @@ fclose($myfile);
 
         self.press('plus'); self.press('plus'); self.press('plus')
         self.press('ok')
+    
+    def goto_keypad(self):
+        self.force_diagnostics()
 
+        self.press('minus'); self.press('ok')
+        self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('ok')
+        if self.meter_type == 'msx':
+            self.press('minus'); self.press('minus'); self.press('ok')
+        else:
+            for i in range(8):
+                self.press('plus')
+            self.press('ok')
+        time.sleep(0.5)
+    
     def print_msg(self, msg):
         msg  = re.sub(r'\n[ \t]+', '\n', msg)
         url = f"http://{self.host}:8005/web/control_print_direct.php"

@@ -13,6 +13,7 @@ from .refresh_meter import refresh_meter
 from .test_robot_coin_shutter import test_robot_coin_shutter
 from .test_robot_nfc_read import test_robot_nfc_read
 from .test_robot_keypad import test_robot_keypad
+from .physical_cycle_all import physical_cycle_all
 
 
 PROGRAM_REGISTRY = {
@@ -47,6 +48,7 @@ PROGRAM_REGISTRY = {
     "test_robot_coin_shutter": test_robot_coin_shutter,
     "test_robot_nfc_read": test_robot_nfc_read,
     "test_robot_keypad": test_robot_keypad,
+    "physical_cycle_all": physical_cycle_all,
 }
 
 _PROGRAM_MONITORS = {
@@ -65,6 +67,10 @@ _PROGRAM_MONITORS = {
     "test_nfc_read":     [("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
     "test_robot_nfc_read":  [("nfc",  {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
     "test_robot_keypad":    [("robot_keypad",  {"buttons": ["0", "1", "2", "3"]})],
+    "physical_cycle_all":   [
+        ("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
+        ("robot_keypad", {"inactivity_timeout_s": 40})
+    ]
 }
 
 def _build_alias_index(registry):
