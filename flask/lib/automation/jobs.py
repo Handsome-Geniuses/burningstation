@@ -41,6 +41,18 @@ PROG2MODULE = {
     "modem":"MK7_XE910",
 }
 
+def get_default_buttons(modules, meter_type):
+    buttons = []
+    if "KEY_PAD_2" in modules:
+        buttons += ['1', '2', '3', '4', '5', 'ASTERISK', '6', '7', '8', '9', '0', 'POUND', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'BACK', 'Y', 'Z', 'ENTER']
+
+    if "KBD_CONTROLLER" in modules and meter_type == "ms2.5":
+        buttons += ['help', 'up', 'down', 'cancel', 'accept', 'max']
+    elif "KBD_CONTROLLER" in modules and meter_type == "ms3":
+        buttons += ['help', 'up', 'down', 'center', 'cancel', 'accept', 'max']
+    
+    return buttons
+
 class JobState(SharedState):
     def __init__(self, meter_ip):
         super().__init__()
@@ -132,11 +144,12 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
             if status is None or status == "running":
                 dev_results[dev] = 'fail' if st.stop_event.is_set() else 'pass'
 
-        print(f"[DEBUG][AFTER TEST] program={program_name} result={st.result}")
-        if dev_results:
-            print("[DEBUG][AFTER TEST] per-device:", {d:r for d,r in dev_results.items()})
-        else:
-            print("[DEBUG][AFTER TEST] per-device: none")
+        if verbose:
+            print(f"[DEBUG] program={program_name} result={st.result}")
+            if dev_results:
+                print("[DEBUG] per-device:", {d:r for d,r in dev_results.items()})
+            else:
+                print("[DEBUG] per-device: none")
 
         meter.results.update(dev_results)
         print(f'meter.results: {meter.results}')
@@ -217,8 +230,6 @@ def job_status(meter_ip):
         }
 
 
-
-
 def start_passive_job(meter_ip):
     meter = mm.get_meter(meter_ip)
     modules = meter.module_info
@@ -239,6 +250,31 @@ def start_passive_job(meter_ip):
     }
 
     start_job(meter_ip, "cycle_all", kwargs)
+
+
+def start_physical_job(meter_ip, buttons=None):
+    meter = mm.get_meter(meter_ip)
+    modules = meter.module_info
+    has_coin_shutter = "COIN_SHUTTER" in modules
+    has_nfc = "KIOSK_NFC" in modules
+    buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
+
+    kwargs = {
+        "numBurnCycles": 1,
+        "numBurnDelay": 5,
+        "coin_shutter": {"enabled": has_coin_shutter},
+        "nfc": {"enabled": has_nfc},
+        "robot_keypad": {"enabled": bool(buttons), "buttons": buttons},
+
+        "monitors": [
+            ("nfc", {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
+            ("robot_keypad", {"buttons": buttons})
+        ]
+    }
+
+    success, msg = start_job(meter_ip, "physical_cycle_all", kwargs, verbose=True)
+    # print(f"[START_PHYSICAL_JOB] start_job() returned: {success} | {msg}")
+
 
 # using this to database?
 def job_done(meter_ip):

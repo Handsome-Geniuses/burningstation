@@ -13,7 +13,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from lib.utils import secrets
-from lib.meter.display_utils import CHARUCO_PATHS, write_ui_page, write_ui_overlay, upload_charuco
+from lib.meter.display_utils import (
+    CHARUCO_PATHS, write_ui_page, write_ui_overlay,
+    upload_image, is_custom_display_current, get_apriltag_path
+)
 
 
 DEVICE_TO_MODULE = {
@@ -643,7 +646,20 @@ fclose($myfile);
 
         self.press('plus'); self.press('plus'); self.press('plus')
         self.press('ok')
+    
+    def goto_keypad(self):
+        self.force_diagnostics()
 
+        self.press('minus'); self.press('ok')
+        self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('ok')
+        if self.meter_type == 'msx':
+            self.press('minus'); self.press('minus'); self.press('ok')
+        else:
+            for i in range(8):
+                self.press('plus')
+            self.press('ok')
+        time.sleep(0.5)
+    
     def print_msg(self, msg):
         msg  = re.sub(r'\n[ \t]+', '\n', msg)
         url = f"http://{self.host}:8005/web/control_print_direct.php"
@@ -824,7 +840,7 @@ fclose($myfile);
 
     def set_ui_mode(self, mode: str) -> None:
         """Set the UI mode on the meter (stock, banner, or charuco)."""
-        valid_modes = {"stock", "banner", "charuco"}
+        valid_modes = {"stock", "banner", "charuco", "apriltag"}
         if mode.lower() not in valid_modes:
             raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}.")
         cmd = f"echo '{mode.lower()}' | tee /var/volatile/html/.ui_mode"
@@ -839,15 +855,25 @@ fclose($myfile);
         
         self.status = "busy"
         try:
+            if is_custom_display_current(self):
+                self.force_diagnostics()
+                return
+
             write_ui_page(self)
             write_ui_overlay(self)
+            
             meter_type = self.meter_type
             local_charuco = CHARUCO_PATHS.get(meter_type)
             if not local_charuco:
                 raise ValueError(f"No Charuco path defined for meter_type: {meter_type}")
             if not os.path.exists(local_charuco):
                 raise FileNotFoundError(f"Local Charuco file not found: {local_charuco}")
-            upload_charuco(self, local_charuco)
+            upload_image(self, local_charuco, "charuco")
+
+            local_apriltag = get_apriltag_path(self)
+            if not os.path.exists(local_apriltag):
+                raise FileNotFoundError(f"Local Apriltag file not found: {local_apriltag}")
+            upload_image(self, local_apriltag, "apriltag")
         finally:
             self.status = "ready"
 

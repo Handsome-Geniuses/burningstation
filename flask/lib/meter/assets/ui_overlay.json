@@ -1,5 +1,6 @@
 {
   "image": "content/Images/charuco.png",
   "bg": "#ffffff",
-  "banner": "BURN-IN MODE - DO NOT UNPLUG"
+  "banner": "BURN-IN MODE - DO NOT UNPLUG",
+  "apriltag": "content/Images/apriltag.png"
 }

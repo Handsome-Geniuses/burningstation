@@ -13,19 +13,29 @@ def test_robot_coin_shutter(meter: SSHMeter, shared: SharedState = None, **kwarg
 
     meter.set_ui_mode("charuco")
     robot = RobotClient()
-    job_id = robot.run_program("run_coin_shutter", {"meter_type": meter.meter_type, "meter_id": meter.hostname})
+    job_id = robot.run_program("run_coin_shutter", {"meter_type": meter.meter_type, "meter_id": meter.hostname, "charuco_frame": kwargs.get("charuco_frame")})
     # print(f"robot._event_queue: {robot._event_queue}")
 
     robot.wait_for_event("taking_enabled_picture", job_id=job_id, timeout=40)
     meter.coin_shutter_hold_open(10)
     
-    event_data = robot.wait_for_event("coin_shutter_results", job_id=job_id, timeout=20)
-    print("Coin shutter analysis results: %s" % event_data)
-
-    event_data = robot.wait_for_event("program_done", job_id=job_id, timeout=10)
-    # print("Program done: %s" % event_data)
-
+    data = robot.wait_for_event("coin_shutter_results", job_id=job_id, timeout=20)
+    print("Coin shutter analysis results: %s" % data)
+    if shared:
+        shared.device_meta["coin_shutter"] = data
+    opened = data.get("opened")
+    confidence = data.get("confidence")
+    
+    robot.wait_for_event("program_done", job_id=job_id, timeout=10)
     # print(f"robot._event_queue: {robot._event_queue}")
+
+    if opened is True:
+        pass
+    elif opened is False:
+        raise StopAutomation(f"Coin shutter did not open: {data}")
+    elif opened is None:
+        raise StopAutomation(f"Coin shutter results are inconclusive: {data}")
+
 
 
 

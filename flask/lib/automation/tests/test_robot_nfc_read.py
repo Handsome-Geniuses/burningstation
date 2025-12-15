@@ -82,7 +82,7 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState = None, **kwargs):
 
     meter.set_ui_mode("charuco")
     robot = RobotClient()
-    job_id = robot.run_program("run_nfc_card", {"meter_type": meter.meter_type, "meter_id": meter.hostname})
+    job_id = robot.run_program("run_nfc_card", {"meter_type": meter.meter_type, "meter_id": meter.hostname, "charuco_frame": kwargs.get("charuco_frame")})
 
     # print(f"{meter.host} {func_name} 1/1")
     # if shared and not subtest:
@@ -141,6 +141,7 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState = None, **kwargs):
                 if shared:
                     shared.device_meta['last4'] = parsed.card_last4
                 nfc_enabled = False
+                # robot.wait_for_event("program_done", job_id=job_id, timeout=15)
                 return  # success
 
             if time.time() - start > max_duration_s:
