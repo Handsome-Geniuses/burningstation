@@ -60,7 +60,7 @@ def physical_cycle_all(
     # Initialize results
     if shared:
         shared.device_results.update({name: "pending" for name, _, _ in PHYSICAL_DEVICES})
-        print(f"[INIT] device_results initialized: {list(shared.device_results.keys())}")
+        # print(f"[INIT] device_results initialized: {list(shared.device_results.keys())}")
 
     robot = RobotClient()
     charuco_frame = run_and_retrieve_charuco(robot, meter, robot_ready_timeout)
@@ -72,7 +72,7 @@ def physical_cycle_all(
 
         for device_name, test_func, default_cfg in PHYSICAL_DEVICES:
             if shared and shared.stop_event.is_set():
-                print(f"STOP EVENT DETECTED — ABORTING CYCLE")
+                # print(f"STOP EVENT DETECTED — ABORTING CYCLE")
                 return
 
             # Config resolution
@@ -162,5 +162,4 @@ def physical_cycle_all(
     print(f"{'='*60}\n")
 
     if not meter.in_diagnostics():
-        print("Returning to diagnostics menu...")
         meter.press("diagnostics")
