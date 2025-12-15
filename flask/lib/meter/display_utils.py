@@ -16,6 +16,10 @@ CHARUCO_PATHS = {
 # ------------------------------------------------------------------
 # Upload helpers
 # ------------------------------------------------------------------
+def get_apriltag_path(meter: "SSHMeter") -> str:  # type: ignore [name-defined]
+    host_octet = meter.host.split(".")[-1]
+    return os.path.join(BASE_DIR, "apriltags", f"apriltag_{host_octet}.png")
+
 def ensure_remote_dir(meter: "SSHMeter", remote_dir: str) -> None:  # type: ignore [name-defined]
     """Create remote directories if they don't exist using SSH."""
     cmd = f"mkdir -p {remote_dir}"
@@ -51,16 +55,17 @@ def write_ui_overlay(meter: "SSHMeter") -> None:  # type: ignore [name-defined]
     cmd = f"cat <<'EOF' > {remote_path}\n{json_content}EOF"
     meter.cli(cmd)
 
-def upload_charuco(meter: "SSHMeter", local_path: str) -> None:  # type: ignore [name-defined]
-    """Upload the local Charuco PNG to the remote meter via chunked binary SSH, renaming to charuco.png."""
+def upload_image(meter: "SSHMeter", local_path: str, remote_name: str) -> None:  # type: ignore [name-defined]
+    """Upload the local image PNG to the remote meter via chunked binary SSH, renaming to remote_name."""
+    print(f"upload_image: {local_path} | {remote_name}")
     if not os.path.exists(local_path):
-        raise FileNotFoundError(f"Local Charuco file not found: {local_path}")
+        raise FileNotFoundError(f"Local file not found: {local_path}")
     
     with open(local_path, "rb") as f:
         binary_content = f.read()
     
     remote_dir = "/var/volatile/html/content/Images"
-    remote_path = f"{remote_dir}/charuco.png"
+    remote_path = f"{remote_dir}/{remote_name}.png"
     ensure_remote_dir(meter, remote_dir)
     
     meter.cli(f"> {remote_path}")  # Truncate or create empty file
@@ -119,6 +124,20 @@ def is_custom_display_current(meter: "SSHMeter") -> bool:  # type: ignore [name-
     if remote_charuco_hash != expected_charuco_hash:
         # print(f"expected_charuco_hash: {expected_charuco_hash}")
         # print(f"remote_charuco_hash: {remote_charuco_hash}")
+        return False
+
+    # apriltag.png
+    local_apriltag = get_apriltag_path(meter)
+    if not local_apriltag or not os.path.exists(local_apriltag):
+        raise FileNotFoundError(f"No local Apriltag PNG for meter.host='{meter.host}'")
+
+    with open(local_apriltag, "rb") as f:
+        expected_apriltag_hash = hashlib.sha256(f.read()).hexdigest()
+
+    remote_apriltag_hash = _remote_sha256(meter, "/var/volatile/html/content/Images/apriltag.png")
+    if remote_apriltag_hash != expected_apriltag_hash:
+        # print(f"expected_apriltag_hash: {expected_apriltag_hash}")
+        # print(f"remote_apriltag_hash: {remote_apriltag_hash}")
         return False
 
     return True

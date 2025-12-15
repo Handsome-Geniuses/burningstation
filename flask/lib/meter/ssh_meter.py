@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from lib.utils import secrets
 from lib.meter.display_utils import (
     CHARUCO_PATHS, write_ui_page, write_ui_overlay,
-    upload_charuco, is_custom_display_current
+    upload_image, is_custom_display_current, get_apriltag_path
 )
 
 
@@ -840,7 +840,7 @@ fclose($myfile);
 
     def set_ui_mode(self, mode: str) -> None:
         """Set the UI mode on the meter (stock, banner, or charuco)."""
-        valid_modes = {"stock", "banner", "charuco"}
+        valid_modes = {"stock", "banner", "charuco", "apriltag"}
         if mode.lower() not in valid_modes:
             raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}.")
         cmd = f"echo '{mode.lower()}' | tee /var/volatile/html/.ui_mode"
@@ -861,13 +861,19 @@ fclose($myfile);
 
             write_ui_page(self)
             write_ui_overlay(self)
+            
             meter_type = self.meter_type
             local_charuco = CHARUCO_PATHS.get(meter_type)
             if not local_charuco:
                 raise ValueError(f"No Charuco path defined for meter_type: {meter_type}")
             if not os.path.exists(local_charuco):
                 raise FileNotFoundError(f"Local Charuco file not found: {local_charuco}")
-            upload_charuco(self, local_charuco)
+            upload_image(self, local_charuco, "charuco")
+
+            local_apriltag = get_apriltag_path(self)
+            if not os.path.exists(local_apriltag):
+                raise FileNotFoundError(f"Local Apriltag file not found: {local_apriltag}")
+            upload_image(self, local_apriltag, "apriltag")
         finally:
             self.status = "ready"
 
