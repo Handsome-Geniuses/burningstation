@@ -239,7 +239,7 @@ def start_physical_job(meter_ip, buttons=None):
         "robot_keypad": {"enabled": bool(buttons), "buttons": buttons},
 
         "monitors": [
-            ("nfc", {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
+            ("nfc", {"timeout_on_s": 6.0, "timeout_off_s": 5.0}),
             ("robot_keypad", {"buttons": buttons})
         ]
     }

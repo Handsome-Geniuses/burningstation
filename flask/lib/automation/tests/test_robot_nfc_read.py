@@ -141,6 +141,7 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState = None, **kwargs):
                 if shared:
                     shared.device_meta['last4'] = parsed.card_last4
                 nfc_enabled = False
+                time.sleep(8) # Gives grace period for NFC reader to send shutdown confirmation (or else NFCMonitor gets suppressed and cant cancel it once received)
                 # robot.wait_for_event("program_done", job_id=job_id, timeout=15)
                 return  # success
 
