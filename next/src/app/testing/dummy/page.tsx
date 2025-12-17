@@ -126,6 +126,13 @@ export default () => {
                 <SimWrap action="question" kwargs={{ type: 2 }} text="ask string" />
             </div>
 
+            <div>abcdefg</div>
+            <div className="flex gap-2">
+                {/* <Button></Button> */}
+                <Button onClick={() => flask.handleAction('program', "physical_cycle_all", {})}>physical_cycle_all</Button>
+            </div>
+
+
             {loading && <LoadingGif variant={'full'} msg="loading" blur={true} className="bg-secondary/20" />}
         </div>
     )
