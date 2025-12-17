@@ -160,37 +160,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
         meter.results[program_name] = st.result
         master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': ''})
 
-
-        # this was the old meter jobs database insert logic gonna remove
-        # if (broadcast_job): 
-        #     master.broadcast('job', {'ip':meter_ip, 'name': program_name, 'result': result, 'msg': st.device_meta})
-        #     journalctl = '\n'.join(line.rstrip('\n') for line in st.logs)
-        #     jobNotes = { 'kwargs': kwargs }
-        #     if program_name=='all tests': jobNotes['results'] = st.device_results
-        #     jobNotes = json.dumps(jobNotes)
-
-        #     # removed this cause listener can stop too so wouldn't work. i'll deal with it later.
-        #     # userNotes = 'user stopped' if (st.stop_event.is_set()) else ''
-
-        #     payload = {
-        #         'name': program_name,
-        #         'status': st.result,
-        #         'jobNotes': jobNotes,   # string! use json.stringify if needed
-        #         # 'userNotes': userNotes, # string! use json.stringify if needed
-        #         'journalctl': journalctl
-        #     }
-
-        #     fwkey = PROG2MODULE.get(program_name)
-        #     if fwkey:
-        #         module:ModuleInfo = meter.module_info.get(fwkey)
-        #         if module:
-        #             payload['moduleFw'] = int(module.get('fw',-1))
-        #             payload['moduleId'] = int(module.get('full_id', -1))
-                    
-        #     # insertJobs(meter.hostname,[payload])
-        #     # print(payload)
-        #     print(journalctl)
-
+        st.extras['kwargs'] = kwargs
         job_done(meter_ip)
         meter.beep(3)
 
@@ -276,6 +246,7 @@ def start_physical_job(meter_ip, buttons=None):
     # print(f"[START_PHYSICAL_JOB] start_job() returned: {success} | {msg}")
 
 
+
 # using this to database?
 def job_done(meter_ip):
     meter = mm.get_meter(meter_ip)
@@ -284,37 +255,50 @@ def job_done(meter_ip):
     current_program = status.get("current_program")
     if current_program=='cycle_all':
         if meter.db_id==None: return
-        meter.results.pop("cycle_all")
+        meter.results.pop(current_program)
 
         overall = "pass"
         for key, val in meter.results.items():
             if val == "fail":
                 overall = "fail"
                 break
-        jobs = [{
+
+        default_info = {'ver': -1, 'mod': -1, 'id': -1}
+        job_results = {}
+        for key, val in meter.results.items():
+            info = meter.module_info.get(PROG2MODULE.get(key), default_info)
+
+            job_results[key] = {
+                "status": val,
+                "fw": info.get('ver', -1),
+                "id": info.get('id', -1)
+            }
+
+        data = {"results": job_results, "kwargs": st.extras.get('kwargs', {})}
+        if st.last_error: data["last_error"] = st.last_error
+        if st.device_meta: data["device_meta"] = st.device_meta
+
+        job_data = {
             "name": current_program,
             "status": overall,
-            "data": {
-                "results": meter.results,
-                "journalctl": '\n'.join(line.rstrip('\n') for line in st.logs)
-            }
-        }]
-        
-        insert_meter_jobs(meter.db_id,jobs)
+            "data": data
+        }
+        insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
+
 
 if __name__ == "__main__":
-    import tools.mock
+    # import tools.mock
     import time
     fresh,stale,meters = mm.refresh()
-    for f in fresh: print(f)
+    # for f in fresh: print(f)
     # ip = meters[0]
+    ip = "192.168.169.27"
     # print(ip)
-    # meter = mm.get_meter(ip)
-    # start_passive_job(ip) 
-    # # start_job(ip, "screen test", {"count":1})
+    meter = mm.get_meter(ip)
 
-
-    # # input("press enter to stop\n")
-    # while meter.status != "ready": time.sleep(1)
+    start_passive_job(ip) 
+    # start_job(ip, "screen test", {"count":1})
+    # input("press enter to stop\n")
+    while meter.status != "ready": time.sleep(1)
     
 

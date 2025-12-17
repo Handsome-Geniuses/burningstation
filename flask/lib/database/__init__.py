@@ -6,53 +6,6 @@ import json
 dbcs = secrets.DBCS
 VERBOSE = secrets.VERBOSE
 
-# ==============================================================================
-# Job Insertion
-# ==============================================================================
-def insert_meter_jobs(meter_id: int, jobs: list[dict], conn=None):
-    """
-    Bulk insert meter jobs (no upsert).
-    Each job dict must contain: name, status, data.
-    Returns list of inserted rows.
-    """
-    if not jobs:
-        return []
-
-    values_sql = []
-    params = []
-
-    for job in jobs:
-        values_sql.append("(%s, %s, %s, %s)")
-        params.extend(
-            [meter_id, job["name"], job["status"], json.dumps(job.get("data", {}))]
-        )
-
-    sql = f"""
-        INSERT INTO meter_job (meter_id, name, status, data)
-        VALUES {", ".join(values_sql)}
-        RETURNING *;
-    """
-
-    if conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
-
-    with psycopg.connect(dbcs) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
-
-
-def cleanup_test():
-    with psycopg.connect(dbcs) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "DELETE FROM meter_firmware WHERE meter_id IN (SELECT id FROM meter WHERE hostname = %s);",
-                ("test-host",),
-            )
-            cur.execute("DELETE FROM meter WHERE hostname = %s;", ("test-host",))
-            conn.commit()
 
 # ==============================================================================
 # Meter Insertion
@@ -110,7 +63,8 @@ def insert_meter(
         with conn.cursor() as cur:
             cur.execute(sql, tuple(values))
             return cur.fetchone()
-        
+
+
 def insert_sshmeter(meter: SSHMeter):
     """
     Insert meter and its firmwares into the database.
@@ -128,9 +82,63 @@ def insert_sshmeter(meter: SSHMeter):
         res = insert_meter(
             hn, system_version, subsystem_version, meter_type, modules, conn=conn
         )
-    
+
     meter.db_id = res[0]  # meter row id
     return res
+
+
+# ==============================================================================
+# Job Insertion
+# ==============================================================================
+def insert_meter_jobs(
+    meter_id: int,
+    jobs: list[dict],
+    jctl: str = "",
+    conn: None | psycopg.Connection = None,
+):
+    """
+    Bulk insert meter jobs (no upsert).
+    Each job dict must contain: name, status, data.
+    Returns list of inserted rows.
+    """
+    if not jobs:
+        return []
+
+    values_sql = []
+    params = []
+
+    for job in jobs:
+        values_sql.append("(%s, %s, %s, %s, %s)")
+        params.extend(
+            [meter_id, job["name"], job["status"], json.dumps(job.get("data", {})), jctl]
+        )
+
+    sql = f"""
+        INSERT INTO meter_job (meter_id, name, status, data, jctl)
+        VALUES {", ".join(values_sql)}
+        RETURNING *;
+    """
+
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+
+    with psycopg.connect(dbcs) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+
+
+def cleanup_test():
+    with psycopg.connect(dbcs) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM meter_firmware WHERE meter_id IN (SELECT id FROM meter WHERE hostname = %s);",
+                ("test-host",),
+            )
+            cur.execute("DELETE FROM meter WHERE hostname = %s;", ("test-host",))
+            conn.commit()
 
 
 if __name__ == "__main__":
@@ -139,6 +147,7 @@ if __name__ == "__main__":
         {"name": "job2", "status": "fail", "data": {"key2": "value2"}},
     ]
     import tools.mock
-    meter = SSHMeter("192.168.137.180")
+
+    meter = SSHMeter("192.168.169.27")
     insert_sshmeter(meter)
     insert_meter_jobs(meter.db_id, fake_jobs)

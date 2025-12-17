@@ -16,7 +16,7 @@ class SharedState:
         self.device_results = {}
         self.device_meta = {}
         self.allowed_monitors: set[str] = set()
-        self.db_data = {}
+        self.extras = {}
 
     def set_allowed(self, devices: set[str], reason: str = ""):
         self.allowed_monitors = devices

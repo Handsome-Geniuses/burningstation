@@ -13,17 +13,17 @@ CREATE TABLE IF NOT EXISTS meter (
 );
 
 -- meter firmwares obsolete table
-CREATE TABLE IF NOT EXISTS meter_firmware (
-    id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    meter_id INT NOT NULL REFERENCES meter(id),
-    name VARCHAR(64) NOT NULL,
-    version INT NOT NULL,
-    modfunc INT NOT NULL DEFAULT -1,
-    fullid INT NOT NULL DEFAULT -1,
-    created_at TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP,
-    last_updated TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP,
-    UNIQUE(meter_id, name)
-);
+-- CREATE TABLE IF NOT EXISTS meter_firmware (
+--     id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+--     meter_id INT NOT NULL REFERENCES meter(id),
+--     name VARCHAR(64) NOT NULL,
+--     version INT NOT NULL,
+--     modfunc INT NOT NULL DEFAULT -1,
+--     fullid INT NOT NULL DEFAULT -1,
+--     created_at TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP,
+--     last_updated TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP,
+--     UNIQUE(meter_id, name)
+-- );
 
 -- revised meter jobs table
 CREATE TABLE IF NOT EXISTS meter_job (
@@ -32,11 +32,12 @@ CREATE TABLE IF NOT EXISTS meter_job (
     name VARCHAR(64) NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('missing','n/a','pass','fail')),
     data JSONB NOT NULL DEFAULT '{}',
+    jctl TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP
 );
 
 
-CREATE INDEX IF NOT EXISTS idx_meter_firmware_meter_id ON meter_firmware(meter_id);
+-- CREATE INDEX IF NOT EXISTS idx_meter_firmware_meter_id ON meter_firmware(meter_id);
 CREATE INDEX IF NOT EXISTS idx_meter_job_meter_id ON meter_job(meter_id);
 
 
