@@ -14,6 +14,7 @@ from lib.sse.sse_queue_manager import SSEQM as master
 from typing import Literal
 from lib.meter.ssh_meter import ModuleInfo, SSHMeter
 import json
+import requests
 
 
 StatusType = Literal['idle', 'running', 'finished', 'error', 'cancelled']
@@ -203,10 +204,10 @@ def job_status(meter_ip):
 def start_passive_job(meter_ip):
     meter = mm.get_meter(meter_ip)
     modules = meter.module_info
-    has_nfc = "KIOSK_NFC" in modules
-    has_modem = "MK7_XE910" in modules
+    has_nfc = "1KIOSK_NFC" in modules
+    has_modem = "1MK7_XE910" in modules
     has_printer = "PRINTER" in modules
-    has_coin_shutter = "COIN_SHUTTER" in modules
+    has_coin_shutter = "1COIN_SHUTTER" in modules
     has_screen_test = True  # all meters have screen test
 
     kwargs = {
@@ -219,6 +220,7 @@ def start_passive_job(meter_ip):
         "numBurnDelay": 10   
     }
 
+    response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"L"})
     start_job(meter_ip, "cycle_all", kwargs)
 
 
@@ -253,14 +255,21 @@ def job_done(meter_ip):
     st = _state(meter_ip)
     status = job_status(meter_ip)
     current_program = status.get("current_program")
-    if current_program=='cycle_all':
-        if meter.db_id==None: return
-        meter.results.pop(current_program)
+    if meter.db_id==None: return
+    meter.results.pop(current_program)
 
-        overall = "pass"
+    # initial 
+    overall_status = "pass"
+    data = {"kwargs": st.extras.get('kwargs', {})}
+        
+
+    # for cycle all passive
+    if current_program == 'cycle_all':
+        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"M"})
+
         for key, val in meter.results.items():
             if val == "fail":
-                overall = "fail"
+                overall_status = "fail"
                 break
 
         default_info = {'ver': -1, 'mod': -1, 'id': -1}
@@ -274,16 +283,23 @@ def job_done(meter_ip):
                 "id": info.get('id', -1)
             }
 
-        data = {"results": job_results, "kwargs": st.extras.get('kwargs', {})}
+        data["results"]=job_results
         if st.last_error: data["last_error"] = st.last_error
         if st.device_meta: data["device_meta"] = st.device_meta
+        start_physical_job(meter.host)
 
-        job_data = {
-            "name": current_program,
-            "status": overall,
-            "data": data
-        }
-        insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
+    # for cycle all physical
+    elif current_program == "physical_cycle_all":
+        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"R"})
+        
+
+    # insertion time!
+    job_data = {
+        "name": current_program,
+        "status": overall_status,
+        "data": data
+    }
+    insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
 
 
 if __name__ == "__main__":
@@ -292,7 +308,7 @@ if __name__ == "__main__":
     fresh,stale,meters = mm.refresh()
     # for f in fresh: print(f)
     # ip = meters[0]
-    ip = "192.168.169.27"
+    ip = "192.168.137.32"
     # print(ip)
     meter = mm.get_meter(ip)
 

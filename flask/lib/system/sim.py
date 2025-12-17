@@ -3,6 +3,7 @@ import threading
 
 from lib.gpio import *
 from lib.sse import ask_clients
+from lib.system import program
 import lib.system.station as station
 import lib.system.override as override
 from lib.system.states import states
@@ -314,6 +315,9 @@ def on_mock(handler, action, **kwargs):
             res = station.on_action(action, **kwargs)
     elif handler == override:
         res = override.on_action(action, **kwargs)
+
+    elif handler == program:
+        res = program.on_action(action, **kwargs)
 
     return res if res is not None else ("", 200)
     
