@@ -10,6 +10,7 @@ from .flash_brightness import flash_brightness as test_flash_brightness
 from .test_dummy import test_dummy
 from .refresh_meter import refresh_meter
 
+from .test_solar import test_solar
 from .test_robot_coin_shutter import test_robot_coin_shutter
 from .test_robot_nfc_read import test_robot_nfc_read
 from .test_robot_keypad import test_robot_keypad
@@ -45,6 +46,7 @@ PROGRAM_REGISTRY = {
     "dummy": test_dummy,
     "refresh_meter": refresh_meter,
 
+    "test_solar": test_solar,
     "test_robot_coin_shutter": test_robot_coin_shutter,
     "test_robot_nfc_read": test_robot_nfc_read,
     "test_robot_keypad": test_robot_keypad,
