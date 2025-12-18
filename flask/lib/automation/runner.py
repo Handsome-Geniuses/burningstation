@@ -1,4 +1,5 @@
 import threading
+import traceback
 from lib.meter.ssh_meter import SSHMeter
 from lib.automation.listener import start_listener_thread
 from lib.automation.tests import PROGRAM_REGISTRY, get_monitors
@@ -76,6 +77,7 @@ def run_test_job(
 
     except Exception as exc:
         print(f"[run_test_job] Error running test {program_name!r} on {meter.host}: {exc}")
+        traceback.print_exc()
         shared.last_error = str(exc)
         shared.stop_event.set()
 
