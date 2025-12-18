@@ -234,6 +234,7 @@ def start_physical_job(meter_ip, buttons=None):
     # print("askjdasldkjlaslkjasdkjldaskjldasdsakljdsakljajdkladklsajdsladjklsajklsajlasjdklaskdjlsajkl")
     meter = mm.get_meter(meter_ip)
     modules = meter.module_info
+    has_solar = True
     has_coin_shutter = "COIN_SHUTTER" in modules
     has_nfc = "KIOSK_NFC" in modules
     buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
@@ -241,6 +242,7 @@ def start_physical_job(meter_ip, buttons=None):
     kwargs = {
         "numBurnCycles": 1,
         "numBurnDelay": 5,
+        "solar": {"enabled": has_solar},
         "coin_shutter": {"enabled": has_coin_shutter},
         "nfc": {"enabled": has_nfc},
         "robot_keypad": {"enabled": bool(buttons), "buttons": buttons},

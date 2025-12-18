@@ -4,6 +4,7 @@ import inspect
 from lib.meter.ssh_meter import SSHMeter
 from lib.automation.shared_state import SharedState
 from lib.automation.helpers import StopAutomation
+from lib.automation.tests.test_solar import test_solar
 from lib.automation.tests.test_robot_coin_shutter import test_robot_coin_shutter
 from lib.automation.tests.test_robot_nfc_read import test_robot_nfc_read
 from lib.automation.tests.test_robot_keypad import test_robot_keypad
@@ -11,6 +12,7 @@ from lib.robot.robot_client import RobotClient
 
 
 PHYSICAL_DEVICES = [
+    ("solar",          test_solar, {}),
     ("coin_shutter",   test_robot_coin_shutter, {}),
     ("nfc",            test_robot_nfc_read,     {}),
     ("robot_keypad",   test_robot_keypad,       {
