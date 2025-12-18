@@ -153,6 +153,16 @@ class RobotClient:
                 log.warning("Heartbeat failed (connection likely dead): %s", e)
                 break
 
+    def flush_event_queue(self):
+        """Clear ALL events from the event queue, regardless of type or job_id."""
+        with self._main_lock:
+            count = len(self._event_queue)
+            self._event_queue.clear()
+            if count > 0:
+                log.info("Flushed %d stale events from queue", count)
+            else:
+                log.debug("Event queue was already empty")
+
     def send_command(self, command: str, params=None, timeout=3.0):
         """Send a quick command and wait for response."""
         if params is None:

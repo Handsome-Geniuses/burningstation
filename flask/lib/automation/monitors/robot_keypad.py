@@ -69,7 +69,8 @@ class RobotKeypadMonitor:
     def _run(self):
         if self.verbose:
             print(f"{GREEN}[robot_keypad] background thread started{RESET}")
-
+        
+        # All past events get cleared when calling jobs.py.start_physical_job so there shouldnt be any old 'button_press' events
         while not self._stop_event.is_set():
             if self.shared and (
                 self.shared.stop_event.is_set() or
