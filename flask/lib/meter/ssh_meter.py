@@ -114,7 +114,8 @@ class SSHMeter(sshkit.Client):
     def cli(self, cmd:str):
         isConnected = self.connected
         if (not isConnected): self.connect()
-        stdin, stdout, stderr = self.exec_command(cmd)
+        # stdin, stdout, stderr = self.exec_command(cmd)
+        stdin, stdout, stderr = self.safe_exec_command(cmd)
         res = stdout.read().decode().strip()
         if (not isConnected): self.close()
         return res

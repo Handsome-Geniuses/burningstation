@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
         'http://172.18.27.154:8010',
         'http://192.168.169.1:8010',
         'http://192.168.5.54:8010',
+        'http://192.168.5.78:8010',
         'http://192.168.5.32:8010',
         'http://192.168.137.1:8010',
         'http://local-origin.dev',
@@ -25,7 +26,7 @@ const nextConfig: NextConfig = {
                 source: '/flask/:path*',
                 destination:
                     process.env.NODE_ENV === 'development'
-                        ? 'http://127.0.0.1:8011/api/:path*'
+                        ? 'http://192.168.169.1:8011/api/:path*'
                         // ? 'http://host.docker.internal:8011/api/:path*'
                         : '/api/',
             },

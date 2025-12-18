@@ -206,10 +206,10 @@ def job_status(meter_ip):
 def start_passive_job(meter_ip):
     meter = mm.get_meter(meter_ip)
     modules = meter.module_info
-    has_nfc = "1KIOSK_NFC" in modules
-    has_modem = "1MK7_XE910" in modules
+    has_nfc = "KIOSK_NFC" in modules
+    has_modem = "MK7_XE910" in modules
     has_printer = "PRINTER" in modules
-    has_coin_shutter = "1COIN_SHUTTER" in modules
+    has_coin_shutter = "COIN_SHUTTER" in modules
     has_screen_test = True  # all meters have screen test
 
     kwargs = {
@@ -223,13 +223,15 @@ def start_passive_job(meter_ip):
     }
 
     response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"L"})
-    start_job(meter_ip, "cycle_all", kwargs)
+    start_job(meter_ip, "cycle_all", kwargs, verbose=True)
 
 
 def start_physical_job(meter_ip, buttons=None):
     robot = RobotClient()
     robot.flush_event_queue()
 
+    time.sleep(10)
+    # print("askjdasldkjlaslkjasdkjldaskjldasdsakljdsakljajdkladklsajdsladjklsajklsajlasjdklaskdjlsajkl")
     meter = mm.get_meter(meter_ip)
     modules = meter.module_info
     has_coin_shutter = "COIN_SHUTTER" in modules
