@@ -13,9 +13,11 @@ from lib.meter.meter_manager import METERMANAGER as mm
 from lib.sse.sse_queue_manager import SSEQM as master
 from typing import Literal
 from lib.meter.ssh_meter import ModuleInfo, SSHMeter
+from lib.robot.robot_client import RobotClient
 import json
 import requests
 import time
+
 
 StatusType = Literal['idle', 'running', 'finished', 'error', 'cancelled']
 ResultType = Literal['pass', 'fail', None]
@@ -225,6 +227,9 @@ def start_passive_job(meter_ip):
 
 
 def start_physical_job(meter_ip, buttons=None):
+    robot = RobotClient()
+    robot.flush_event_queue()
+
     time.sleep(10)
     # print("askjdasldkjlaslkjasdkjldaskjldasdsakljdsakljajdkladklsajdsladjklsajklsajlasjdklaskdjlsajkl")
     meter = mm.get_meter(meter_ip)
@@ -247,6 +252,7 @@ def start_physical_job(meter_ip, buttons=None):
     }
 
     success, msg = start_job(meter_ip, "physical_cycle_all", kwargs, verbose=True)
+    time.sleep(5) # incase robot needs to get out of there
     # print(f"[START_PHYSICAL_JOB] start_job() returned: {success} | {msg}")
 
 
