@@ -130,6 +130,43 @@ def insert_meter_jobs(
             return cur.fetchall()
 
 
+# ==============================================================================
+# Job Retrieval 
+# ==============================================================================
+def retrieve_jobs(limit=10, offset=0, conn: None | psycopg.Connection = None,):
+    """
+    Retrieve meter jobs with pagination.
+    Returns list of job rows.
+    """
+    # sql = """
+    #     SELECT *
+    #     FROM meter_job
+    #     ORDER BY created_at DESC
+    #     LIMIT %s OFFSET %s;
+    # """
+    sql = """
+        SELECT
+            mj.*,
+            m.hostname
+            FROM meter_job mj
+            JOIN meter m ON mj.meter_id = m.id
+            ORDER BY mj.created_at DESC
+            LIMIT %s OFFSET %s;
+        """
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (limit, offset))
+            return cur.fetchall()
+
+    with psycopg.connect(dbcs, row_factory=psycopg.rows.dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (limit, offset))
+            return cur.fetchall()
+
+
+# ==============================================================================
+# cleanup for testing
+# ==============================================================================
 def cleanup_test():
     with psycopg.connect(dbcs) as conn:
         with conn.cursor() as cur:
@@ -142,12 +179,18 @@ def cleanup_test():
 
 
 if __name__ == "__main__":
-    fake_jobs = [
-        {"name": "job1", "status": "pass", "data": {"key1": "value1"}},
-        {"name": "job2", "status": "fail", "data": {"key2": "value2"}},
-    ]
+    # fake_jobs = [
+    #     {"name": "job1", "status": "pass", "data": {"key1": "value1"}},
+    #     {"name": "job2", "status": "fail", "data": {"key2": "value2"}},
+    # ]
     import tools.mock
 
-    meter = SSHMeter("192.168.169.27")
-    insert_sshmeter(meter)
-    insert_meter_jobs(meter.db_id, fake_jobs)
+    # meter = SSHMeter("192.168.169.27")
+    # insert_sshmeter(meter)
+    # insert_meter_jobs(meter.db_id, fake_jobs)
+
+
+    jobs = retrieve_jobs(limit=10, offset=0)
+    for row in jobs: row.pop("jctl", None)
+    print(json.dumps(jobs, indent=4, default=str))
+
