@@ -8,8 +8,8 @@ from typing import Dict, Tuple
 from lib.meter.ssh_meter import SSHMeter
 from lib.automation.shared_state import SharedState
 from lib.automation.helpers import check_stop_event, StopAutomation
-from lib.gpio.lamp_manager import lamp
-
+# from lib.gpio import lm
+from lib.system import lm
 
 EXPECTED_MIN_INCREASE_mA = 100   # adjust based on your floodlight strength and panel size
 EXPECTED_DROP_TOLERANCE_mA = 30  # allow some hysteresis/slow decay
@@ -98,8 +98,8 @@ def test_solar(meter: SSHMeter, shared: SharedState = None, **kwargs):
     print(f"charge_off_1: {charge_off_1}")
     time.sleep(6)
 
-    lamp(0, True, 100)
-    lamp(1, True, 100)
+    lm.lamp(0, True, 100)
+    lm.lamp(1, True, 100)
     time.sleep(8)
 
     illuminated = get_latest_power_status(meter)
@@ -108,8 +108,8 @@ def test_solar(meter: SSHMeter, shared: SharedState = None, **kwargs):
     print(f"charge_on: {charge_on}")
 
     # Recovery (lights OFF again)
-    lamp(0, False, 100)
-    lamp(1, False, 100)
+    lm.lamp(0, False, 100)
+    lm.lamp(1, False, 100)
     time.sleep(8)
 
     recovery = get_latest_power_status(meter)
