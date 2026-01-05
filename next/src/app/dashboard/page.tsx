@@ -7,6 +7,7 @@ import React from "react"
 import { ControlsTab } from "./tabs/controls"
 import { MonitorTab } from "./tabs/monitor"
 import { SecretTab } from "./tabs/secret"
+import { HistoryTab } from "./tabs/history/page"
 
 
 const Dashboard = () => {
@@ -14,6 +15,7 @@ const Dashboard = () => {
     const tabs: TabItem[] = [
         { value: "Controls", content: <ControlsTab /> },
         { value: "Monitor", content: <MonitorTab /> },
+        { value: "History", content: <HistoryTab /> },
         { value: "Settings", content: <SettingsTab /> }
     ]
     if (systemState.handsome) tabs.push({ value: "Secret", content: <SecretTab /> })
