@@ -64,7 +64,7 @@ const statusIcon = (status: string) => {
 
 
 const JobRow = ({ job, onClick }: { job: any, onClick?: () => void }) => {
-    const icon = statusIcon(job.status)
+    const icon = statusIcon(job?.status)
 
     return (
         <tr onClick={onClick} className="border-b cursor-pointer hover:bg-gray-50">
@@ -92,7 +92,7 @@ const copyme = (text:string) => {
 const JobDialog = ({ job }: { job: any }) => {
     const { systemState, systemDispatch } = useStoreContext()
     const isHandsome = systemState.handsome
-    const icon = statusIcon(job.status)
+    const icon = statusIcon(job?.status)
     return (
         <>
             <DialogContent className="min-w-[85vw] ">
