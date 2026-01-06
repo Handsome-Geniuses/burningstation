@@ -11,7 +11,16 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
-
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+    Accordion,
+    AccordionContent,
+    AccordionItem,
+    AccordionTrigger,
+} from "@/components/ui/accordion"
+import { LucideCopy } from "lucide-react";
+import { useStoreContext } from "../../store";
+import { notify } from "@/lib/notify";
 
 const retrieve_limit = 10;
 
@@ -31,21 +40,37 @@ const retrieveJobHistoryPlaceholder = async (limit: number, offset: number) => {
     ]
 }
 
-const retrieveJobHistory = async(limit: number, offset: number) => {
+const retrieveJobHistory = async (limit: number, offset: number) => {
     // const response = await fetch(`/api/database/meter_jobs?limit=${limit}&offset=${offset}`);
     const response = await flask.get(`/database/meter_job?limit=${limit}&offset=${offset}`)
     const data = await response.json()
     return data
 }
 
+const statusIcon = (status: string) => {
+    switch (status) {
+        case 'pass':
+            return "✅"
+        case 'fail':
+            return "❌"
+        case 'missing':
+            return "⚠️"
+        case 'n/a':
+            return "❓"
+        default:
+            return "❔"
+    }
+}
+
 
 // # 🚀🛸🪐🌌⭐🌠👽🤖☀️🌙🌧️⚡🌊🌸🍂🌈🔧🛠️⚙️🪓🪛🧰✈️🚁🚗🚲⛵🏍️🛶✅❌⚠️✖➡️⬆️🔁🎨🎸🎮🕹️🐉🧩🕯️📖
 const JobRow = ({ job, onClick }: { job: any, onClick?: () => void }) => {
-    let icon = "✅"
-    if (job.status === 'fail') icon = "❌"
-    // else if (job.status === 'pass') icon = "✅"
-    else if (job.status === 'missing') icon = "⚠️"
-    else if (job.status === 'n/a') icon = "❓"
+    // let icon = "✅"
+    // if (job.status === 'fail') icon = "❌"
+    // // else if (job.status === 'pass') icon = "✅"
+    // else if (job.status === 'missing') icon = "⚠️"
+    // else if (job.status === 'n/a') icon = "❓"
+    const icon = statusIcon(job.status)
 
     return (
         <tr onClick={onClick} className="border-b cursor-pointer hover:bg-gray-50">
@@ -53,7 +78,7 @@ const JobRow = ({ job, onClick }: { job: any, onClick?: () => void }) => {
             <td className="text-left">{job.id}</td>
             {/* <td className="text-left">{job.status}</td> */}
             {/* <td className="text-left">{job.meter_id}</td> */}
-            
+
             <td className="text-left">{job.hostname}</td>
             <td className="text-left">{job.name}</td>
             {/* <td className="text-left">📖</td> */}
@@ -61,8 +86,80 @@ const JobRow = ({ job, onClick }: { job: any, onClick?: () => void }) => {
         </tr>
     )
 }
+const Copyable = ({ text }: { text: string }) => {
+    const copyToClipboard = () => {
+        navigator.clipboard.writeText(text)
+        notify.info('Copied to clipboard')
+    }
+    return <LucideCopy className="cursor-pointer ml-2" onClick={copyToClipboard} />
+}
 
-export const HistoryTab = ()=>{
+const JobDialog = ({ job }: { job: any }) => {
+    const { systemState, systemDispatch } = useStoreContext()
+    const isHandsome = systemState.handsome
+    const icon = statusIcon(job.status)
+    return (
+        <>
+            <DialogContent className="min-w-[85vw] ">
+                <DialogHeader className="gap-0 space-y-0 m-0 p-0 border-0">
+                    <DialogTitle>Job Details — {job?.hostname} — {job?.name} — {job?.status}{icon}</DialogTitle>
+                    <DialogDescription>
+                        {job?.created_at}
+                    </DialogDescription>
+                </DialogHeader>
+
+                <ScrollArea className="mt-2 max-h-80 overflow-y-auto w-full rounded-md border border-border px-2 mr-2">
+                    <Accordion type="single" collapsible>
+                        { job?.data?.kwargs &&
+                            <AccordionItem value="kwargs">
+                                <AccordionTrigger>program parameters(kwargs)</AccordionTrigger>
+                                <AccordionContent>
+                                    {isHandsome && <Copyable text={JSON.stringify(job?.data?.kwargs, null, 2)} />}
+                                    <pre className="bg-gray-100 rounded-md">
+                                        {JSON.stringify(job?.data?.kwargs, null, 2)}
+                                    </pre>
+                                </AccordionContent>
+                            </AccordionItem>
+                        }
+                        { job?.data?.results &&
+                            <AccordionItem value="results">
+                                <AccordionTrigger>results</AccordionTrigger>
+                                <AccordionContent>
+                                    {isHandsome && <Copyable text={JSON.stringify(job?.data?.results, null, 2)} />}
+                                    <pre className="bg-gray-100 rounded-md p-2">
+                                        {JSON.stringify(job?.data?.results, null, 2)}
+                                    </pre>
+                                </AccordionContent>
+                            </AccordionItem>
+                        }
+                        { job?.jctl &&
+                            <AccordionItem value="journalctl">
+                                <AccordionTrigger>journalctl</AccordionTrigger>
+                                <AccordionContent>
+                                    {isHandsome && <Copyable text={job?.jctl} />}
+                                    {/* <pre className="bg-gray-100 rounded-md">
+                                        {JSON.stringify(job?.jctl, null, 2)}
+                                    </pre> */}
+                                    <div className="bg-gray-100 rounded-md p-2">
+                                        {job?.jctl}
+                                    </div>
+                                </AccordionContent>
+                            </AccordionItem>
+                        }
+                    </Accordion>
+                </ScrollArea>
+                <DialogFooter >
+                    <DialogClose asChild >
+                        <Button variant="secondary">Close</Button>
+                    </DialogClose>
+                </DialogFooter>
+            </DialogContent>
+        </>
+    )
+}
+
+
+export const HistoryTab = () => {
     const [jobs, setJobs] = React.useState<any[]>([])
     const [selected, setSelected] = React.useState<any>(null)
     const [dialogOpen, setDialogOpen] = React.useState(false)
@@ -104,24 +201,7 @@ export const HistoryTab = ()=>{
                 </div>
             </div>
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent className="min-w-[85vw] ">
-                    <DialogHeader className="gap-0 space-y-0 m-0 p-0 border-0">
-                        <DialogTitle>Job Details: {selected?.id}</DialogTitle>
-                        <DialogDescription >
-                            {selected?.hostname} - {selected?.name}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="mt-2 max-h-70 overflow-y-auto w-full">
-                        <pre className="bg-gray-100 p-2 rounded-md overflow-y-auto w-full">
-                            {JSON.stringify(selected, null, 2)}
-                        </pre>
-                    </div>
-                    <DialogFooter >
-                        <DialogClose asChild >
-                            <Button variant="secondary">Close</Button>
-                        </DialogClose>
-                    </DialogFooter>
-                </DialogContent>
+                <JobDialog job={selected} />
             </Dialog>
         </div>
     )
