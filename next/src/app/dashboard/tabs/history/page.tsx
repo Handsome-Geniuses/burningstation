@@ -63,25 +63,15 @@ const statusIcon = (status: string) => {
 }
 
 
-// # 🚀🛸🪐🌌⭐🌠👽🤖☀️🌙🌧️⚡🌊🌸🍂🌈🔧🛠️⚙️🪓🪛🧰✈️🚁🚗🚲⛵🏍️🛶✅❌⚠️✖➡️⬆️🔁🎨🎸🎮🕹️🐉🧩🕯️📖
 const JobRow = ({ job, onClick }: { job: any, onClick?: () => void }) => {
-    // let icon = "✅"
-    // if (job.status === 'fail') icon = "❌"
-    // // else if (job.status === 'pass') icon = "✅"
-    // else if (job.status === 'missing') icon = "⚠️"
-    // else if (job.status === 'n/a') icon = "❓"
     const icon = statusIcon(job.status)
 
     return (
         <tr onClick={onClick} className="border-b cursor-pointer hover:bg-gray-50">
             <td className="text-center">{icon}</td>
             <td className="text-left">{job.id}</td>
-            {/* <td className="text-left">{job.status}</td> */}
-            {/* <td className="text-left">{job.meter_id}</td> */}
-
             <td className="text-left">{job.hostname}</td>
             <td className="text-left">{job.name}</td>
-            {/* <td className="text-left">📖</td> */}
             <td className="text-left">{new Date(job.created_at).toLocaleString()}</td>
         </tr>
     )
@@ -92,6 +82,11 @@ const Copyable = ({ text }: { text: string }) => {
         notify.info('Copied to clipboard')
     }
     return <LucideCopy className="cursor-pointer ml-2" onClick={copyToClipboard} />
+}
+
+const copyme = (text:string) => {
+    navigator.clipboard.writeText(text)
+    notify.info('Copied to clipboard')
 }
 
 const JobDialog = ({ job }: { job: any }) => {
@@ -114,8 +109,8 @@ const JobDialog = ({ job }: { job: any }) => {
                             <AccordionItem value="kwargs">
                                 <AccordionTrigger>program parameters(kwargs)</AccordionTrigger>
                                 <AccordionContent>
-                                    {isHandsome && <Copyable text={JSON.stringify(job?.data?.kwargs, null, 2)} />}
-                                    <pre className="bg-gray-100 rounded-md">
+                                    {/* {isHandsome && <Copyable text={JSON.stringify(job?.data?.kwargs, null, 2)} />} */}
+                                    <pre className="bg-gray-100 rounded-md cursor-default" onClick={() => isHandsome && copyme(JSON.stringify(job?.data?.kwargs, null, 2))}>
                                         {JSON.stringify(job?.data?.kwargs, null, 2)}
                                     </pre>
                                 </AccordionContent>
@@ -125,8 +120,8 @@ const JobDialog = ({ job }: { job: any }) => {
                             <AccordionItem value="results">
                                 <AccordionTrigger>results</AccordionTrigger>
                                 <AccordionContent>
-                                    {isHandsome && <Copyable text={JSON.stringify(job?.data?.results, null, 2)} />}
-                                    <pre className="bg-gray-100 rounded-md p-2">
+                                    {/* {isHandsome && <Copyable text={JSON.stringify(job?.data?.results, null, 2)} />} */}
+                                    <pre className="bg-gray-100 rounded-md p-2 cursor-default" onClick={() => isHandsome && copyme(JSON.stringify(job?.data?.results, null, 2))}>
                                         {JSON.stringify(job?.data?.results, null, 2)}
                                     </pre>
                                 </AccordionContent>
@@ -136,11 +131,8 @@ const JobDialog = ({ job }: { job: any }) => {
                             <AccordionItem value="journalctl">
                                 <AccordionTrigger>journalctl</AccordionTrigger>
                                 <AccordionContent>
-                                    {isHandsome && <Copyable text={job?.jctl} />}
-                                    {/* <pre className="bg-gray-100 rounded-md">
-                                        {JSON.stringify(job?.jctl, null, 2)}
-                                    </pre> */}
-                                    <div className="bg-gray-100 rounded-md p-2">
+                                    {/* {isHandsome && <Copyable text={job?.jctl} />} */}
+                                    <div className="bg-gray-100 rounded-md p-2  cursor-default" onClick={() => isHandsome && copyme(job?.jctl)}>
                                         {job?.jctl}
                                     </div>
                                 </AccordionContent>
@@ -184,11 +176,8 @@ export const HistoryTab = () => {
                         <tr>
                             <th className="text-left"></th>
                             <th className="text-left">ID</th>
-                            {/* <th className="text-left">Status</th> */}
-                            {/* <th className="text-left">Meter ID</th> */}
                             <th className="text-left">Meter</th>
                             <th className="text-left">Job</th>
-                            {/* <th className="text-left cursor-pointer">Data</th> */}
                             <th className="text-left">Finished</th>
                         </tr>
                     </thead>
