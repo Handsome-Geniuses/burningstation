@@ -1,3 +1,4 @@
+import time
 from lib.gpio.gpio_setup import pwm_lamps
 from lib.system.states import states
 from lib.sse.sse_queue_manager import SSEQM, key_payload
@@ -6,6 +7,15 @@ from pipwm import HWPWM
 
 pwm = [HWPWM(ch) for ch in pwm_lamps]
 amnt = len(pwm)
+
+try:
+    for p in pwm:
+        p.export = 0
+except Exception as e:
+    pass
+finally:
+    time.sleep(0.5)
+
 for p in pwm: 
     p.export = 1
     p.hz = 100

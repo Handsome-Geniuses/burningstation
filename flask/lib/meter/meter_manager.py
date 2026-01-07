@@ -33,8 +33,8 @@ class METERMANAGER:
 
     @classmethod
     def __on_fresh(cls, ip: str):
-        if ip in cls.__meters: return
-        if cls.__attempts.get(ip,0) >= cls.__limit: return
+        if ip in cls.__meters: return False
+        if cls.__attempts.get(ip,0) >= cls.__limit: return False
         meter = METERMANAGER.MeterClass(ip)
         try:
             meter.connect()
@@ -53,13 +53,14 @@ class METERMANAGER:
                 if ip in cls.__splash or ip in cls.__attempts:
                     t0 = cls.__booted.get(ip,None)
                     if t0==None: 
-                        print(f"[{hn}]🔧 Just booted? Giving it time to load up ...", fg="#008800")
+                        print(f"[{hn}-{ip}]🔧 Just booted? Giving it time to load up ...", fg="#008800")
                         cls.__booted[ip] = time.time()
                         raise cls.__FINALLY
                     elif time.time() - t0 > 20: pass
                     else: raise cls.__FINALLY
 
                 # here, has booted+10s or was booted already
+                print(f"[{hn}-{ip}] Attempting to enter diagnostics ...", fg="#888800")
                 meter.force_diagnostics()
                 time.sleep(0.1)
                 if not meter.in_diagnostics(): raise Exception
@@ -84,6 +85,8 @@ class METERMANAGER:
                 # try: send_fun_meter(meter)
                 # except: pass
                 print(f"✅ [{hn}] detected success", fg="#00ff00", style=STYLE.BOLD)
+                print("hello?")
+                return True
 
                 
 
@@ -110,10 +113,16 @@ class METERMANAGER:
         fresh = current - cls.__meters
         stale = cls.__meters - current
 
-        for ip in fresh: cls.__on_fresh(ip)
+        valid_fresh = set()
+
+        for ip in fresh: 
+            if cls.__on_fresh(ip):
+                valid_fresh.add(ip)
+
         for ip in stale: cls.__on_stale(ip)
 
-        return fresh, stale, list(cls.__meters)
+
+        return valid_fresh, stale, list(cls.__meters)
     
     @classmethod
     def list_meters(cls): return list(cls.__meters)
@@ -122,10 +131,13 @@ class METERMANAGER:
         
 
 if __name__ == "__main__":
+
+
     import time
-    _res = []
     while True:
         time.sleep(1)
-        METERMANAGER.refresh()
+        fresh,stale,ips = METERMANAGER.refresh()
+        print(f"ips: {ips}")
+        print(f"fresh: {fresh}, stale: {stale}")
 
  

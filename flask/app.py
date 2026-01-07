@@ -2,10 +2,12 @@
 # File: app.py
 # Desc: flask app
 #================================================================
+import logging
+logging.getLogger("paramiko").setLevel(logging.CRITICAL)
+
 import flask
 from flask_cors import CORS
 from datetime import datetime
-import logging
 from route import *
 import argparse
 from prettyprint import STYLE, prettyprint as print

@@ -16,11 +16,15 @@ def __interval_task():
             count = 0
         try:
             # 10 minute
-            if count % 600:
+            if not (count % 600):
                 pass
-            if count % 6: 
+            if not (count % 6): 
+                # print("refreshing meters")
                 fresh,stale,ips = mm.refresh()
+                # print(f"ips: {ips}")
+                # print(f"fresh: {fresh}, stale: {stale}")
                 for ip in fresh: 
+                    print(f"ip: {ip}")
                     mm.get_meter(ip).setup_custom_display()
                     start_passive_job(ip)
         except:
