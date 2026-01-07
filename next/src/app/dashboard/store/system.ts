@@ -34,6 +34,8 @@ export interface SystemState {
 
     // lamp1, lamp2
     lamp: [number,number,number,number]
+
+    mode:  'auto' | 'manual'
 }
 export const initialSystemState: SystemState = {
     motors: [0, 0, 0],
@@ -45,6 +47,7 @@ export const initialSystemState: SystemState = {
     running: false,
     tower: [false, false, false, false],
     lamp: [0, 0, 0, 0],
+    mode: 'auto'
 }
 
 export type Action = { type: 'set'; key: keyof SystemState; value: SystemState[keyof SystemState] }

@@ -4,10 +4,12 @@ import { MeterSlots } from "../controls/meter-slots"
 import { flask } from "@/lib/flask"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
-import { useStoreContext } from "../../store"
+import { useStoreContext } from "@/app/dashboard/store"
 import React from "react"
 import { useDebounce } from "@/hooks/useDebounce"
 import { Pinout } from "./Pinout"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 
 const TowerLampControls = () => {
     const { systemState } = useStoreContext()
@@ -116,12 +118,54 @@ const MotorControls = () => {
     )
 }
 
+const ManualAutoBox = () => {
+    const { systemState } = useStoreContext()
+    const isManual = systemState.mode === 'manual'
+    return (
+        <div className="flex flex-col w-full gap-1">
+            <div className="w-full flex items-center gap-2 justify-end">
+                <Label htmlFor="mode">{systemState.mode}</Label>
+                <Switch
+                    id="mode"
+                    checked={!isManual}
+                    onCheckedChange={(checked) => flask.handleAction('station', 'mode', { value: checked ? 'auto' : 'manual' })}
+                />
+            </div>
+            {
+                isManual &&
+                <div className="w-full flex flex-col gap-1">
+                    <Button onClick={()=>flask.handleAction('program', 'manual', {program:'setup_custom_display'})}>
+                        Load Custom Display
+                    </Button>
+                    <Button onClick={()=>flask.handleAction('program', 'manual', {program:'start_passive_job'})}>
+                        Start Passive Job
+                    </Button>
+                    <Button onClick={()=>flask.handleAction('program', 'manual', {program:'start_physical_job'})}>
+                        Start Physical Job
+                    </Button>
+                    <Button onClick={()=>flask.handleAction('program', 'manual', {program:'hello'})}>
+                        hello
+                    </Button>
+                </div>
+            }
+        </div>
+    )
+}
+// onClick={() => flask.handleAction('station', 'lamp', { type: type, state: !systemState.lamp[i] })}
+
 export const SecretTab = () => {
+    const { systemState } = useStoreContext()
+
     return (
         <div className="flex items-center justify-around">
             <Pinout />
             <div className="bg-muted/70 gap-2 p-4 flex flex-col items-center">
-                <Indicators />
+                <div className="flex justify-between w-full">
+                    <div className="border-4 border-border p-1"><Indicators /></div>
+                    <div className="flex flex-col items-center">
+                        <ManualAutoBox />
+                    </div>
+                </div>
                 <MeterSlots classname="border border-border p-1" />
             </div>
             <div className="bg-muted/70 gap-2 p-4 flex flex-col items-center">

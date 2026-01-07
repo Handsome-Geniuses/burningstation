@@ -18,6 +18,8 @@ import json
 import requests
 import time
 
+from lib.system.states import states
+
 
 StatusType = Literal['idle', 'running', 'finished', 'error', 'cancelled']
 ResultType = Literal['pass', 'fail', None]
@@ -296,7 +298,9 @@ def job_done(meter_ip):
         data["results"]=job_results
         if st.last_error: data["last_error"] = st.last_error
         if st.device_meta: data["device_meta"] = st.device_meta
-        start_physical_job(meter.host)
+
+        if states['mode'] == 'auto':
+            start_physical_job(meter.host)
 
     # for cycle all physical
     elif current_program == "physical_cycle_all":

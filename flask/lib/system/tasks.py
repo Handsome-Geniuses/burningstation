@@ -7,6 +7,7 @@ import threading
 import time
 from lib.automation.jobs import start_passive_job
 from lib.meter.meter_manager import METERMANAGER as mm
+from lib.system.states import states
 
 def __interval_task():
     count = 0
@@ -24,9 +25,10 @@ def __interval_task():
                 # print(f"ips: {ips}")
                 # print(f"fresh: {fresh}, stale: {stale}")
                 for ip in fresh: 
-                    print(f"ip: {ip}")
-                    mm.get_meter(ip).setup_custom_display()
-                    start_passive_job(ip)
+                    print(f"fresh ip: {ip}")
+                    if states['mode']=='auto':
+                        mm.get_meter(ip).setup_custom_display()
+                        start_passive_job(ip)
         except:
             pass
         time.sleep(1)

@@ -14,7 +14,7 @@ const Dashboard = () => {
     const { systemState } = useStoreContext()
     const tabs: TabItem[] = [
         { value: "Controls", content: <ControlsTab /> },
-        { value: "Monitor", content: <MonitorTab /> },
+        // { value: "Monitor", content: <MonitorTab /> },
         { value: "History", content: <HistoryTab /> },
         { value: "Settings", content: <SettingsTab /> }
     ]

@@ -85,7 +85,6 @@ class METERMANAGER:
                 # try: send_fun_meter(meter)
                 # except: pass
                 print(f"✅ [{hn}] detected success", fg="#00ff00", style=STYLE.BOLD)
-                print("hello?")
                 return True
 
                 

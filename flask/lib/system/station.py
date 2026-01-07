@@ -3,7 +3,7 @@
 # controls turning on/off motors to move meters
 # ====================================================
 from lib.gpio import *
-from lib.sse.sse_queue_manager import SSEQM
+from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.system import states
 import time
 from prettyprint import STYLE, prettyprint as print
@@ -232,6 +232,14 @@ def on_lamp(**kwargs):
     # elif option=='L1DC' and dc!=-1: lm.lamp1_dc(dc)
     # elif option=='L2DC' and dc!=-1: lm.lamp2_dc(dc)
 
+
+def on_mode(**kwargs):
+    mode = kwargs.get('mode', None)
+    if mode==None: states['mode'] = 'auto' if states['mode']=='manual' else 'manual'
+    elif mode not in ('auto','manual'): return
+    else: states['mode'] = mode
+    SSEQM.broadcast("state", key_payload("mode", states['mode']))
+
 # ----------------------------------------------------
 # determine action and go!
 # ----------------------------------------------------
@@ -242,6 +250,7 @@ def on_action(action, **kwargs):
     elif action=="load":  res = on_load(**kwargs)
     elif action=="tower": res = on_tower(**kwargs)
     elif action=="lamp":  res = on_lamp(**kwargs)
+    elif action=="mode":  res = on_mode(**kwargs)
 
     return res if res is not None else ("", 200)
 
