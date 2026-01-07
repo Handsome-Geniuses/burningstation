@@ -18,7 +18,7 @@ import {
     AccordionItem,
     AccordionTrigger,
 } from "@/components/ui/accordion"
-import { LucideCopy } from "lucide-react";
+import { LucideAlertTriangle, LucideCheck, LucideCopy, LucideShieldBan, LucideShieldQuestion, LucideX } from "lucide-react";
 import { useStoreContext } from "../../store";
 import { notify } from "@/lib/notify";
 
@@ -48,17 +48,29 @@ const retrieveJobHistory = async (limit: number, offset: number) => {
 }
 
 const statusIcon = (status: string) => {
+    // switch (status) {
+    //     case 'pass':
+    //         return "✅"
+    //     case 'fail':
+    //         return "❌"
+    //     case 'missing':
+    //         return "⚠️"
+    //     case 'n/a':
+    //         return "❓"
+    //     default:
+    //         return "❔"
+    // }
     switch (status) {
         case 'pass':
-            return "✅"
+            return <LucideCheck className="size-6 text-green-500 inline-block" />
         case 'fail':
-            return "❌"
+            return <LucideX className="size-6 text-red-500 inline-block" />
         case 'missing':
-            return "⚠️"
+            return <LucideAlertTriangle className="size-6 text-yellow-500 inline-block" />
         case 'n/a':
-            return "❓"
+            return <LucideShieldQuestion className="size-6 text-gray-500 inline-block" />
         default:
-            return "❔"
+            return <LucideShieldBan className="size-6 text-gray-500 inline-block" />
     }
 }
 
