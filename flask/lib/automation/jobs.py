@@ -52,7 +52,7 @@ def get_default_buttons(modules, meter_type):
     if "KBD_CONTROLLER" in modules and meter_type == "ms2.5":
         buttons += ['help', 'up', 'down', 'cancel', 'accept', 'max']
     elif "KBD_CONTROLLER" in modules and meter_type == "ms3":
-        buttons += ['help', 'up', 'down', 'center', 'cancel', 'accept', 'max']
+        buttons += ['help', 'up', 'down', 'cancel', 'accept', 'max'] # skip "center" bc it resets the meter program/display
     
     return buttons
 
