@@ -114,6 +114,7 @@ def is_custom_display_current(meter: "SSHMeter") -> bool:  # type: ignore [name-
 
     # charuco.png
     local_charuco = CHARUCO_PATHS.get(meter.meter_type)
+    print(f"local_charuco: {local_charuco}, meter_type: {meter.meter_type}")
     if not local_charuco or not os.path.exists(local_charuco):
         raise FileNotFoundError(f"No local Charuco PNG for meter_type='{meter.meter_type}'")
 
