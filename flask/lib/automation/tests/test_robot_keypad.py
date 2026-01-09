@@ -9,19 +9,19 @@ from lib.robot.robot_client import RobotClient
 
 KEYPAD_PAGE = "Service:Utilities:Peripherals:Keyboard"
 
-def is_on_keypad_page(meter: SSHMeter, timeout: float = 3.0) -> bool:
+def is_on_keypad_page(meter: SSHMeter, shared: SharedState, timeout: float = 3.0) -> bool:
     url = f"http://{meter.host}:8005/UIPage.php"
     try:
         resp = requests.get(url, timeout=timeout)
         resp.raise_for_status()
     except Exception as e:
-        print(f"Failed to fetch UI page, assuming NOT on keyboard page. Error: {e}")
+        shared.log(f"Failed to fetch UI page, assuming NOT on keyboard page | Error: {e}")
         return False
     
     return KEYPAD_PAGE in resp.text
 
 
-def test_robot_keypad(meter: SSHMeter, shared: SharedState = None, **kwargs):
+def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     """
     Navigate to the keypad diagnostics page and wait for the keypad monitor
     to mark success (all required keys pressed) or a fault to stop the run.
@@ -29,6 +29,11 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState = None, **kwargs):
     func_name = inspect.currentframe().f_code.co_name
     buttons = kwargs.get("buttons")
     max_duration_s = int(kwargs.get("max_duration_s", 300))
+    subtest = bool(kwargs.get("subtest", False))
+
+    shared.log(f"{meter.host} {func_name} 1/1")
+    if not subtest:
+        shared.broadcast_progress(meter.host, func_name, 1, 1)
 
     meter.set_ui_mode("charuco")
     robot = RobotClient()
@@ -36,8 +41,8 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState = None, **kwargs):
     # job_id = robot.run_program("temp_button_press", {"buttons": buttons, "meter_type": meter.meter_type, "meter_id": meter.hostname})
 
     meter.goto_keypad()
-    if not is_on_keypad_page(meter):
-        print(f"warning: did NOT make it to the keypad page")
+    if not is_on_keypad_page(meter, shared):
+        shared.log(f"warning: did NOT make it to the keypad page")
 
     start = time.time()
     poll = 0.5
@@ -50,7 +55,7 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState = None, **kwargs):
             return
 
         if time.time() - start > max_duration_s:
-            print(f"max_duration_s ({max_duration_s} sec) timeout reached, setting shared.stop_event")
+            shared.log(f"max_duration_s ({max_duration_s} sec) timeout reached, setting shared.stop_event")
             # timeout: let jobs.py classify as FAIL (stop_event triggers)
             shared.last_error = 'max duration exceeded'
             shared.stop_event.set()
@@ -58,11 +63,11 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState = None, **kwargs):
         
         found, data = robot.try_get_event("program_done", job_id=job_id, consume=False)
         if found:
-            print(f"received program_done event with data: {data}...")
+            shared.log(f"received program_done event with data: {data}...")
             raise StopAutomation(f"received program_done event earlier than expected. data={data}...")
         
         if not is_on_keypad_page(meter):
-            print(f"No longer on keypad page... re-navigating to keypad page")
+            shared.log(f"No longer on keypad page... re-navigating to keypad page")
             meter.goto_keypad()
 
 

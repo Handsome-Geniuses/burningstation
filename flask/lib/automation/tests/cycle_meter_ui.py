@@ -49,7 +49,7 @@ def __test_cycle_ms25_ui(meter: SSHMeter, shared: SharedState, payment_type: str
     func_name = inspect.currentframe().f_code.co_name
 
     for i in range(count):
-        print(f"{meter.host} {func_name} {i+1}/{count}")
+        shared.log(f"{meter.host} {func_name} {i+1}/{count}")
         if shared:
             shared.broadcast_progress(meter.host, 'cycle_ui', i+1, count)
         
@@ -91,7 +91,7 @@ def __test_cycle_msx_ui(meter: SSHMeter, shared: SharedState, payment_type: str,
     func_name = inspect.currentframe().f_code.co_name
 
     for i in range(count):        
-        print(f"{meter.host} {func_name} {i+1}/{count}")
+        shared.log(f"{meter.host} {func_name} {i+1}/{count}")
         if shared:
             shared.broadcast_progress(meter.host, 'cycle_ui', i+1, count)
         
@@ -122,7 +122,7 @@ def __test_cycle_msx_ui(meter: SSHMeter, shared: SharedState, payment_type: str,
             while time.time() < end:
                 page = get_msx_ui_page(meter)
                 if page != 'thank_you_receipt':
-                    # print(f'breaking out bc page={page} {datetime.now().strftime("%H:%M:%S.%f")[:-3]}')
+                    # shared.log(f'breaking out bc page={page} {datetime.now().strftime("%H:%M:%S.%f")[:-3]}')
                     break
                 if shared:
                     check_stop_event(shared)
@@ -139,7 +139,7 @@ def __test_cycle_msx_ui(meter: SSHMeter, shared: SharedState, payment_type: str,
             while time.time() < end:
                 page = get_msx_ui_page(meter)
                 if page not in ("authorizing", "thank_you_receipt"):
-                    # print(f'breaking out bc page={page} {datetime.now().strftime("%H:%M:%S.%f")[:-3]}')
+                    # shared.log(f'breaking out bc page={page} {datetime.now().strftime("%H:%M:%S.%f")[:-3]}')
                     break
                 if shared:
                     check_stop_event(shared)

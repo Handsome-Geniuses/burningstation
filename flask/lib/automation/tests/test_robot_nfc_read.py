@@ -74,19 +74,19 @@ def _fetch_ui_page(meter: SSHMeter, timeout: float = 2.0) -> str:
     resp.raise_for_status()
     return resp.text
 
-def test_robot_nfc_read(meter: SSHMeter, shared: SharedState = None, **kwargs):
+def test_robot_nfc_read(meter: SSHMeter, shared: SharedState, **kwargs):
     """ Navigate to the nfc diagnostics page, enable nfc, then wait for a card read """
     func_name = inspect.currentframe().f_code.co_name
     max_duration_s = int(kwargs.get("max_duration_s", 40))
     subtest = bool(kwargs.get("subtest", False))
 
+    shared.log(f"{meter.host} {func_name} 1/1")
+    if not subtest:
+        shared.broadcast_progress(meter.host, func_name, 1, 1)
+
     meter.set_ui_mode("charuco")
     robot = RobotClient()
     job_id = robot.run_program("run_nfc_card", {"meter_type": meter.meter_type, "meter_id": meter.hostname, "charuco_frame": kwargs.get("charuco_frame")})
-
-    # print(f"{meter.host} {func_name} 1/1")
-    # if shared and not subtest:
-    #     shared.broadcast_progress(meter.host, func_name, 1, 1)
 
     if meter.in_diagnostics():
         meter.press('diagnostics'); meter.press('diagnostics')
@@ -111,15 +111,13 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState = None, **kwargs):
     poll = 0.5
     try:
         while True:
-            if shared:
-                check_stop_event(shared)
+            check_stop_event(shared)
             
             found, data = robot.try_get_event("program_done", job_id=job_id, consume=True)
             if found:
-                print(f"[NFC] Robot program finished but card still not detected... data: {data}")
-                if shared:
-                    shared.last_error = "robot finished without any card detection"
-                    shared.stop_event.set()
+                shared.log(f"Robot program finished but card still not detected... data: {data}")
+                shared.last_error = "robot program finished without any card detected"
+                shared.stop_event.set()
                 return # fail
 
             try:
@@ -127,32 +125,26 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState = None, **kwargs):
             except Exception as e:
                 time.sleep(poll)
                 if time.time() - start > max_duration_s:
-                    if shared:
-                        shared.last_error = 'max duration exceeded'
-                        shared.stop_event.set()
+                    shared.last_error = 'max duration exceeded'
+                    shared.stop_event.set()
                     return
                 continue
 
             parsed = _parse_nfc_page(page)
-            # print(f'[NFC] device={parsed.device} data="{parsed.data_raw}" card_masked="{parsed.card_masked}" card_last4="{parsed.card_last4}"')
 
             if parsed.card_masked is not None:
-                print(f'[NFC] Card detected, last4={parsed.card_last4}')
-                if shared:
-                    shared.device_meta['last4'] = parsed.card_last4
+                shared.log(f'Card detected, last4={parsed.card_last4} | parsed={parsed}')
+                shared.device_meta['last4'] = parsed.card_last4
                 nfc_enabled = False
                 time.sleep(8) # Gives grace period for NFC reader to send shutdown confirmation (or else NFCMonitor gets suppressed and cant cancel it once received)
-                # robot.wait_for_event("program_done", job_id=job_id, timeout=15)
                 return  # success
 
             if time.time() - start > max_duration_s:
-                if shared:
-                    shared.last_error = 'max duration exceeded'
-                    shared.stop_event.set()
+                shared.last_error = f'max duration exceeded ({max_duration_s} sec)'
+                shared.stop_event.set()
                 return
 
-            if shared:
-                check_stop_event(shared)
+            check_stop_event(shared)
             time.sleep(poll)
 
     finally:
@@ -160,5 +152,5 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState = None, **kwargs):
             try:
                 meter.press('minus')
             except Exception as _e:
-                print(f'[NFC] Cleanup warning: failed to press [-]: {_e}')
+                shared.log(f'Cleanup warning: failed to press [-] | {_e}', console=True)
 

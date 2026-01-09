@@ -8,7 +8,7 @@ import inspect
 MIN_PRINT_RESULT_DELAY = 8.0
 
 
-def test_cycle_print(meter: SSHMeter, shared: SharedState = None, **kwargs):
+def test_cycle_print(meter: SSHMeter, shared: SharedState, **kwargs):
     """Run a print test N times with delay. Stops early if shared.stop_event is set."""
     func_name = inspect.currentframe().f_code.co_name
     count = int(kwargs.get("count", 3))
@@ -16,8 +16,8 @@ def test_cycle_print(meter: SSHMeter, shared: SharedState = None, **kwargs):
     subtest = bool(kwargs.get("subtest", False))
 
     for i in range(count):
-        print(f"{meter.host} {func_name} {i+1}/{count}")
-        if shared and not subtest:
+        shared.log(f"{meter.host} {func_name} {i+1}/{count}")
+        if not subtest:
             shared.broadcast_progress(meter.host, 'printer', i+1, count)
         
         meter.printer_test()
