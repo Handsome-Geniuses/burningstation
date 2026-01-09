@@ -66,9 +66,8 @@ class SSEQM:
 
     @classmethod
     def broadcast(cls, event: str, payload: Any):
-        if event != "keep-alive":
-            if cls.verbose:
-                print(f"[DEBUG] broadcast(event={event}, payload={payload})")
+        # if event != "keep-alive" and cls.verbose:
+        #     print(f"[DEBUG] broadcast(event={event}, payload={payload})")
         cls.broadcast_payload(sse_payload(event, payload))
 
 
