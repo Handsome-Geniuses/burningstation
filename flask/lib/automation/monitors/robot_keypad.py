@@ -7,6 +7,7 @@ from lib.automation.monitors.models import (
     LogEvent, Action, StartWatch, CancelWatch, MarkSuccess, ProgressUpdate,
     RED, GREEN, YELLOW, DIM, RESET
 )
+from lib.automation.shared_state import SharedState
 from lib.robot.robot_client import RobotClient
 
 
@@ -15,14 +16,13 @@ class RobotKeypadMonitor:
     Robot-driven keypad monitor.
     - Watches real KEY_PRESSED logs and counts presses
     - Uses robot events ("button_press") to arm/disarm per-button failure timers
-    - Fails fast if robot starts pressing a button but never completes it
     """
     id = "robot_keypad"
 
     def __init__(
         self,
+        shared: SharedState,
         buttons: List[str],
-        shared = None,
         count: int = 1,
         inactivity_timeout_s: float = 30.0,
         per_button_timeout_s: float = 20.0,   # how long to wait between robot pressing event and meter log confirmation
@@ -53,8 +53,7 @@ class RobotKeypadMonitor:
         )
         self._allowed_src = {"KEY_PAD_2", "KBD_CONTROLLER"}
 
-        if self.verbose:
-            print(f"[robot_keypad] Expecting {len(self.expected)} buttons × {self.required_per_key}")
+        self.shared.log(f"Expecting {len(self.expected)} buttons × {self.required_per_key}")
 
         self.robot = RobotClient()
 
@@ -67,23 +66,19 @@ class RobotKeypadMonitor:
     # Background thread — polls robot events
     # ------------------------------------------------------------------ #
     def _run(self):
-        if self.verbose:
-            print(f"{GREEN}[robot_keypad] background thread started{RESET}")
-        
+        self.shared.log("robot event polling background thread for RobotKeypadMonitor: STARTED", color=GREEN)
+
         # All past events get cleared when calling jobs.py.start_physical_job so there shouldnt be any old 'button_press' events
         while not self._stop_event.is_set():
-            if self.shared and (
-                self.shared.stop_event.is_set() or
-                getattr(self.shared, "end_listener", None) and self.shared.end_listener.is_set()
-            ):
+            end_requested = (getattr(self.shared, "end_listener", None) and self.shared.end_listener.is_set())
+            if self.shared.stop_event.is_set() or end_requested:
                 break
 
             self._check_robot_events()
             if self._stop_event.wait(0.3):
                 break
 
-        if self.verbose:
-            print(f"{YELLOW}[robot_keypad] background thread exited{RESET}")
+        self.shared.log("robot event polling background thread for RobotKeypadMonitor: STOPPED", color=YELLOW)
 
     def _check_robot_events(self) -> None:
         """Poll robot events and queue actions according to strict rules."""
@@ -95,21 +90,18 @@ class RobotKeypadMonitor:
             button_name_raw = data.get("button_name", "")
             button_name = self._norm(button_name_raw)
             if button_name not in self.expected:
-                if self.verbose:
-                    print(f"{DIM}[robot_keypad] ignoring unexpected button: {button_name_raw}{RESET}")
+                self.shared.log(f"ignoring unexpected button: {button_name_raw}", color=DIM)
                 continue
 
             action_type = data.get("action")
             pressed = data.get("pressed", None)  # only present when action=="pressed"
 
             if action_type == "pressing":
-                if self.verbose:
-                    print(f"{YELLOW}[robot_keypad] robot STARTED pressing '{button_name_raw}' → arming timeout{RESET}")
+                self.shared.log(f"robot STARTED pressing '{button_name_raw}' → arming timeout", color=YELLOW)
 
                 # Cancel any previous dangling watch (shouldn't happen, but be safe)
                 for cancel in self._cancel_button_watch(button_name):
-                    if self.shared:
-                        self.shared.queue_action(cancel)
+                    self.shared.queue_action(cancel)
 
                 # ARM NEW TIMER
                 watch_key = f"{self.id}:button:{button_name}:{int(time.time() * 1000)}"
@@ -122,29 +114,24 @@ class RobotKeypadMonitor:
                     on_timeout_msg=f"Robot pressing '{button_name_raw}' but the meter did not see this button pressed in the logs within {self.per_button_timeout_s}s",
                     severity="critical"
                 )
-                if self.shared:
-                    self.shared.queue_action(timer)
+                self.shared.queue_action(timer)
 
             elif action_type == "pressed":
                 if pressed is False:
                     # ROBOT TRIED BUT FAILED → cancel timer (prevents false timeout if meter never logs it)
-                    if self.verbose:
-                        print(f"{RED}[robot_keypad] robot reports FAILED press on '{button_name_raw}' → cancelling timer{RESET}")
+                    self.shared.log(f"robot reports FAILED press on '{button_name_raw}' → cancelling timer", color=RED)
 
                     for cancel in self._cancel_button_watch(button_name):
-                        if self.shared:
-                            self.shared.queue_action(cancel)
+                        self.shared.queue_action(cancel)
 
                 elif pressed is True:
                     # We expect the meter to log KEY_PRESSED → handle() will cancel the timer
-                    if self.verbose:
-                        print(f"{GREEN}[robot_keypad] robot reports SUCCESS on '{button_name_raw}' — waiting for meter log...{RESET}")
+                    self.shared.log(f"robot reports SUCCESS on '{button_name_raw}' — waiting for meter log...", color=GREEN)
     
     def _cancel_button_watch(self, button_name: str) -> List[Action]:
         watch_key = self._button_watches.pop(button_name, None)
         if watch_key:
-            if self.verbose:
-                print(f"{GREEN}[robot_keypad] CANCELLED timeout for {button_name}{RESET}")
+            self.shared.log(f"CANCELLED timeout for {button_name}", color=GREEN)
             return [CancelWatch(watch_key)]
         return []
     
@@ -182,9 +169,7 @@ class RobotKeypadMonitor:
             return None
         
         if self.ignore_repeats and m.group("ar").lower() == "true":
-            print(f"[{self.id}] ignoring auto-repeat for key {m.group('key')}")
-            if self.verbose:
-                print(f"[{self.id}] ignoring auto-repeat for key {m.group('key')}")
+            self.shared.log(f"ignoring auto-repeat for key {m.group('key')}")
             return None
     
         key = self._norm(m.group("key"))
@@ -200,13 +185,11 @@ class RobotKeypadMonitor:
 
         # Valid real key press detected!
         self.seen_counts[key] += 1
-        if self.verbose:
-            print(f"{GREEN}[{self.id}] '{key}' pressed -> {self.seen_counts[key]}/{self.required_per_key}{RESET}")
+        self.shared.log(f"'{key}' pressed -> {self.seen_counts[key]}/{self.required_per_key}", color=GREEN)
 
         # Cancel any pending per-button failure watchdog for this key
         if key in self._button_watches:
-            if self.verbose:
-                print(f"{GREEN}[{self.id}] meter confirmed press -> cancelling robot timeout for '{key}'{RESET}")
+            self.shared.log(f"meter confirmed press -> cancelling robot timeout for '{key}'", color=GREEN)
             actions.extend(self._cancel_button_watch(key))
 
         # Check for completion

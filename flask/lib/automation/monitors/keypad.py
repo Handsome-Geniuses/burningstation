@@ -1,9 +1,11 @@
 import re
 from typing import Optional, Iterable, Set, Dict, List, Tuple
+
 from lib.automation.monitors.models import (
     LogEvent, Action, StartWatch, CancelWatch, MarkSuccess, MetaUpdate,
     ProgressUpdate, BLUE, GREEN, YELLOW, RED, DIM, RESET
 )
+from lib.automation.shared_state import SharedState
 
 
 KEY_LAYOUTS: Dict[str, List[str]] = {
@@ -34,12 +36,14 @@ class KeypadMonitor:
         return layouts
 
     def __init__(self,
+                 shared: SharedState,
                  inactivity_timeout_s: float = 15.0,
                  layouts: Optional[List[str]] = None,
                  count: int = 1,
                  verbose: bool = False,
                  meter_type: Optional[str] = None,
                  firmwares: Optional[Dict[str, str]] = None):
+        self.shared = shared
         self.verbose = verbose
         self.timeout_s = float(inactivity_timeout_s)
         self.required_per_key = max(1, int(count))
@@ -68,10 +72,9 @@ class KeypadMonitor:
         self._allowed_src = {"KEY_PAD_2", "KBD_CONTROLLER"}
         self._last_progress: Tuple[int,int] = (-1, -1)
 
-        if self.verbose:
-            print(f"[monitors/keypad] meter_type={meter_type}, layouts={self.layouts}")
+        self.shared.log(f"[{self.id}] meter_type={meter_type}, layouts={self.layouts}")
         if not self.expected:
-            print(f"{YELLOW}[{self.id}] No expected keys resolved from layouts; will only run gap timer{RESET}")
+            self.shared.log(f"[{self.id}] No expected keys resolved from layouts; will only run gap timer", color=YELLOW)
             # Should add something to let test_keypad know to stop the test since there arent any keys to test
 
     @staticmethod
@@ -126,8 +129,7 @@ class KeypadMonitor:
 
     def handle(self, ev: LogEvent) -> Optional[Iterable[Action]]:
         msg = ev.msg
-        if self.verbose:
-            print(f"{DIM}[{self.id}] Handle: {msg}{RESET}")
+        self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
 
         m = self._re_line.search(msg)
         if not m:
@@ -136,8 +138,7 @@ class KeypadMonitor:
         key = self._norm(m.group("key"))
         src = self._norm(m.group("src"))
         if self._allowed_src and src not in self._allowed_src:
-            if self.verbose:
-                print(f"{DIM}[{self.id}] ignore src={src}{RESET}")
+            self.shared.log(f"[{self.id}] ignore src={src}", color=DIM)
             return None
 
         actions: List[Action] = []
@@ -145,8 +146,7 @@ class KeypadMonitor:
         actions.extend(self._arm_gap(ev, last=key))
 
         if self.expected and key not in self.expected:
-            if self.verbose:
-                print(f"{DIM}[{self.id}] non-required key={key}; gap re-armed{RESET}")
+            self.shared.log(f"[{self.id}] non-required key={key}; gap re-armed", color=DIM)
             return actions
 
         # Count this key
@@ -154,8 +154,7 @@ class KeypadMonitor:
         self.seen_counts[key] = c
         current_cycle, total_cycles = self._progress_counts()
         actions.append(ProgressUpdate(self.id, current_cycle, total_cycles))
-        if self.verbose:
-            print(f"{GREEN}[{self.id}] {key} #{c}/{self.required_per_key}; missing={self._missing_summary()}{RESET}")
+        self.shared.log(f"[{self.id}] {key} #{c}/{self.required_per_key}; missing={self._missing_summary()}", color=DIM)
 
         # Check each layout for “just completed”
         for layout, keys in self.layout_keys.items():
@@ -164,14 +163,12 @@ class KeypadMonitor:
             if keys and self._layout_satisfied(layout):
                 self.layout_done.add(layout)
                 actions.append(MetaUpdate(self.id, {"layouts_done": sorted(self.layout_done)}))
-                if self.verbose:
-                    total = len(keys)
-                    print(f"{GREEN}[{self.id}] layout '{layout}' completed ({total} keys × {self.required_per_key}){RESET}")
+                total = len(keys)
+                self.shared.log(f"[{self.id}] layout '{layout}' completed ({total} keys × {self.required_per_key})", color=GREEN)
 
         # Overall completion across all selected layouts
         if self._all_satisfied():
-            if self.verbose:
-                print(f"{GREEN}[{self.id}] all required keys reached {self.required_per_key} presses — success{RESET}")
+            self.shared.log(f"[{self.id}] all required keys reached {self.required_per_key} presses — success", color=GREEN)
             actions.extend(self._cancel_gap())
             actions.append(MarkSuccess(device=self.id, message="All required keypad presses observed"))
 

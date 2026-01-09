@@ -1,6 +1,9 @@
 import re
 from typing import Optional, List, Iterable, Dict
+
 from lib.automation.monitors.models import LogEvent, Action, StartWatch, CancelWatch, BLUE, GREEN, DIM, RESET
+from lib.automation.shared_state import SharedState
+
 
 class NFCMonitor:
     id = "nfc"
@@ -13,11 +16,13 @@ class NFCMonitor:
     re_ui_payload = re.compile(r'\bEMV_UI_OUTPUT\b.*?\bD=(?P<payload>[0-9A-Fa-f ]+)', re.IGNORECASE)
 
     def __init__(self,
+                 shared: SharedState,
                  timeout_on_s: float = 6.0,
                  timeout_off_s: float = 3.0,
                  verbose: bool = False,
                  meter_type: Optional[str] = None,
                  firmwares: Optional[Dict[str, str]] = None):
+        self.shared = shared
         self.timeout_on_s = timeout_on_s
         self.timeout_off_s = timeout_off_s
         self.verbose = verbose
@@ -43,8 +48,7 @@ class NFCMonitor:
 
     def _start_on_watch(self, ev: LogEvent):
         self._on_key = f"{self.id}:on:{int(ev.ts.timestamp())}"
-        if self.verbose:
-            print(f"{BLUE}[{self.id}] arm ON {self._on_key} t={self.timeout_on_s:.1f}s{RESET}")
+        self.shared.log(f"[{self.id}] arm ON {self._on_key} t={self.timeout_on_s:.1f}s", color=BLUE)
         yield StartWatch(
             key=self._on_key,
             timeout_s=self.timeout_on_s,
@@ -54,8 +58,7 @@ class NFCMonitor:
 
     def _start_off_watch(self, ev: LogEvent):
         self._off_key = f"{self.id}:off:{int(ev.ts.timestamp())}"
-        if self.verbose:
-            print(f"{BLUE}[{self.id}] arm OFF {self._off_key} t={self.timeout_off_s:.1f}s{RESET}")
+        self.shared.log(f"[{self.id}] arm OFF {self._off_key} t={self.timeout_off_s:.1f}s", color=BLUE)
         yield StartWatch(
             key=self._off_key,
             timeout_s=self.timeout_off_s,
@@ -65,16 +68,14 @@ class NFCMonitor:
 
     def _cancel_on(self):
         if self._on_key:
-            if self.verbose:
-                print(f"{GREEN}[{self.id}] ON confirmed; cancel {self._on_key}{RESET}")
+            self.shared.log(f"[{self.id}] ON confirmed; cancel {self._on_key}", color=GREEN)
             k = self._on_key
             self._on_key = None
             yield CancelWatch(k)
 
     def _cancel_off(self):
         if self._off_key:
-            if self.verbose:
-                print(f"{GREEN}[{self.id}] OFF confirmed; cancel {self._off_key}{RESET}")
+            self.shared.log(f"[{self.id}] OFF confirmed; cancel {self._off_key}", color=GREEN)
             k = self._off_key
             self._off_key = None
             yield CancelWatch(k)
@@ -108,16 +109,14 @@ class NFCMonitor:
 
     def handle(self, ev: LogEvent) -> Optional[Iterable[Action]]:
         msg = ev.msg
-        if self.verbose:
-            print(f"{DIM}[{self.id}] Handle: {msg}{RESET}")
+        self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
 
         # Request ON / OFF
         m = self.re_req_any.search(msg)
         if m:
             verb = m.group("verb").upper()
             toks = self._tokens(m.group("payload"))
-            if self.verbose:
-                print(f"{BLUE}[nfc] request {verb} D={' '.join(toks)}{RESET}")
+            self.shared.log(f"[{self.id}] request {verb} D={' '.join(toks)}", color=BLUE)
 
             if verb == "EMV_POWER":
                 # ON: 01 01 ...   OFF: 01 00 ...
@@ -139,8 +138,7 @@ class NFCMonitor:
         m = self.re_reply.search(msg)
         if m:
             toks = self._tokens(m.group("payload"))
-            if self.verbose:
-                print(f"{DIM}[nfc] reply EMV_POWER_REPLY ({len(toks)} bytes) D={' '.join(toks)}{RESET}")
+            self.shared.log(f"[{self.id}] reply EMV_POWER_REPLY ({len(toks)} bytes) D={' '.join(toks)}", color=DIM)
 
             state = self._decode_emv_power_reply(toks)
             if state == "on":
