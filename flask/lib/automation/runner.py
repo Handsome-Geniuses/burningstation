@@ -8,7 +8,7 @@ from datetime import datetime
 
 _SENTINEL = object()
 
-def _resolve_devices(program_name: str, automation_kwargs: dict):
+def _resolve_devices(program_name: str, automation_kwargs: dict, shared: SharedState):
     """
     Resolve which devices (monitors) to register for this run
     monitors override precedence:
@@ -18,10 +18,9 @@ def _resolve_devices(program_name: str, automation_kwargs: dict):
     override = automation_kwargs.pop("monitors", _SENTINEL)
     if override is not _SENTINEL:
         devices = override or []
-        print(f"[mon] override for {program_name!r}: {devices}")##
+        shared.log(f"using override monitors for {program_name!r}: {devices}")
         return devices
     devices = get_monitors(program_name)
-    print(f"[mon] defaults for {program_name!r}: {devices}")##
     return devices
 
 def run_test_job(
@@ -36,7 +35,7 @@ def run_test_job(
     Runs a test job: optionally spins up modular listener with selected devices,
     runs the selected test, and manages shared state.
     """
-    devices = _resolve_devices(program_name, automation_kwargs)
+    devices = _resolve_devices(program_name, automation_kwargs, shared)
 
     devices_enriched = []
     for dev_id, cfg in devices:
@@ -76,8 +75,10 @@ def run_test_job(
         test_func(meter, shared=shared, **automation_kwargs)
 
     except Exception as exc:
-        print(f"[run_test_job] Error running test {program_name!r} on {meter.host}: {exc}")
-        traceback.print_exc()
+        shared.log(f"Error running test {program_name!r} on {meter.host}: {type(exc).__name__}: {exc}", console=True)
+        for line in traceback.format_exc().splitlines():
+            shared.log(line, console=True)
+        
         shared.last_error = str(exc)
         shared.stop_event.set()
 

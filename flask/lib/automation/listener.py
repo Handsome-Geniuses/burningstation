@@ -8,6 +8,7 @@ from lib.automation.monitors.models import (
     LogEvent, Fault, StartWatch, CancelWatch, WatchdogManager, MarkSuccess, MetaUpdate,
     ProgressUpdate, Action, RESET, RED, GREEN, YELLOW, BLUE, DIM, GRAY
 )
+from lib.automation.shared_state import SharedState
 from lib.automation.monitors import create_monitor
 
 
@@ -32,7 +33,7 @@ USELESS_RES = [
 
 class Listener:
     def __init__(self,
-                 shared=None,
+                 shared: SharedState,
                  host: str = "192.168.5.61",
                  user: str = "root",
                  pswd: str = "",
@@ -63,11 +64,11 @@ class Listener:
         cmd = f'journalctl -u MS3_Platform.service -f -n0 -o json'
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        if self.verbose:
-            print(f"{DIM}[ssh] connecting {self.user}@{self.host} …{RESET}")
+        # self.shared.log(f"connecting {self.user}@{self.host}", color=DIM)
+
         client.connect(self.host, username=self.user, password=self.pswd)
-        if self.verbose:
-            print(f"{DIM}[ssh] connected; running: {cmd}{RESET}")
+        self.shared.log(f"connected; running: {cmd}", color=DIM)
+
         stdin, stdout, stderr = client.exec_command(cmd)
         return client, stdout
 
@@ -104,23 +105,9 @@ class Listener:
         msg = (ev.msg or "").replace("\n", " ").strip()
         return f"[{ts_str}] [{host}] | {msg}"
 
-    def _log_to_file(self, text: str) -> None:
-        try:
-            with open(self.logfile_path, 'a', encoding='utf-8') as f:
-                f.write(text + '\n')
-        except Exception as e:
-            print(f"[log_to_file] {e}")
-
     def _log_to_file(self, text:str) -> None:
-        if self.shared: self.shared.logs.append(text)
-            
-        else:
-            try:
-                with open(self.logfile_path, 'a', encoding='utf-8') as f:
-                    f.write(text + '\n')
-            except Exception as e:
-                print(f"[log_to_file] {e}")
-    
+        self.shared.log(text)
+
     def _is_useless(self, ev) -> bool:
         msg = (ev.msg or '').strip()
         for rx in USELESS_RES:
@@ -132,69 +119,56 @@ class Listener:
         if not faults:
             return
         for f in faults:
-            if self.verbose:
-                color = RED if f.severity == "critical" else YELLOW
-                print(f"{color}[FAULT] {f.device}: {f.message}{RESET}")
-            if self.shared:
-                dev_name = getattr(self.shared, "current_device", None) or f.device
-                if dev_name:
-                    self.shared.device_results[dev_name] = 'fail'
-        if self.shared and any(f.severity == "critical" for f in faults):
+            color = RED if f.severity == "critical" else YELLOW
+            self.shared.log(f"[FAULT] {f.device}: {f.message}", console=self.verbose, color=color)
+            dev_name = getattr(self.shared, "current_device", None) or f.device
+            if dev_name:
+                self.shared.device_results[dev_name] = 'fail'
+        if any(f.severity == "critical" for f in faults):
             self.shared.stop_event.set()
 
     def _process_action(self, a: Action, dev_id: str) -> None:
-        allowed = (self.shared.allowed_monitors if self.shared else set())
+        allowed = self.shared.allowed_monitors
         is_allowed = dev_id in allowed
 
         if isinstance(a, StartWatch):
             if is_allowed:
                 self.wd.start(a)
-                if self.verbose:
-                    print(f"{BLUE}[{dev_id}] watch start {a.key} ({a.timeout_s}s){RESET}")
+                self.shared.log(f"[{dev_id}] watch start {a.key} ({a.timeout_s}s)", console=self.verbose, color=BLUE)
             else:
-                if self.verbose:
-                    print(f"{YELLOW}[SUPPRESS][{dev_id}] watch start {a.key} ({a.timeout_s}s){RESET}")
+                self.shared.log(f"[SUPPRESS][{dev_id}] watch start {a.key} ({a.timeout_s}s)", console=self.verbose, color=YELLOW)
 
         elif isinstance(a, CancelWatch):
             if is_allowed:
                 self.wd.cancel(a.key)
-                if self.verbose:
-                    print(f"{DIM}[{dev_id}] watch cancel {a.key}{RESET}")
+                self.shared.log(f"[{dev_id}] watch cancel {a.key}", console=self.verbose, color=DIM)
             else:
-                if self.verbose:
-                    print(f"{YELLOW}[SUPPRESS][{dev_id}] watch cancel {a.key}{RESET}")
+                self.shared.log(f"[SUPPRESS][{dev_id}] watch cancel {a.key}", console=self.verbose, color=YELLOW)
 
         elif isinstance(a, MarkSuccess):
             if is_allowed:
-                if self.verbose:
-                    print(f"{GREEN}[{a.device}] success: {a.message}{RESET}")
-                if self.shared:
-                    self.shared.device_results[a.device] = "pass"
-                    if hasattr(self.shared, "success_event"):
-                        self.shared.success_event.set()
+                self.shared.log(f"[{a.device}] success: {a.message}", console=self.verbose, color=GREEN)
+                self.shared.device_results[a.device] = "pass"
+                if hasattr(self.shared, "success_event"):
+                    self.shared.success_event.set()
             else:
-                if self.verbose:
-                    print(f"{YELLOW}[SUPPRESS][{a.device}] success: {a.message}{RESET}")
+                self.shared.log(f"[SUPPRESS][{a.device}] success: {a.message}", console=self.verbose, color=YELLOW)
 
         elif isinstance(a, MetaUpdate):
             if is_allowed:
-                if self.shared:
-                    for k, v in (a.data or {}).items():
-                        self.shared.device_meta[k] = v
+                for k, v in (a.data or {}).items():
+                    self.shared.device_meta[k] = v
             else:
-                if self.verbose:
-                    print(f"{YELLOW}[SUPPRESS][{dev_id}] meta: {a.data}{RESET}")
+                self.shared.log(f"[SUPPRESS][{dev_id}] meta: {a.data}", console=self.verbose, color=YELLOW)
 
         elif isinstance(a, ProgressUpdate):
             if is_allowed:
-                if self.shared:
-                    ip = a.ip or self.host
-                    self.shared.broadcast_progress(
-                        ip, a.program, a.current_cycle, a.total_cycles
-                    )
+                ip = a.ip or self.host
+                self.shared.broadcast_progress(
+                    ip, a.program, a.current_cycle, a.total_cycles
+                )
             else:
-                if self.verbose:
-                    print(f"{YELLOW}[SUPPRESS][{dev_id}] progress: {a.current_cycle}/{a.total_cycles}{RESET}")
+                self.shared.log(f"[SUPPRESS][{dev_id}] progress: {a.current_cycle}/{a.total_cycles}", console=self.verbose, color=YELLOW)
 
     # ---- Main loop ----
     def run(self) -> None:
@@ -206,18 +180,14 @@ class Listener:
                     continue
 
                 # Check and process any _pending_actions
-                if self.shared:
-                    pending_actions = []
-                    with self.shared.lock:
-                        pending_actions = self.shared.__dict__.pop("_pending_actions", [])
-                    for a in pending_actions:
-                        dev_id = getattr(a, "device", None) or "unknown"
-                        self._process_action(a, dev_id)
+                pending_actions = []
+                with self.shared.lock:
+                    pending_actions = self.shared.__dict__.pop("_pending_actions", [])
+                for a in pending_actions:
+                    dev_id = getattr(a, "device", None) or "unknown"
+                    self._process_action(a, dev_id)
 
-                if self.shared and (
-                    self.shared.stop_event.is_set()
-                    or (getattr(self.shared, "end_listener", None) and self.shared.end_listener.is_set())
-                ):
+                if self.shared.stop_event.is_set() or self.shared.end_listener.is_set():
                     break
 
                 ev = self._parse_line(line)
@@ -227,8 +197,8 @@ class Listener:
                 if self.save_logs and not self._is_useless(ev):
                     self._log_to_file(self._format_human(ev))
 
-                if self.trace_lines and self.verbose:
-                    print(f"{GRAY}[line] {ev.msg}{RESET}")
+                # if self.trace_lines and self.verbose:
+                #     print(f"{GRAY}[line] {ev.msg}{RESET}")
 
                 # fan-out to registered monitors
                 for dev in list(self.devs.values()):
@@ -238,8 +208,7 @@ class Listener:
                     try:
                         is_interested = True if interested_fn is None else bool(interested_fn(ev.msg))
                     except Exception as e:
-                        if self.verbose:
-                            print(f"{YELLOW}[{dev.id}] interested() error: {e}{RESET}")
+                        self.shared.log(f"[{dev.id}] interested() error: {e}", console=True, color=YELLOW)
                         continue
 
                     if not is_interested:
@@ -249,8 +218,7 @@ class Listener:
                     try:
                         actions = list((getattr(dev, "handle", lambda _ : [])(ev)) or [])
                     except Exception as e:
-                        if self.verbose:
-                            print(f"{YELLOW}[{dev.id}] handle() error: {e}{RESET}")
+                        self.shared.log(f"[{dev.id}] handle() error: {e}", console=True, color=YELLOW)
                         continue
 
                     # Apply or suppress actions depending on allow-list
@@ -262,12 +230,9 @@ class Listener:
                 self._emit_faults(faults)
 
         finally:
-            if self.verbose:
-                print(f"{DIM}[ssh] closing …{RESET}")
             stdout.channel.close()
             client.close()
-            if self.verbose:
-                print(f"{DIM}[ssh] closed{RESET}")
+            self.shared.log(f"End of listener.run() main loop", color=DIM)
 
 
 # --- Helper to start a listener thread for a job ---
