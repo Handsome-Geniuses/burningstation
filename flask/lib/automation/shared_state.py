@@ -61,7 +61,7 @@ class SharedState:
         """Set the logfile path at job start. Creates directory if needed."""
         self._logfile_path = path
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        self.log("=== JOB LOG STARTED ===", console=False)
+        self.log("=== LOG STARTED ===", console=False)
 
     def log(self, message: str, *, console: bool = False, color: str = ''):
         """
@@ -115,10 +115,9 @@ class SharedState:
                 f.flush()  # Ensure OS writes to disk
             self._last_flush = time.time()
         except Exception as e:
-            print(f"[LOG ERROR] Failed to write to {self._logfile_path}: {e}")
+            print(f"Failed to write to {self._logfile_path}: {e}")
 
     def flush_logs(self):
         """Force flush remaining buffer — call at job end or cleanup"""
         with self._log_lock:
             self._flush_buffer()
-        self.log("=== JOB LOG ENDED ===", console=False)

@@ -101,9 +101,10 @@ class Listener:
     @staticmethod
     def _format_human(ev: LogEvent) -> str:
         ts_str = ev.ts.strftime("%b %d %H:%M:%S")
-        host = ev.hostname or "UNKNOWN"
+        # host = ev.hostname or "UNKNOWN"
         msg = (ev.msg or "").replace("\n", " ").strip()
-        return f"[{ts_str}] [{host}] | {msg}"
+        # return f"[{ts_str}] [{host}] | {msg}"
+        return msg
 
     def _log_to_file(self, text:str) -> None:
         self.shared.log(text)
