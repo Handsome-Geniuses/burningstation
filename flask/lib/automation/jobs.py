@@ -355,6 +355,7 @@ def job_done(meter_ip):
     st.log(f"Extras: {st.extras}")
     st.log(f"Last Error: {st.last_error}")
     st.log("=== END OF JOB ===")
+    st.flush_logs()
 
     insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
 

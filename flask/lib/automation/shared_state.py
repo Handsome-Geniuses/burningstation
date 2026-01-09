@@ -76,15 +76,14 @@ class SharedState:
             if caller:
                 filename = os.path.basename(caller.f_code.co_filename)
                 funcname = caller.f_code.co_name
-                lineno = caller.f_lineno
-                caller_tag = f"{filename}:{funcname}:{lineno}"
+                caller_tag = f"{filename}.{funcname}"
             else:
                 caller_tag = "unknown"
         finally:
             del frame
 
         timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-        line = f"[{timestamp}] [{caller_tag}] {message}"
+        line = f"[{timestamp}] {caller_tag}: {message}"
 
         self.logs.append(line)
 
@@ -100,9 +99,8 @@ class SharedState:
             if should_flush:
                 self._flush_buffer()
 
-        # console=True
         if console:
-            s = f'{color}{line}{"\033[0m"}' if color else line
+            s = f"{color}{line}\033[0m" if color else line
             print(s)
 
     def _flush_buffer(self):
