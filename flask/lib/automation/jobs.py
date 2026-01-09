@@ -240,29 +240,6 @@ def start_passive_job(meter_ip):
     response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"L"})
     start_job(meter_ip, "cycle_all", kwargs, verbose=True)
 
-def start_passive_job(meter_ip):
-    #! TEMP FOR LOGGING TESTING
-    meter = mm.get_meter(meter_ip)
-    modules = meter.module_info
-    has_nfc = "KIOSK_NFC" in modules
-    has_modem = "MK7_XE910" in modules
-    has_printer = "PRINTER" in modules
-    has_coin_shutter = "COIN_SHUTTER" in modules
-    has_screen_test = True  # all meters have screen test
-
-    kwargs = {
-        "nfc": 0 if has_nfc else 0,
-        "modem": 0 if has_modem else 0 ,
-        "printer": 0 if has_printer else 0,
-        "coin shutter": 1 if has_coin_shutter else 0,
-        "screen test": 0 if has_screen_test else 0,
-        "numBurnCycles": 1,
-        "numBurnDelay": 10   
-    }
-
-    response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"L"})
-    start_job(meter_ip, "cycle_all", kwargs, verbose=True)
-
 
 def start_physical_job(meter_ip, buttons=None):
     robot = RobotClient()
@@ -358,6 +335,7 @@ def job_done(meter_ip):
     st.flush_logs()
 
     insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
+    # if st.logs successfully inserted to db, rm log file maybe?
 
 
 if __name__ == "__main__":
