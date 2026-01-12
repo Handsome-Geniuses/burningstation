@@ -5,7 +5,7 @@ import time
 import inspect
 
 
-def test_cycle_coin_shutter(meter: SSHMeter, shared: SharedState = None, **kwargs):
+def test_cycle_coin_shutter(meter: SSHMeter, shared: SharedState, **kwargs):
     """Open/close coin shutter N times. Stops early if shared.stop_event is set."""
     func_name = inspect.currentframe().f_code.co_name
     count = int(kwargs.get("count", 3))
@@ -13,8 +13,8 @@ def test_cycle_coin_shutter(meter: SSHMeter, shared: SharedState = None, **kwarg
     subtest = bool(kwargs.get("subtest", False))
 
     for i in range(count):
-        print(f"{meter.host} {func_name} {i+1}/{count}")
-        if shared and not subtest:
+        shared.log(f"{meter.host} {func_name} {i+1}/{count}")
+        if not subtest:
             shared.broadcast_progress(meter.host, 'coin shutter', i+1, count)
 
         meter.coin_shutter_pulse(1,0.1,0.1)

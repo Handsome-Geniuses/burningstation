@@ -1,6 +1,8 @@
 import re
 from typing import Optional, Iterable, Dict
+
 from lib.automation.monitors.models import LogEvent, Action, StartWatch, CancelWatch, BLUE, GREEN, DIM, RESET
+from lib.automation.shared_state import SharedState
 
 
 class ModemMonitor:
@@ -10,11 +12,13 @@ class ModemMonitor:
     re_disconnected = re.compile(r'\bstate=S1_IDLE\b', re.IGNORECASE)
 
     def __init__(self,
+                 shared: SharedState,
                  connect_timeout_s: float = 20.0,
                  disconnect_timeout_s: float = 10.0,
                  verbose: bool = False,
                  meter_type: Optional[str] = None,
                  firmwares: Optional[Dict[str, str]] = None):
+        self.shared = shared
         self.connect_timeout_s = connect_timeout_s
         self.disconnect_timeout_s = disconnect_timeout_s
         self.verbose = verbose
@@ -27,8 +31,7 @@ class ModemMonitor:
 
     def _arm_connect(self, ev: LogEvent):
         self._connect_key = f"{self.id}:connect:{int(ev.ts.timestamp())}"
-        if self.verbose:
-            print(f"{BLUE}[{self.id}] arm CONNECT {self._connect_key} t={self.connect_timeout_s:.1f}s{RESET}")
+        self.shared.log(f"[{self.id}] arm CONNECT {self._connect_key} t={self.connect_timeout_s:.1f}s", color=BLUE)
         yield StartWatch(
             key=self._connect_key,
             timeout_s=self.connect_timeout_s,
@@ -38,8 +41,7 @@ class ModemMonitor:
 
     def _arm_disconnect(self, ev: LogEvent):
         self._disconnect_key = f"{self.id}:disconnect:{int(ev.ts.timestamp())}"
-        if self.verbose:
-            print(f"{BLUE}[{self.id}] arm DISCONNECT {self._disconnect_key} t={self.disconnect_timeout_s:.1f}s{RESET}")
+        self.shared.log(f"[{self.id}] arm DISCONNECT {self._disconnect_key} t={self.disconnect_timeout_s:.1f}s", color=BLUE)
         yield StartWatch(
             key=self._disconnect_key,
             timeout_s=self.disconnect_timeout_s,
@@ -49,24 +51,21 @@ class ModemMonitor:
 
     def _cancel_connect(self):
         if self._connect_key:
-            if self.verbose:
-                print(f"{GREEN}[{self.id}] CONNECTED; cancel {self._connect_key}{RESET}")
+            self.shared.log(f"[{self.id}] CONNECTED; cancel {self._connect_key}", color=GREEN)
             k = self._connect_key
             self._connect_key = None
             yield CancelWatch(k)
 
     def _cancel_disconnect(self):
         if self._disconnect_key:
-            if self.verbose:
-                print(f"{GREEN}[{self.id}] DISCONNECTED/IDLE; cancel {self._disconnect_key}{RESET}")
+            self.shared.log(f"[{self.id}] DISCONNECTED/IDLE; cancel {self._disconnect_key}", color=GREEN)
             k = self._disconnect_key
             self._disconnect_key = None
             yield CancelWatch(k)
 
     def handle(self, ev: LogEvent) -> Optional[Iterable[Action]]:
         msg = ev.msg
-        if self.verbose:
-            print(f"{DIM}[{self.id}] Handle: {msg}{RESET}")
+        self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
 
         # Request CONNECT / DISCONNECT
         m = self.re_req_cmd.search(msg)

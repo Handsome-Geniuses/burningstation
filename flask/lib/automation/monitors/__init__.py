@@ -1,5 +1,6 @@
 import inspect
 
+from lib.automation.shared_state import SharedState
 from .printer import PrinterMonitor
 from .nfc import NFCMonitor
 from .modem import ModemMonitor
@@ -17,14 +18,10 @@ REGISTRY = {
 }
 
 
-def create_monitor(kind: str, shared=None, **kwargs):
+def create_monitor(kind: str, shared: SharedState, **kwargs):
     try:
         Mod = REGISTRY[kind]
     except KeyError:
         raise ValueError(f"Unknown device '{kind}'")
     
-    init_args = {}
-    if "shared" in inspect.getfullargspec(Mod.__init__).args:
-        init_args["shared"] = shared
-
-    return Mod(**init_args, **kwargs)
+    return Mod(shared=shared, **kwargs)

@@ -1,8 +1,10 @@
 # jobs.py
+import os
 import threading
 import traceback
 from collections import deque
 from typing import Dict, Optional
+from datetime import datetime
 from lib.automation.tests import get_monitors
 from lib.automation.shared_state import SharedState
 from lib.automation.runner import run_test_job
@@ -65,8 +67,6 @@ class JobState(SharedState):
         self.status:StatusType              = "idle"        # idle|running|finished|error|cancelled
         self.result:ResultType              = None          # pass|fail|None
         self.last_error: Optional[str]      = None
-        # self.logs                           = deque(maxlen=400)
-        self.logs                           = []
         self.current_program: Optional[str] = None
 
     def reset(self):
@@ -102,7 +102,20 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     st = _state(meter_ip)
 
     if meter.status != 'ready': return False, "job already running"
+
     st.reset()
+    if log:
+        log_dir = "./logs"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        logfile_name = f"[{meter.hostname}]{ts}-{program_name}.log"
+        logfile_path = os.path.join(log_dir, logfile_name)
+        st.set_logfile(logfile_path)
+    else:
+        st.set_logfile(None)
+
+    st.log(f"STARTING JOB THREAD: {program_name} on {meter.hostname}", console=True)
+    st.log(f"Arguments: {kwargs}")
+
     meter.status = "busy"
     master.broadcast('status', {'ip':meter_ip, 'status': meter.status})
     st.status = "running"
@@ -132,15 +145,20 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
             st.result  = "pass" if not st.stop_event.is_set() else "fail"
             st.status  = "finished"
             st.last_error = ''
+            st.log(f"JOB FINISHED: {st.result.upper()}", console=verbose)
 
             meter.results[program_name] = st.result
-
+        
         except Exception as exc:
-            st.status, st.result = "error", "fail"
-            # st.result = "fail"
-            meter.results[program_name] = st.result
-
+            st.log(f"JOB CRASHED: {exc}", console=True)
+            
+            st.status = "error"
+            st.result = "fail"
             st.last_error = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+
+            meter.results[program_name] = st.result
+        finally:
+            st.flush_logs()
 
         dev_results = getattr(st, "device_results", {}) or {}
         dev = PROG2DEVICE.get(program_name)
@@ -149,19 +167,11 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
             if status is None or status == "running":
                 dev_results[dev] = 'fail' if st.stop_event.is_set() else 'pass'
 
-        if verbose:
-            print(f"[DEBUG] program={program_name} result={st.result}")
-            if dev_results:
-                print("[DEBUG] per-device:", {d:r for d,r in dev_results.items()})
-            else:
-                print("[DEBUG] per-device: none")
-
         meter.results.update(dev_results)
-        print(f'meter.results: {meter.results}')
+        st.log(f"meter.results: {meter.results}", console=True)
         master.broadcast('devices', {'ip': meter_ip, 'results': dev_results})
 
         meter.status = "ready"
-        result = 'success' if st.result == 'pass' else 'error' if st.result == 'fail' else 'info'
         meter.results[program_name] = st.result
         master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': ''})
 
@@ -186,6 +196,9 @@ def stop_job(meter_ip):
     if (st.status!='running' and meter.status!='busy'): 
         master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': 'tried stopping a non busy meter'})
 
+    st.log(f"JOB CANCELLED BY USER", console=True)
+    st.flush_logs()
+    
     st.stop_event.set()
     st.status = "cancelled"
     meter.status = "ready"
@@ -232,10 +245,11 @@ def start_physical_job(meter_ip, buttons=None):
     robot = RobotClient()
     robot.flush_event_queue()
 
-    time.sleep(10)
-    # print("askjdasldkjlaslkjasdkjldaskjldasdsakljdsakljajdkladklsajdsladjklsajklsajlasjdklaskdjlsajkl")
+    time.sleep(10) # wait for meter to move from L to M
     meter = mm.get_meter(meter_ip)
     modules = meter.module_info
+    meter.setup_custom_display()
+    
     has_solar = True
     has_coin_shutter = "COIN_SHUTTER" in modules
     has_nfc = "KIOSK_NFC" in modules
@@ -257,7 +271,6 @@ def start_physical_job(meter_ip, buttons=None):
 
     success, msg = start_job(meter_ip, "physical_cycle_all", kwargs, verbose=True)
     time.sleep(5) # incase robot needs to get out of there
-    # print(f"[START_PHYSICAL_JOB] start_job() returned: {success} | {msg}")
 
 
 
@@ -274,7 +287,6 @@ def job_done(meter_ip):
     overall_status = "pass"
     data = {"kwargs": st.extras.get('kwargs', {})}
         
-
     # for cycle all passive
     if current_program == 'cycle_all':
         response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"M"})
@@ -305,15 +317,26 @@ def job_done(meter_ip):
     # for cycle all physical
     elif current_program == "physical_cycle_all":
         response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"R"})
-        
-
+    
     # insertion time!
     job_data = {
         "name": current_program,
         "status": overall_status,
         "data": data
     }
+
+    st.log("=== JOB SUMMARY ===")
+    st.log(f"Overall Result: {overall_status.upper()}")
+    st.log(f"Program: {current_program}")
+    st.log(f"Device Results: {st.device_results}")
+    st.log(f"Device Metadata: {st.device_meta}")
+    st.log(f"Extras: {st.extras}")
+    st.log(f"Last Error: {st.last_error}")
+    st.log("=== END OF JOB ===")
+    st.flush_logs()
+
     insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
+    # if st.logs successfully inserted to db, rm log file maybe?
 
 
 if __name__ == "__main__":

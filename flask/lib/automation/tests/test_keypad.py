@@ -6,7 +6,7 @@ from lib.automation.helpers import check_stop_event, StopAutomation
 import inspect
 
 
-def test_keypad(meter: SSHMeter, shared: SharedState = None, **kwargs):
+def test_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     """
     Navigate to the keypad diagnostics page and wait for the keypad monitor
     to mark success (all required keys pressed) or a fault to stop the run.
@@ -15,8 +15,8 @@ def test_keypad(meter: SSHMeter, shared: SharedState = None, **kwargs):
     max_duration_s = int(kwargs.get("max_duration_s", 300))
     subtest = bool(kwargs.get("subtest", False))
 
-    print(f"{meter.host} {func_name} 1/1")
-    if shared and not subtest:
+    shared.log(f"{meter.host} {func_name} 1/1")
+    if not subtest:
         shared.broadcast_progress(meter.host, 'keypad', 1, 1)
 
     if meter.in_diagnostics():

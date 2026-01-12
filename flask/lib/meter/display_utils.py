@@ -57,7 +57,7 @@ def write_ui_overlay(meter: "SSHMeter") -> None:  # type: ignore [name-defined]
 
 def upload_image(meter: "SSHMeter", local_path: str, remote_name: str) -> None:  # type: ignore [name-defined]
     """Upload the local image PNG to the remote meter via chunked binary SSH, renaming to remote_name."""
-    print(f"upload_image: {local_path} | {remote_name}")
+    print(f"uploading asset to {meter.host} (local_path: {local_path} | remote_name: {remote_name})")
     if not os.path.exists(local_path):
         raise FileNotFoundError(f"Local file not found: {local_path}")
     
@@ -114,7 +114,7 @@ def is_custom_display_current(meter: "SSHMeter") -> bool:  # type: ignore [name-
 
     # charuco.png
     local_charuco = CHARUCO_PATHS.get(meter.meter_type)
-    print(f"local_charuco: {local_charuco}, meter_type: {meter.meter_type}")
+    print(f"checking if {meter.host} has custom display assets (meter_type: {meter.meter_type} | local_charuco: {local_charuco})")
     if not local_charuco or not os.path.exists(local_charuco):
         raise FileNotFoundError(f"No local Charuco PNG for meter_type='{meter.meter_type}'")
 

@@ -7,7 +7,7 @@ import inspect
 MIN_NFC_DELAY = 7.0
 
 
-def test_cycle_nfc(meter: SSHMeter, shared: SharedState = None, **kwargs):
+def test_cycle_nfc(meter: SSHMeter, shared: SharedState, **kwargs):
     """ Toggle ON/OFF NFC Reader N times. Stops early if shared.stop_event is set. """
     func_name = inspect.currentframe().f_code.co_name
     count = int(kwargs.get("count", 3))
@@ -30,8 +30,8 @@ def test_cycle_nfc(meter: SSHMeter, shared: SharedState = None, **kwargs):
     meter.press('ok')
 
     for i in range(count):
-        print(f"{meter.host} {func_name} {i+1}/{count}")
-        if shared and not subtest:
+        shared.log(f"{meter.host} {func_name} {i+1}/{count}")
+        if not subtest:
             shared.broadcast_progress(meter.host, 'nfc', i+1, count)
         
         meter.press('plus')

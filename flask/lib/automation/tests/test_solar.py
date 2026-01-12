@@ -11,11 +11,11 @@ from lib.automation.helpers import check_stop_event, StopAutomation
 # from lib.gpio import lm
 from lib.system import lm
 
-EXPECTED_MIN_INCREASE_mA = 100   # adjust based on your floodlight strength and panel size
-EXPECTED_DROP_TOLERANCE_mA = 30  # allow some hysteresis/slow decay
-MAX_BASELINE_DRIFT_mA = 30       # how much off-to-off can vary naturally
 
-def _parse_power_status_line(res: str) -> Dict:
+EXPECTED_MIN_INCREASE_mA = 100
+EXPECTED_DROP_TOLERANCE_mA = 30
+
+def _parse_power_status_line(res: str, shared: SharedState) -> Dict:
     """
     Parses a journalctl power status log line into structured data.
     
@@ -58,7 +58,7 @@ def _parse_power_status_line(res: str) -> Dict:
             key, value = pair.split('=', 1)
             power_data[key] = value
         else:
-            print(f"Warning: Skipping malformed key-value pair: '{pair}'")
+            shared.log(f"Warning: Skipping malformed key-value pair: '{pair}'")
 
     return {
         'datetime_str': datetime_str,
@@ -67,7 +67,7 @@ def _parse_power_status_line(res: str) -> Dict:
         'power_data': power_data
     }
 
-def get_latest_power_status(meter: SSHMeter):
+def get_latest_power_status(meter: SSHMeter, shared: SharedState):
     cmd = (
         "journalctl -u MS3_Platform.service -n 250 --no-pager | "
         "grep 'Meter:sProcessIPSBusMessage:' | "
@@ -75,9 +75,9 @@ def get_latest_power_status(meter: SSHMeter):
         "tail -1"
     )
     res = meter.cli(cmd)
-    parsed = _parse_power_status_line(res)
-    # for k,v in parsed.items():
-    #     print(f"{k}: {v}")
+    parsed = _parse_power_status_line(res, shared)
+    shared.log(f"Latest power status: {parsed}")
+    # for k,v in parsed.items(): print(f"{k}: {v}")
 
     return parsed
 
@@ -89,13 +89,18 @@ def get_numeric_value(val: str) -> float:
 
 
 
-def test_solar(meter: SSHMeter, shared: SharedState = None, **kwargs):
+def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
+    # TODO: Need to also check charge/solar voltage or something
     func_name = inspect.currentframe().f_code.co_name
+    subtest = bool(kwargs.get("subtest", False))
+
+    shared.log(f"{meter.host} {func_name} 1/1")
+    if not subtest:
+        shared.broadcast_progress(meter.host, func_name, 1, 1)
 
     baseline = get_latest_power_status(meter)
     charge_off_1 = get_numeric_value(baseline["power_data"]["ChargeCurrent"])
-    print(f"\n{baseline['power_data']}")
-    print(f"charge_off_1: {charge_off_1}")
+    shared.log(f"charge_off_1: {charge_off_1}")
     time.sleep(6)
 
     lm.lamp(0, True, 100)
@@ -104,8 +109,7 @@ def test_solar(meter: SSHMeter, shared: SharedState = None, **kwargs):
 
     illuminated = get_latest_power_status(meter)
     charge_on = get_numeric_value(illuminated["power_data"]["ChargeCurrent"])
-    print(f"\n{illuminated['power_data']}")
-    print(f"charge_on: {charge_on}")
+    shared.log(f"charge_on: {charge_on}")
 
     # Recovery (lights OFF again)
     lm.lamp(0, False, 100)
@@ -114,39 +118,17 @@ def test_solar(meter: SSHMeter, shared: SharedState = None, **kwargs):
 
     recovery = get_latest_power_status(meter)
     charge_off_2 = get_numeric_value(recovery["power_data"]["ChargeCurrent"])
-    print(f"\n{recovery['power_data']}")
-    print(f"charge_off_2: {charge_off_2}")
+    shared.log(f"charge_off_2: {charge_off_2}")
 
     # Must significantly increase when light is on
     if charge_on <= charge_off_1 + EXPECTED_MIN_INCREASE_mA:
-        raise StopAutomation("ChargeCurrent did not increase enough when light turned on")
+        s = "ChargeCurrent did not increase enough when light turned on"
+        shared.log(s)
+        raise StopAutomation(s)
 
     # Must drop back close to baseline when light removed
     if charge_off_2 > charge_on - EXPECTED_DROP_TOLERANCE_mA:
-        raise StopAutomation("ChargeCurrent did not decrease after light turned off")
-
-    # # Optional: recovery should be similar to initial baseline
-    # if abs(charge_off_2 - charge_off_1) > MAX_BASELINE_DRIFT_mA:
-    #     raise StopAutomation("Baseline drifted — possible temperature effect or load change")
-
-
-
-if __name__ == "__main__":
-    try:
-        meter = SSHMeter("192.168.169.33")
-        # meter = SSHMeter("192.168.69.110")
-        meter.connect()
-        
-        power_status = get_latest_power_status(meter)
-        print(power_status["power_data"]["ChargeCurrent"])
-
-        # test_solar(meter)
-
-
-    except Exception as e:
-        print(f"error: {e}")
-        pass
-    finally:
-        try: meter.close()
-        except: pass
+        s = "ChargeCurrent did not decrease after light turned off"
+        shared.log(s)
+        raise StopAutomation(s)
 
