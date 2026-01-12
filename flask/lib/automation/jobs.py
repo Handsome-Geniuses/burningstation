@@ -245,10 +245,11 @@ def start_physical_job(meter_ip, buttons=None):
     robot = RobotClient()
     robot.flush_event_queue()
 
-    time.sleep(10)
-    # print("askjdasldkjlaslkjasdkjldaskjldasdsakljdsakljajdkladklsajdsladjklsajklsajlasjdklaskdjlsajkl")
+    time.sleep(10) # wait for meter to move from L to M
     meter = mm.get_meter(meter_ip)
     modules = meter.module_info
+    meter.setup_custom_display()
+    
     has_solar = True
     has_coin_shutter = "COIN_SHUTTER" in modules
     has_nfc = "KIOSK_NFC" in modules
