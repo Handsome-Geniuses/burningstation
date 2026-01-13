@@ -20,6 +20,10 @@ def test_cycle_print(meter: SSHMeter, shared: SharedState, **kwargs):
         if not subtest:
             shared.broadcast_progress(meter.host, 'printer', i+1, count)
         
+        if meter.meter_type == "ms3":
+            shared.log("Toggle printer OFF and back ON to avoid a jam")
+            meter.reboot_printer()
+        
         meter.printer_test()
         time.sleep(delay)
         check_stop_event(shared)

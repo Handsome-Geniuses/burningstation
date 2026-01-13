@@ -53,22 +53,26 @@ def __test_cycle_ms25_ui(meter: SSHMeter, shared: SharedState, payment_type: str
         if shared:
             shared.broadcast_progress(meter.host, 'cycle_ui', i+1, count)
         
+        if meter.meter_type == "ms3":
+            shared.log("Toggle printer OFF and back ON to avoid a jam")
+            meter.reboot_printer()
+        
         meter.press('a')
         check_stop_event(shared)
 
         # License plate entry
-        meter.press('back', 1)
+        meter.press('back', delay=1)
         plate = random_plate()
         for char in plate:
-            meter.press(char, 0.5)
-        meter.press('Enter', 1)
+            meter.press(char, delay=0.5)
+        meter.press('Enter', delay=1)
         check_stop_event(shared)
 
         # Time entry
         for _ in range(random.randint(3, 10)):
-            meter.press('plus', 0.5)
+            meter.press('plus', delay=0.5)
         time.sleep(0.25)
-        meter.press('enter', 1)
+        meter.press('enter', delay=1)
         time.sleep(0.25)
         check_stop_event(shared)
 
@@ -80,7 +84,7 @@ def __test_cycle_ms25_ui(meter: SSHMeter, shared: SharedState, payment_type: str
         elif payment_type == PaymentType.CONTACT_CREDIT_CARD:
             meter.custom_busdev("CONTACT", "Contact Credit Card")
             time.sleep(1)
-            meter.press('Enter', 2)
+            meter.press('Enter', delay=2)
         else:
             raise ValueError(f"Unknown payment type: {payment_type}")
 
@@ -99,17 +103,17 @@ def __test_cycle_msx_ui(meter: SSHMeter, shared: SharedState, payment_type: str,
         check_stop_event(shared)
 
         # License plate entry
-        meter.press('back', 0.5)
+        meter.press('back', delay=0.5)
         plate = random_plate()
         for char in plate:
-            meter.press(char, 0.5)
-        meter.press('Enter', 1)
+            meter.press(char, delay=0.5)
+        meter.press('Enter', delay=1)
         check_stop_event(shared)
 
         # Time entry
         for _ in range(random.randint(3, 10)):
-            meter.press('plus', 0.5)
-        meter.press('enter', 1)
+            meter.press('plus', delay=0.5)
+        meter.press('enter', delay=1)
         check_stop_event(shared)
 
         # Payment logic
