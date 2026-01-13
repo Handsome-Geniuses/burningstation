@@ -616,6 +616,12 @@ fclose($myfile);
         cmd = f"echo 'cmd.main.printer:{s}' | socat - UDP:127.0.0.1:8008"
         _, out, err = self.safe_exec_command(cmd)
 
+    def reboot_printer(self):
+        self.toggle_printer(False)
+        time.sleep(0.1)
+        self.toggle_printer(True)
+        time.sleep(5)
+
     def toggle_coin_shutter(self, b: bool):
         s = "15" if b else "14"
         cmd = f"echo 'cmd.main.coinshutter:setflags={s}' | socat - UDP:127.0.0.1:8008"
