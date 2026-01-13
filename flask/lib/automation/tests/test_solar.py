@@ -98,7 +98,7 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     if not subtest:
         shared.broadcast_progress(meter.host, func_name, 1, 1)
 
-    baseline = get_latest_power_status(meter)
+    baseline = get_latest_power_status(meter, shared)
     charge_off_1 = get_numeric_value(baseline["power_data"]["ChargeCurrent"])
     shared.log(f"charge_off_1: {charge_off_1}")
     time.sleep(6)
@@ -107,7 +107,7 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     lm.lamp(1, True, 100)
     time.sleep(8)
 
-    illuminated = get_latest_power_status(meter)
+    illuminated = get_latest_power_status(meter, shared)
     charge_on = get_numeric_value(illuminated["power_data"]["ChargeCurrent"])
     shared.log(f"charge_on: {charge_on}")
 
@@ -116,7 +116,7 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     lm.lamp(1, False, 100)
     time.sleep(8)
 
-    recovery = get_latest_power_status(meter)
+    recovery = get_latest_power_status(meter, shared)
     charge_off_2 = get_numeric_value(recovery["power_data"]["ChargeCurrent"])
     shared.log(f"charge_off_2: {charge_off_2}")
 
