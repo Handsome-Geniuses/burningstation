@@ -113,15 +113,31 @@ def physical_cycle_all(
                 if not shared.stop_event.is_set():
                     shared.device_results[device_name] = "pass"
 
-            except StopAutomation:
+            except StopAutomation as e:
                 shared.log(f"{device_name} subtest fail due to StopAutomation")
                 shared.device_results[device_name] = "fail"
-                raise
+
+                try:
+                    robot.send_command("abort_program")
+                    shared.log("Robot program aborted due to subtest failure")
+                except Exception as abort_e:
+                    shared.log(f"Failed to abort robot program: {abort_e}")
+
+                raise e
+            
             except Exception as e:
                 shared.log(f"{device_name} subtest fail due to {e}")
                 shared.device_results[device_name] = "fail"
                 shared.last_error = str(e)
-                raise
+
+                try:
+                    robot.send_command("abort_program")
+                    shared.log("Robot program aborted due to subtest failure")
+                except Exception as abort_e:
+                    shared.log(f"Failed to abort robot program: {abort_e}")
+
+                raise e
+
             finally:
                 shared.current_device = None
                 shared.set_allowed(set(), reason="Subtest complete")
