@@ -8,6 +8,7 @@ from prettyprint import STYLE, prettyprint as print
 def __print(*args,**kwargs): pass
 if not secrets.VERBOSE: print = __print
 import time
+import datetime
 
 class METERMANAGER:
     MeterClass = SSHMeter
@@ -18,23 +19,41 @@ class METERMANAGER:
     __splash: Set[str] = set()
     __attempts:dict[str, int] = {}
     __booted:dict[str, int] = {}
+    __stale_counts: Dict[str, int] = {}
+    __STALE_THRESHOLD = 3
 
     meters: Dict[str, MeterClass] = {}
 
     class __FINALLY(Exception): pass
-
+    
+    @staticmethod
+    def _timestamp():
+        return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    
     @classmethod
     def __on_stale(cls, ip: str):
-        cls.meters[ip].close()
-        cls.meters.pop(ip,None)
-        cls.__meters.discard(ip)
-        cls.__splash.discard(ip)
-        cls.__booted.pop(ip,None)
+        cls.__stale_counts[ip] = cls.__stale_counts.get(ip, 0) + 1
+        
+        if cls.__stale_counts[ip] >= cls.__STALE_THRESHOLD:
+            if ip in cls.meters:
+                hn = cls.meters[ip].hostname if hasattr(cls.meters[ip], 'hostname') else "unknown"
+                print(f"[{cls._timestamp()}] STALE: {ip} ({hn}) removed from known meters", fg="#888800")
+            
+            cls.meters[ip].close()
+            cls.meters.pop(ip,None)
+            cls.__meters.discard(ip)
+            cls.__splash.discard(ip)
+            cls.__booted.pop(ip,None)
+            cls.__stale_counts.pop(ip, None)
+            cls.__attempts.pop(ip, None)
+        else:
+            print(f"[{cls._timestamp()}] STALE (ignored): {ip} failed ping, count={cls.__stale_counts[ip]}/{cls.__STALE_THRESHOLD}", fg="#888800")
 
     @classmethod
     def __on_fresh(cls, ip: str):
         if ip in cls.__meters: return False
         if cls.__attempts.get(ip,0) >= cls.__limit: return False
+
         meter = METERMANAGER.MeterClass(ip)
         try:
             meter.connect()
@@ -84,7 +103,7 @@ class METERMANAGER:
                 # send FUN data
                 # try: send_fun_meter(meter)
                 # except: pass
-                print(f"✅ [{hn}] detected success", fg="#00ff00", style=STYLE.BOLD)
+                print(f"✅ [{hn}-{ip}] added to active meters", fg="#00ff00", style=STYLE.BOLD)
                 return True
 
                 
@@ -111,6 +130,12 @@ class METERMANAGER:
         current = set(ip_scanner.get_ips(base=cls.base, start=cls.address_range[0], end=cls.address_range[1], timeout=1, concurrency=500))
         fresh = current - cls.__meters
         stale = cls.__meters - current
+        # if fresh: print(f"[{cls._timestamp()}] REFRESH: Found {len(fresh)} new live IPs: {sorted(fresh)}", fg="#000fff")
+        # if stale: print(f"[{cls._timestamp()}] REFRESH: {len(stale)} stale IPs: {sorted(stale)}", fg="#000fff")
+
+        alive_known = current & cls.__meters
+        for ip in alive_known:
+            cls.__stale_counts.pop(ip, None)
 
         valid_fresh = set()
 
