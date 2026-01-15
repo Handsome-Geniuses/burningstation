@@ -2,6 +2,7 @@ import os
 import base64
 import hashlib
 from typing import Optional
+import json
 
 BASE_DIR = os.path.join(os.path.dirname(__file__), "assets")
 UI_PAGE_PATH = os.path.join(BASE_DIR, "UIPage.php")
@@ -53,6 +54,20 @@ def write_ui_overlay(meter: "SSHMeter") -> None:  # type: ignore [name-defined]
     
     # Use heredoc for multi-line text upload
     cmd = f"cat <<'EOF' > {remote_path}\n{json_content}EOF"
+    meter.cli(cmd)
+
+def write_results_json(meter: "SSHMeter", results_data: dict) -> None:  # type: ignore [name-defined]
+    """
+    Write the provided results data as JSON to the remote meter via SSH command.
+    Expected dict struct setup with SSHMeter.update_display_results
+    """
+    json_content = json.dumps(results_data, indent=2)
+    
+    remote_path = "/var/volatile/html/results.json"
+    ensure_remote_dir(meter, "/var/volatile/html")
+    
+    # Use heredoc for multi-line text upload
+    cmd = f"cat <<'EOF' > {remote_path}\n{json_content}\nEOF\n" # EOF needs to be on its own line for it to be recognized by the shell
     meter.cli(cmd)
 
 def upload_image(meter: "SSHMeter", local_path: str, remote_name: str) -> None:  # type: ignore [name-defined]

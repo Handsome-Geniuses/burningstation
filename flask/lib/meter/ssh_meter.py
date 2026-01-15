@@ -13,9 +13,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from lib.utils import secrets
+from lib.automation.shared_state import SharedState
 from lib.meter.display_utils import (
     CHARUCO_PATHS, write_ui_page, write_ui_overlay,
-    upload_image, is_custom_display_current, get_apriltag_path
+    upload_image, is_custom_display_current,
+    get_apriltag_path, write_results_json
 )
 
 
@@ -846,8 +848,8 @@ fclose($myfile);
         return resp
 
     def set_ui_mode(self, mode: str) -> None:
-        """Set the UI mode on the meter (stock, banner, or charuco)."""
-        valid_modes = {"stock", "banner", "charuco", "apriltag"}
+        """Set the UI mode on the meter."""
+        valid_modes = {"stock", "banner", "charuco", "apriltag", "results"}
         if mode.lower() not in valid_modes:
             raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}.")
         cmd = f"echo '{mode.lower()}' | tee /var/volatile/html/.ui_mode"
@@ -883,6 +885,58 @@ fclose($myfile);
             upload_image(self, local_apriltag, "apriltag")
         finally:
             self.status = "ready"
+
+    def update_display_results(self, shared: SharedState) -> None:
+        """Update the meter's _display_results dict based on the completed job in SharedState."""
+        program_name = shared.current_program
+        if program_name not in ["cycle_all", "physical_cycle_all"]:
+            shared.log(f"unable to update display results for program_name = '{program_name}'", console=True)
+            return
+
+        # Initialize _display_results if it doesn't exist yet
+        if not hasattr(self, "_display_results") or self._display_results is None:
+            self._display_results = {
+                "overall_result": "N/A",
+                "meter_info": {
+                    "IP": self.host,
+                    "Hostname": self.hostname,
+                    "Meter Type": self.meter_type
+                },
+                "passive": {
+                    "device_results": {},
+                    "other_info": {}
+                },
+                "physical": {
+                    "device_results": {},
+                    "other_info": {}
+                }
+            }
+
+        section = "passive" if program_name == "cycle_all" else "physical"
+
+        # device_results
+        dev_res = {k: str(v).lower() for k, v in shared.device_results.items()}
+        self._display_results[section]["device_results"] = dev_res
+
+        # other_info
+        other_info = {k: str(v) for k, v in shared.device_meta.items()}
+        other_info["Error"] = shared.last_error or "None"
+        self._display_results[section]["other_info"] = other_info
+
+        # compute overall_result: FAIL if any device result is "fail" (across both sections)
+        all_dev_res = {
+            **self._display_results["passive"]["device_results"],
+            **self._display_results["physical"]["device_results"]
+        }
+        if any(v == "fail" for v in all_dev_res.values()):
+            self._display_results["overall_result"] = "FAIL"
+        else:
+            self._display_results["overall_result"] = "PASS"
+
+        write_results_json(self, self._display_results)
+        self.set_ui_mode("results")
+
+
 
 
 if __name__ == "__main__":
