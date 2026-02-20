@@ -885,13 +885,51 @@ fclose($myfile);
             self.status = "ready"
 
 
+
+def generate_mock_details_for_copy_paste(meter: SSHMeter):
+    meter.connect()
+
+    info = meter.get_info()
+
+    modules = info["module_info"]
+    firmwares = info["firmwares"]
+    hostname = info["hostname"]
+    system_versions = info["system_versions"]
+    meter_type = info["meter_type"]
+
+    print("__modules = {")
+    for name, data in modules.items():
+        print(f'    "{name}": {{"ver": {data["ver"]}, "mod": {data["mod"]}, "id": {data["id"]}}},')
+    print("}")
+
+    print("__firmwares = {")
+    for name, ver in firmwares.items():
+        print(f'    "{name}": "{ver}",')
+    print("}")
+
+    print(f'__hn = "{hostname}"')
+    print(f'__svs = {json.dumps(system_versions)}')
+    print(f'__meter_type = "{meter_type}"')
+
+    meter.close()
+
 if __name__ == "__main__":
     # meter = SSHMeter("192.168.137.159")
     # print(meter.get_hostname())
 
     delay = 7
-    meter = SSHMeter("192.168.137.180")
-    meter.connect()
+    meter = SSHMeter("192.168.169.20")
+
+    generate_mock_details_for_copy_paste(meter)
+
+
+    # meter.connect()
+    # print(meter.hostname)
+    # import json
+    # print("=========================================")
+    # print(json.dumps(meter.get_info(),indent=4))
+    # print("=========================================")
+    # print(json.dumps(meter.get_power_info(),indent=4))
     # meter.goto_nfc()
     # print(meter.get_info())
     # meter.press('plus')
@@ -905,4 +943,4 @@ if __name__ == "__main__":
     # print(res)
     # firmwares = meter.system_versions
     # print("Firmwares:", firmwares)
-    meter.close()
+    # meter.close()

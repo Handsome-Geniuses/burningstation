@@ -5,6 +5,6 @@ from lib.utils import secrets
 from prettyprint import STYLE, prettyprint as print
 
 
-ips = ip_scanner.get_ips(base=secrets.BASE, start=2, end=254, timeout=1, concurrency=500)
+ips = ip_scanner.get_ips(base=secrets.BASE, start=10, end=40, timeout=1, concurrency=500)
 
 print(ips)
