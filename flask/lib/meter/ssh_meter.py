@@ -861,17 +861,21 @@ fclose($myfile);
         """Automate uploading/writing UIPage.php, ui_overlay.json, and type-specific Charuco PNG."""
         if self.status != "ready":
             raise RuntimeError("Meter is not ready")
-        
+
+        meter_type = self.meter_type
+        print(f"[setup_custom_display] host={self.host} status={self.status} connected={self.connected} meter_type={meter_type}")
+
+        if is_custom_display_current(self):
+            # print(f"[setup_custom_display] display already current, forcing diagnostics refresh then returning")
+            self.force_diagnostics()
+            return
+
         self.status = "busy"
         try:
-            if is_custom_display_current(self):
-                self.force_diagnostics()
-                return
-
+            # print(f"[setup_custom_display] uploading assets ({meter_type})")
             write_ui_page(self)
             write_ui_overlay(self)
             
-            meter_type = self.meter_type
             local_charuco = CHARUCO_PATHS.get(meter_type)
             if not local_charuco:
                 raise ValueError(f"No Charuco path defined for meter_type: {meter_type}")
@@ -879,10 +883,13 @@ fclose($myfile);
                 raise FileNotFoundError(f"Local Charuco file not found: {local_charuco}")
             upload_image(self, local_charuco, "charuco")
 
-            local_apriltag = get_apriltag_path(self)
-            if not os.path.exists(local_apriltag):
-                raise FileNotFoundError(f"Local Apriltag file not found: {local_apriltag}")
-            upload_image(self, local_apriltag, "apriltag")
+            ## Apriltag isn't currently used in the system so we can skip it for now, but leaving the code here in case we want to add it back in later
+            # local_apriltag = get_apriltag_path(self)
+            # if not os.path.exists(local_apriltag):
+            #     raise FileNotFoundError(f"Local Apriltag file not found: {local_apriltag}")
+            # upload_image(self, local_apriltag, "apriltag")
+
+            print(f"[setup_custom_dsplay] done for {self.host}")
         finally:
             self.status = "ready"
 
