@@ -66,7 +66,7 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             shared.log(f"received program_done event with data: {data}...")
             raise StopAutomation(f"received program_done event earlier than expected. data={data}...")
         
-        if not is_on_keypad_page(meter):
+        if not is_on_keypad_page(meter, shared):
             shared.log(f"No longer on keypad page... re-navigating to keypad page")
             meter.goto_keypad()
 

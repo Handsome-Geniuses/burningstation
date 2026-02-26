@@ -101,6 +101,16 @@ function overlay_results() {
         .test-grid { grid-template-columns: 1fr; grid-template-rows: auto; gap: 32px; }
         .test-column > * { grid-row: auto; }
       }
+      
+      .other-info-section .result-item {
+        margin-left: 20px;
+      }
+      .other-info-section .result-item .key {
+        text-align: left;
+        min-width: 0;
+        flex: 0 0 auto;
+        padding-right: 5px;
+      }
     </style>
     <div id="results-overlay">';
 
