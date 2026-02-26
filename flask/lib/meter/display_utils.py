@@ -2,6 +2,7 @@ import os
 import base64
 import hashlib
 from typing import Optional
+import json
 
 BASE_DIR = os.path.join(os.path.dirname(__file__), "assets")
 UI_PAGE_PATH = os.path.join(BASE_DIR, "UIPage.php")
@@ -55,9 +56,23 @@ def write_ui_overlay(meter: "SSHMeter") -> None:  # type: ignore [name-defined]
     cmd = f"cat <<'EOF' > {remote_path}\n{json_content}EOF"
     meter.cli(cmd)
 
+def write_results_json(meter: "SSHMeter", results_data: dict) -> None:  # type: ignore [name-defined]
+    """
+    Write the provided results data as JSON to the remote meter via SSH command.
+    Expected dict struct setup with SSHMeter.update_display_results
+    """
+    json_content = json.dumps(results_data, indent=2)
+    
+    remote_path = "/var/volatile/html/results.json"
+    ensure_remote_dir(meter, "/var/volatile/html")
+    
+    # Use heredoc for multi-line text upload
+    cmd = f"cat <<'EOF' > {remote_path}\n{json_content}\nEOF\n" # EOF needs to be on its own line for it to be recognized by the shell
+    meter.cli(cmd)
+
 def upload_image(meter: "SSHMeter", local_path: str, remote_name: str) -> None:  # type: ignore [name-defined]
     """Upload the local image PNG to the remote meter via chunked binary SSH, renaming to remote_name."""
-    print(f"uploading asset to {meter.host} (local_path: {local_path} | remote_name: {remote_name})")
+    print(f"uploading asset to {meter.host} (local_path: {local_path} | remote_name: {remote_name} | connected: {meter.connected})")
     if not os.path.exists(local_path):
         raise FileNotFoundError(f"Local file not found: {local_path}")
     
@@ -79,6 +94,7 @@ def upload_image(meter: "SSHMeter", local_path: str, remote_name: str) -> None: 
         printf_arg = ''.join(f'\\x{x}' for x in hex_pairs)
         cmd = f"printf '{printf_arg}' >> {remote_path}"
         meter.cli(cmd)
+        # print(f"Uploaded chunk {i // chunk_size + 1} (bytes {i}-{min(i + chunk_size, len(binary_content))}) to {meter.host}")
 
 # ------------------------------------------------------------------
 # Detection helpers
@@ -127,19 +143,20 @@ def is_custom_display_current(meter: "SSHMeter") -> bool:  # type: ignore [name-
         # print(f"remote_charuco_hash: {remote_charuco_hash}")
         return False
 
-    # apriltag.png
-    local_apriltag = get_apriltag_path(meter)
-    if not local_apriltag or not os.path.exists(local_apriltag):
-        raise FileNotFoundError(f"No local Apriltag PNG for meter.host='{meter.host}'")
+    ## Apriltag isn't currently used in the system so we can skip it for now, but leaving the code here in case we want to add it back in later
+    # # apriltag.png
+    # local_apriltag = get_apriltag_path(meter)
+    # if not local_apriltag or not os.path.exists(local_apriltag):
+    #     raise FileNotFoundError(f"No local Apriltag PNG for meter.host='{meter.host}'")
 
-    with open(local_apriltag, "rb") as f:
-        expected_apriltag_hash = hashlib.sha256(f.read()).hexdigest()
+    # with open(local_apriltag, "rb") as f:
+    #     expected_apriltag_hash = hashlib.sha256(f.read()).hexdigest()
 
-    remote_apriltag_hash = _remote_sha256(meter, "/var/volatile/html/content/Images/apriltag.png")
-    if remote_apriltag_hash != expected_apriltag_hash:
-        # print(f"expected_apriltag_hash: {expected_apriltag_hash}")
-        # print(f"remote_apriltag_hash: {remote_apriltag_hash}")
-        return False
+    # remote_apriltag_hash = _remote_sha256(meter, "/var/volatile/html/content/Images/apriltag.png")
+    # if remote_apriltag_hash != expected_apriltag_hash:
+    #     # print(f"expected_apriltag_hash: {expected_apriltag_hash}")
+    #     # print(f"remote_apriltag_hash: {remote_apriltag_hash}")
+    #     return False
 
     return True
 

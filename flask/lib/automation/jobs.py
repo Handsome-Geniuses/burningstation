@@ -335,6 +335,7 @@ def job_done(meter_ip):
     st.log("=== END OF JOB ===")
     st.flush_logs()
 
+    meter.update_display_results(st)
     insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
     # if st.logs successfully inserted to db, rm log file maybe?
 

@@ -13,9 +13,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from lib.utils import secrets
+from lib.automation.shared_state import SharedState
 from lib.meter.display_utils import (
     CHARUCO_PATHS, write_ui_page, write_ui_overlay,
-    upload_image, is_custom_display_current, get_apriltag_path
+    upload_image, is_custom_display_current,
+    get_apriltag_path, write_results_json
 )
 
 
@@ -846,8 +848,8 @@ fclose($myfile);
         return resp
 
     def set_ui_mode(self, mode: str) -> None:
-        """Set the UI mode on the meter (stock, banner, or charuco)."""
-        valid_modes = {"stock", "banner", "charuco", "apriltag"}
+        """Set the UI mode on the meter."""
+        valid_modes = {"stock", "banner", "charuco", "apriltag", "results"}
         if mode.lower() not in valid_modes:
             raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}.")
         cmd = f"echo '{mode.lower()}' | tee /var/volatile/html/.ui_mode"
@@ -859,17 +861,21 @@ fclose($myfile);
         """Automate uploading/writing UIPage.php, ui_overlay.json, and type-specific Charuco PNG."""
         if self.status != "ready":
             raise RuntimeError("Meter is not ready")
-        
+
+        meter_type = self.meter_type
+        print(f"[setup_custom_display] host={self.host} status={self.status} connected={self.connected} meter_type={meter_type}")
+
+        if is_custom_display_current(self):
+            # print(f"[setup_custom_display] display already current, forcing diagnostics refresh then returning")
+            self.force_diagnostics()
+            return
+
         self.status = "busy"
         try:
-            if is_custom_display_current(self):
-                self.force_diagnostics()
-                return
-
+            # print(f"[setup_custom_display] uploading assets ({meter_type})")
             write_ui_page(self)
             write_ui_overlay(self)
             
-            meter_type = self.meter_type
             local_charuco = CHARUCO_PATHS.get(meter_type)
             if not local_charuco:
                 raise ValueError(f"No Charuco path defined for meter_type: {meter_type}")
@@ -877,12 +883,67 @@ fclose($myfile);
                 raise FileNotFoundError(f"Local Charuco file not found: {local_charuco}")
             upload_image(self, local_charuco, "charuco")
 
-            local_apriltag = get_apriltag_path(self)
-            if not os.path.exists(local_apriltag):
-                raise FileNotFoundError(f"Local Apriltag file not found: {local_apriltag}")
-            upload_image(self, local_apriltag, "apriltag")
+            ## Apriltag isn't currently used in the system so we can skip it for now, but leaving the code here in case we want to add it back in later
+            # local_apriltag = get_apriltag_path(self)
+            # if not os.path.exists(local_apriltag):
+            #     raise FileNotFoundError(f"Local Apriltag file not found: {local_apriltag}")
+            # upload_image(self, local_apriltag, "apriltag")
+
+            print(f"[setup_custom_dsplay] done for {self.host}")
         finally:
             self.status = "ready"
+
+    def update_display_results(self, shared: SharedState) -> None:
+        """Update the meter's _display_results dict based on the completed job in SharedState."""
+        program_name = shared.current_program
+        if program_name not in ["cycle_all", "physical_cycle_all"]:
+            shared.log(f"unable to update display results for program_name = '{program_name}'", console=True)
+            return
+
+        # Initialize _display_results if it doesn't exist yet
+        if not hasattr(self, "_display_results") or self._display_results is None:
+            self._display_results = {
+                "overall_result": "N/A",
+                "meter_info": {
+                    "IP": self.host,
+                    "Hostname": self.hostname,
+                    "Meter Type": self.meter_type
+                },
+                "passive": {
+                    "device_results": {},
+                    "other_info": {}
+                },
+                "physical": {
+                    "device_results": {},
+                    "other_info": {}
+                }
+            }
+
+        section = "passive" if program_name == "cycle_all" else "physical"
+
+        # device_results
+        dev_res = {k: str(v).lower() for k, v in shared.device_results.items()}
+        self._display_results[section]["device_results"] = dev_res
+
+        # other_info
+        other_info = {k: str(v) for k, v in shared.device_meta.items()}
+        other_info["Error"] = shared.last_error or "None"
+        self._display_results[section]["other_info"] = other_info
+
+        # compute overall_result: FAIL if any device result is "fail" (across both sections)
+        all_dev_res = {
+            **self._display_results["passive"]["device_results"],
+            **self._display_results["physical"]["device_results"]
+        }
+        if any(v == "fail" for v in all_dev_res.values()):
+            self._display_results["overall_result"] = "FAIL"
+        else:
+            self._display_results["overall_result"] = "PASS"
+
+        write_results_json(self, self._display_results)
+        self.set_ui_mode("results")
+
+
 
 
 
