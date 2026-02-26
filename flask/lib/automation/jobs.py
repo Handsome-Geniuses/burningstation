@@ -248,6 +248,7 @@ def start_physical_job(meter_ip, buttons=None):
     time.sleep(10) # wait for meter to move from L to M
     meter = mm.get_meter(meter_ip)
     modules = meter.module_info
+    meter.set_brightness(15)
     meter.setup_custom_display()
     
     has_solar = True
@@ -314,8 +315,7 @@ def job_done(meter_ip):
         if states['mode'] == 'auto':
             start_physical_job(meter.host)
 
-    # for cycle all physical
-    elif current_program == "physical_cycle_all":
+    elif current_program == "physical_cycle_all" and states["mode"] == "auto":
         response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"R"})
     
     # insertion time!
