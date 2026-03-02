@@ -75,6 +75,9 @@ context = (args.cert_file,  args.key_file) if args.key_file and args.cert_file e
 if __name__ == "__main__": 
     # import tools.mock # for testing with mock meters
     import lib.system.tasks as tasks
+    from lib.robot.robot_power import pulse_robot_remote_on
+
+    pulse_robot_remote_on()
 
     print("=========================================================================", fg="#888888", style=STYLE.DIM)
     print(f">> Server running at {args.host}:{args.port}", fg="#888888", style=STYLE.DIM)

@@ -34,6 +34,7 @@ pcfio = [
 
 # pin values here so we know whats used and unused
 pin_emergency = 23
+pin_robot_remote_on = 24
 pins_mds = [17, 27, 22, 10, 9, 11, 5, 6, 13]
 pin_buzzer = 12
 
@@ -57,6 +58,7 @@ pcfio_tower = (pcfio[__pcfio_tower_index], *__pcfio_tower_pins)
 
 
 emergency = HWGPIO(pin_emergency, "in", "pull_up")
+robot_remote_on = HWGPIO(pin_robot_remote_on, "out")
 
 HWGPIO_MONITOR.start()
 
@@ -67,6 +69,7 @@ def __keyme(**kwargs):
 
 hardware_map = __keyme(
     pin_emergency=pin_emergency,
+    pin_robot_remote_on=pin_robot_remote_on,
     pins_mds=pins_mds,
     pin_buzzer=pin_buzzer,
     pwm_lamps=pwm_lamps,
