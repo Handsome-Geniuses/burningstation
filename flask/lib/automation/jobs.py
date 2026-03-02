@@ -312,9 +312,6 @@ def job_done(meter_ip):
         if st.last_error: data["last_error"] = st.last_error
         if st.device_meta: data["device_meta"] = st.device_meta
 
-        if states['mode'] == 'auto':
-            start_physical_job(meter.host)
-
     elif current_program == "physical_cycle_all" and states["mode"] == "auto":
         response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"R"})
     
@@ -338,6 +335,10 @@ def job_done(meter_ip):
     meter.update_display_results(st)
     insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
     # if st.logs successfully inserted to db, rm log file maybe?
+
+    if current_program == "cycle_all" and states["mode"] == "auto":
+        start_physical_job(meter.host)
+
 
 
 if __name__ == "__main__":
