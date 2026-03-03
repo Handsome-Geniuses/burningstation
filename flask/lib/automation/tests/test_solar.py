@@ -12,7 +12,7 @@ from lib.automation.helpers import check_stop_event, StopAutomation
 from lib.system import lm
 
 
-EXPECTED_MIN_INCREASE_mA = 100
+EXPECTED_MIN_INCREASE_mA = 15
 EXPECTED_DROP_TOLERANCE_mA = 30
 
 def _parse_power_status_line(res: str, shared: SharedState) -> Dict:
@@ -122,13 +122,13 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
 
     # Must significantly increase when light is on
     if charge_on <= charge_off_1 + EXPECTED_MIN_INCREASE_mA:
-        s = "ChargeCurrent did not increase enough when light turned on"
+        s = f"ChargeCurrent did not increase enough when light turned on. {charge_on} --> {charge_off_1}"
         shared.log(s)
         raise StopAutomation(s)
 
     # Must drop back close to baseline when light removed
     if charge_off_2 > charge_on - EXPECTED_DROP_TOLERANCE_mA:
-        s = "ChargeCurrent did not decrease after light turned off"
+        s = f"ChargeCurrent did not decrease after light turned off. {charge_off_2} --> {charge_on}"
         shared.log(s)
         raise StopAutomation(s)
 

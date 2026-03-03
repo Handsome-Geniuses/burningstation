@@ -1,6 +1,8 @@
 {
     "code-runner.executorMap": {
-        "python": "PYTHONPATH=~/repos/burningstation/flask python -u",
+        // "python": "PYTHONPATH=~/repos/burningstation/flask python -u",
+        "python": "PYTHONPATH=/app python -u"
+
     },
     "files.exclude": {
         "**/node_modules": true,

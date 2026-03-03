@@ -1,35 +1,7 @@
 from unittest.mock import patch
 from lib.meter.ssh_meter import SSHMeter
-
-# __modules = {
-#     "MK7_XE910": {"ver": 2209, "mod": 3, "id": 76011859},
-#     "KIOSK_NFC": {"ver": 2227, "mod": 0, "id": 75006081},
-#     "MSPM_PWR": {"ver": 2219, "mod": 2, "id": 84000022},
-#     "KBD_CONTROLLER": {"ver": 2217, "mod": 4, "id": 93001636},
-#     "MK7_RFID": {"ver": 2101, "mod": 0, "id": 0},
-#     "COIN_SHUTTER": {"ver": 2215, "mod": 1, "id": 61000071},
-#     "KIOSK_III": {"ver": 146, "mod": 0, "id": 39078272},
-#     "MK7_VALIDATOR": {"ver": 2217, "mod": 2, "id": 71000694},
-#     "BNA": {"ver": 2207, "mod": 2, "id": 97000490},
-#     "PRINTER": {"ver": 2205, "mod": 1, "id": 50002729},
-#     "KEY_PAD_2": {"ver": 1, "mod": 0, "id": 89002160},
-# }
-# __firmwares = {
-#     "MK7_XE910": "2209",
-#     "KIOSK_NFC": "2227",
-#     "MSPM_PWR": "2219",
-#     "KBD_CONTROLLER": "2217",
-#     "MK7_RFID": "2101",
-#     "COIN_SHUTTER": "2215",
-#     "KIOSK_III": "146",
-#     "MK7_VALIDATOR": "2217",
-#     "BNA": "2207",
-#     "PRINTER": "2205",
-#     "KEY_PAD_2": "1"
-# }
-# __hn = "30000269"
-# __svs = {"system_version": "48792", "system_sub_version": "29"}
-# __meter_type = "ms2.5"
+import time
+# from prettyprint import print
 
 __modules = {
     "MK7_XE910": {"ver": 2209, "mod": 3, "id": 76000166},
@@ -88,7 +60,22 @@ patch("lib.meter.ssh_meter.SSHMeter.__init__", mock_init).start()
 # # patch.object(SSHMeter, "get_power_info", mock_get_power_info).start()
 # patch("lib.meter.SSHMeter.get_power_info", mock_get_power_info).start()
 
+def __mock_start_physical_job(meter_up, buttons=None):
+    # print("[👽 mock_start_physical_job] starting ...", fg="#004400", style=1)
+    # for i in range(3):
+    #     time.sleep(1)
+    #     print("[👽 mock_start_physical_job] working ...", fg="#004400", style=1)
+    # print("[👽 mock_start_physical_job]  ... DONE!", fg="#004400", style=1)
+    print("[👽 mock_start_physical_job] starting ...")
+    for i in range(3):
+        time.sleep(1)
+        print("[👽 mock_start_physical_job] working ...")
+    print("[👽 mock_start_physical_job] ... DONE!")
+patch("lib.automation.jobs.start_physical_job", __mock_start_physical_job).start()
 
 if __name__ == "__main__":
-    meter = SSHMeter("192.168.169.20")
-    print(meter.get_info())
+    # meter = SSHMeter("192.168.169.20")
+    # print(meter.get_info())
+    from lib.automation.jobs import start_physical_job
+    start_physical_job("","")
+ 
