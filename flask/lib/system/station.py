@@ -8,6 +8,9 @@ from lib.system import states
 import time
 from prettyprint import STYLE, prettyprint as print
 from asyncdec import AsyncManager, async_fire_and_forget
+from lib.robot.robot_client import RobotClient
+
+
 am_station = AsyncManager("am_station")
 
 def emergency_event(p:HWGPIO):
@@ -15,6 +18,16 @@ def emergency_event(p:HWGPIO):
     else: am_station.emergency_reset()
 HWGPIO_MONITOR.add_listener(emergency,emergency_event)
 
+def check_robot_busy():
+    robot = RobotClient()
+    # check robot to see if station is safe to move
+    is_robot_busy = robot.send_command("get_system_status")['robot_busy']
+    # print("is_robot_busy: ", is_robot_busy)
+    if is_robot_busy:
+        robot.send_command("abort_program")
+        time.sleep(2)
+        robot.run_program("run_safe_home")
+        time.sleep(10)
 
 @async_fire_and_forget
 def on_load_start():
@@ -177,6 +190,7 @@ def load_R_to_M(**kwargs):
 # handle moving meter around
 # ----------------------------------------------------   
 def on_load(**kwargs):
+    check_robot_busy()
     option = kwargs.get('type', None)
     if option==None: return
     elif option=='L': return load_L()
