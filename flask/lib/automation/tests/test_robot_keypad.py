@@ -35,7 +35,11 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     if not subtest:
         shared.broadcast_progress(meter.host, func_name, 1, 1)
 
-    meter.set_ui_mode("charuco")
+    if kwargs.get("charuco_frame") is None:
+        meter.set_ui_mode("charuco")
+    else:
+        meter.set_ui_mode("banner")
+    
     robot = RobotClient()
     job_id = robot.run_program("run_button_press", {"meter_type": meter.meter_type, "meter_id": meter.hostname, "buttons": buttons, "charuco_frame": kwargs.get("charuco_frame"), "test": False})
     # job_id = robot.run_program("temp_button_press", {"buttons": buttons, "meter_type": meter.meter_type, "meter_id": meter.hostname})

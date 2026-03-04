@@ -16,7 +16,11 @@ def test_robot_coin_shutter(meter: SSHMeter, shared: SharedState, **kwargs):
     if not subtest:
         shared.broadcast_progress(meter.host, func_name, 1, 1)
 
-    meter.set_ui_mode("charuco")
+    if kwargs.get("charuco_frame") is None:
+        meter.set_ui_mode("charuco")
+    else:
+        meter.set_ui_mode("banner")
+    
     robot = RobotClient()
     job_id = robot.run_program("run_coin_shutter", {"meter_type": meter.meter_type, "meter_id": meter.hostname, "charuco_frame": kwargs.get("charuco_frame")})
 

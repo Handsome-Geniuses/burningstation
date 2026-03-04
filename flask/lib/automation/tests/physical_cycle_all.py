@@ -34,6 +34,10 @@ def run_and_retrieve_charuco(robot: RobotClient, meter: SSHMeter, shared: Shared
     data = robot.send_command("get_charuco_frame")
     charuco_frame = data.get("charuco_frame", None)
     shared.log(f"charuco_frame to use for runs: {charuco_frame}")
+
+    if charuco_frame is not None:
+        meter.set_ui_mode("banner")
+
     return charuco_frame
 
 
