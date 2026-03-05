@@ -20,7 +20,7 @@ class METERMANAGER:
     __attempts:dict[str, int] = {}
     __booted:dict[str, int] = {}
     __stale_counts: Dict[str, int] = {}
-    __STALE_THRESHOLD = 3
+    __STALE_THRESHOLD = 2
 
     meters: Dict[str, MeterClass] = {}
 
