@@ -18,16 +18,25 @@ def emergency_event(p:HWGPIO):
     else: am_station.emergency_reset()
 HWGPIO_MONITOR.add_listener(emergency,emergency_event)
 
-def check_robot_busy():
+def check_robot_clear_of_conveyor():
     robot = RobotClient()
-    # check robot to see if station is safe to move
-    is_robot_busy = robot.send_command("get_system_status")['robot_busy']
-    # print("is_robot_busy: ", is_robot_busy)
-    if is_robot_busy:
-        robot.send_command("abort_program")
-        time.sleep(2)
-        robot.run_program("run_safe_home")
-        time.sleep(10)
+
+    resp = robot.send_command("is_in_conveyor_path")
+    busy = resp.get("busy", False)
+    in_bbox = resp.get("in_conveyor_bbox", False)
+
+    if not busy and not in_bbox:
+        return
+
+    try:
+        if busy:
+            robot.send_command("abort_program")
+            robot.wait_until_ready(wait_timeout=5)
+
+        job_id = robot.run_program("run_safe_home")
+        robot.wait_for_event("program_done", job_id=job_id, timeout=10)
+    except Exception as e:
+        raise RuntimeError(f"Robot failed to clear conveyor zone: {e}")
 
 @async_fire_and_forget
 def on_load_start():
@@ -190,8 +199,11 @@ def load_R_to_M(**kwargs):
 # handle moving meter around
 # ----------------------------------------------------   
 def on_load(**kwargs):
-    check_robot_busy()
     option = kwargs.get('type', None)
+    
+    if option in ("M", "R", "ALL", "ML", "RM"):
+        check_robot_clear_of_conveyor()
+    
     if option==None: return
     elif option=='L': return load_L()
     elif option=='M': return load_M()
