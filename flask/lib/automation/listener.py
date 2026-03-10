@@ -121,7 +121,9 @@ class Listener:
             return
         for f in faults:
             color = RED if f.severity == "critical" else YELLOW
-            self.shared.log(f"[FAULT] {f.device}: {f.message}", console=self.verbose, color=color)
+            s = f"[FAULT] {f.device}: {f.message}"
+            self.shared.log(s, console=self.verbose, color=color)
+            self.shared.last_error = s
             dev_name = getattr(self.shared, "current_device", None) or f.device
             if dev_name:
                 self.shared.device_results[dev_name] = 'fail'

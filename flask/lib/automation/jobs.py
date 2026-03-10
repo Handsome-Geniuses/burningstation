@@ -144,7 +144,6 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
             )
             st.result  = "pass" if not st.stop_event.is_set() else "fail"
             st.status  = "finished"
-            st.last_error = ''
             st.log(f"JOB FINISHED: {st.result.upper()}", console=verbose)
 
             meter.results[program_name] = st.result

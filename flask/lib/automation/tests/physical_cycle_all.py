@@ -120,6 +120,7 @@ def physical_cycle_all(
             except StopAutomation as e:
                 shared.log(f"{device_name} subtest fail due to StopAutomation")
                 shared.device_results[device_name] = "fail"
+                shared.last_error = str(e)
 
                 try:
                     robot.send_command("abort_program")
