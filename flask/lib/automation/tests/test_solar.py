@@ -94,55 +94,6 @@ def get_numeric_value(val: str) -> float:
     return float(numeric_part)
 
 
-
-def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
-    # TODO: Need to also check charge/solar voltage or something
-    func_name = inspect.currentframe().f_code.co_name
-    subtest = bool(kwargs.get("subtest", False))
-
-    shared.log(f"{meter.host} {func_name} 1/1")
-    if not subtest:
-        shared.broadcast_progress(meter.host, func_name, 1, 1)
-
-    baseline = get_latest_power_status(meter, shared)
-    charge_off_1 = get_numeric_value(baseline["power_data"]["ChargeCurrent"])
-    shared.log(f"charge_off_1: {charge_off_1}")
-
-    time.sleep(6)
-
-    lm.lamp(0, True, 100)
-    lm.lamp(1, True, 100)
-    time.sleep(8)
-
-    illuminated = get_latest_power_status(meter, shared)
-    charge_on = get_numeric_value(illuminated["power_data"]["ChargeCurrent"])
-    shared.log(f"charge_on: {charge_on}")
-
-    # Recovery (lights OFF again)
-    lm.lamp(0, False, 100)
-    lm.lamp(1, False, 100)
-    time.sleep(8)
-
-    recovery = get_latest_power_status(meter, shared)
-    charge_off_2 = get_numeric_value(recovery["power_data"]["ChargeCurrent"])
-    shared.log(f"charge_off_2: {charge_off_2}")
-
-    # Must significantly increase when light is on
-    if charge_on <= charge_off_1 + EXPECTED_MIN_INCREASE_mA:
-        s = f"ChargeCurrent did not increase enough when light turned on. {charge_on} --> {charge_off_1}"
-        shared.log(s)
-        raise StopAutomation(s)
-
-    # Must drop back close to baseline when light removed
-    if charge_off_2 > charge_on - EXPECTED_DROP_TOLERANCE_mA:
-        s = f"ChargeCurrent did not decrease after light turned off. {charge_off_2} --> {charge_on}"
-        shared.log(s)
-        raise StopAutomation(s)
-    
-
-
-
-
 def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     # TODO: Need to also check charge/solar voltage or something
     func_name = inspect.currentframe().f_code.co_name
@@ -163,7 +114,7 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     shared.log(f"charge_off_1: {charge_off}")
 
 
-    # ---- Lamp 1 ----
+    # ---- Lamp 1 (rear) ----
     # on
     time.sleep(1)
     lm.lamp(0, True, 100)
@@ -179,6 +130,9 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     charge_off_l1 = get_numeric_value(recovery["power_data"]["ChargeCurrent"])
     shared.log(f"charge_off_l1: {charge_off_l1}")
 
+    delta_l1 = charge_on_l1 - charge_off
+    shared.device_meta["solar"] = f"rear {delta_l1:.0f} mA"
+
     # check
     if charge_on_l1 <= charge_off + EXPECTED_MIN_INCREASE_mA_1:
         s = f"ChargeCurrent did not increase enough when lamp 1 turned on. {charge_on_l1} --> {charge_off}"
@@ -189,7 +143,7 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
         shared.log(s)
         raise StopAutomation(s)
 
-    # ---- Lamp 2 ----
+    # ---- Lamp 2 (top) ----
     # on
     time.sleep(1)
     lm.lamp(1, True, 100)
@@ -205,6 +159,9 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     charge_off_l2 = get_numeric_value(recovery["power_data"]["ChargeCurrent"])
     shared.log(f"charge_off_l2: {charge_off_l2}")
 
+    delta_l2 = charge_on_l2 - charge_off
+    shared.device_meta["solar"] = f"rear {delta_l1:.0f} mA, top {delta_l2:.0f} mA"
+
     #check
     if charge_on_l2 <= charge_off + EXPECTED_MIN_INCREASE_mA_2:
         s = f"ChargeCurrent did not increase enough when lamp 2 turned on. {charge_on_l2} --> {charge_off}"
@@ -214,11 +171,3 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
         s = f"ChargeCurrent did not decrease after lamp 2 turned off. {charge_off_l2} --> {charge_on_l2}"
         shared.log(s)
         raise StopAutomation(s)
-    
-
-    
-    
-    
-    
-
-    

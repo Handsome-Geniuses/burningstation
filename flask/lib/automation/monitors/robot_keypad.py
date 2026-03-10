@@ -25,7 +25,7 @@ class RobotKeypadMonitor:
         buttons: List[str],
         count: int = 1,
         inactivity_timeout_s: float = 30.0,
-        per_button_timeout_s: float = 20.0,   # how long to wait between robot pressing event and meter log confirmation
+        per_button_timeout_s: float = 5,   # how long to wait between robot pressing event and meter log confirmation
         verbose: bool = False,
         **kwargs
     ):

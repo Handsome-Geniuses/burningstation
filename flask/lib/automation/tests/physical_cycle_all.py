@@ -18,7 +18,7 @@ PHYSICAL_DEVICES = [
     ("robot_keypad",   test_robot_keypad,       {
         "buttons": ["1","2","3"],
         "inactivity_timeout_s": 40.0,
-        "per_button_timeout_s": 25.0,
+        "per_button_timeout_s": 5.0,
     }),
 ]
 
@@ -120,6 +120,7 @@ def physical_cycle_all(
             except StopAutomation as e:
                 shared.log(f"{device_name} subtest fail due to StopAutomation")
                 shared.device_results[device_name] = "fail"
+                shared.last_error = str(e)
 
                 try:
                     robot.send_command("abort_program")
