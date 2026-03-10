@@ -18,7 +18,7 @@ PHYSICAL_DEVICES = [
     ("robot_keypad",   test_robot_keypad,       {
         "buttons": ["1","2","3"],
         "inactivity_timeout_s": 40.0,
-        "per_button_timeout_s": 25.0,
+        "per_button_timeout_s": 5.0,
     }),
 ]
 
