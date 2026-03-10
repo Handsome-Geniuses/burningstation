@@ -237,7 +237,9 @@ def start_passive_job(meter_ip):
         "numBurnDelay": 10   
     }
 
-    response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"L"})
+    if states["mode"] == "auto":
+        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"L"})
+    
     start_job(meter_ip, "cycle_all", kwargs, verbose=True)
 
 
@@ -284,14 +286,17 @@ def job_done(meter_ip):
     if meter.db_id==None: return
     meter.results.pop(current_program)
 
+    if current_program == "cycle_all" and states["mode"] == "auto":
+        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"M"})
+    elif current_program == "physical_cycle_all" and states["mode"] == "auto":
+        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"R"})
+
     # initial 
     overall_status = "pass"
     data = {"kwargs": st.extras.get('kwargs', {})}
-        
+    
     # for cycle all passive
     if current_program == 'cycle_all':
-        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"M"})
-
         for key, val in meter.results.items():
             if val == "fail":
                 overall_status = "fail"
@@ -312,8 +317,11 @@ def job_done(meter_ip):
         if st.last_error: data["last_error"] = st.last_error
         if st.device_meta: data["device_meta"] = st.device_meta
 
-    elif current_program == "physical_cycle_all" and states["mode"] == "auto":
-        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"R"})
+    elif current_program == "physical_cycle_all":
+        for key, val in st.device_results.items():
+            if val == "fail":
+                overall_status = "fail"
+                break
     
     # insertion time!
     job_data = {
