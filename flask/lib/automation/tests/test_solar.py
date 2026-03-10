@@ -179,6 +179,9 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     charge_off_l1 = get_numeric_value(recovery["power_data"]["ChargeCurrent"])
     shared.log(f"charge_off_l1: {charge_off_l1}")
 
+    delta_l1 = charge_on_l1 - charge_off
+    shared.device_meta["solar"] = f"L1 +{delta_l1:.0f} mA"
+
     # check
     if charge_on_l1 <= charge_off + EXPECTED_MIN_INCREASE_mA_1:
         s = f"ChargeCurrent did not increase enough when lamp 1 turned on. {charge_on_l1} --> {charge_off}"
@@ -204,6 +207,9 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     recovery = get_latest_power_status(meter, shared)
     charge_off_l2 = get_numeric_value(recovery["power_data"]["ChargeCurrent"])
     shared.log(f"charge_off_l2: {charge_off_l2}")
+
+    delta_l2 = charge_on_l2 - charge_off
+    shared.device_meta["solar"] = f"L1 +{delta_l1:.0f} | L2 +{delta_l2:.0f} mA"
 
     #check
     if charge_on_l2 <= charge_off + EXPECTED_MIN_INCREASE_mA_2:
