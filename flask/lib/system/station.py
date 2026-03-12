@@ -31,7 +31,7 @@ def check_robot_clear_of_conveyor():
     try:
         if busy:
             robot.send_command("abort_program")
-            robot.wait_until_ready(wait_timeout=5)
+            robot.wait_until_ready(wait_timeout=10)
 
         job_id = robot.run_program("run_safe_home")
         robot.wait_for_event("program_done", job_id=job_id, timeout=10)
