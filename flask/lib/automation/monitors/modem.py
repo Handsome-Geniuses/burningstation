@@ -1,7 +1,7 @@
 import re
 from typing import Optional, Iterable, Dict
 
-from lib.automation.monitors.models import LogEvent, Action, StartWatch, CancelWatch, BLUE, GREEN, DIM, RESET
+from lib.automation.monitors.models import LogEvent, Action, StartWatch, CancelWatch, MetaUpdate, BLUE, GREEN, DIM, RESET
 from lib.automation.shared_state import SharedState
 
 
@@ -10,6 +10,10 @@ class ModemMonitor:
     re_req_cmd = re.compile(r'\bMODEM:\s*SendRemote:\s*CMD\.(?P<cmd>CONNECT|DISCONNECT)\b', re.IGNORECASE)
     re_connected    = re.compile(r'\bstate=S4_CONNECTED\b', re.IGNORECASE)
     re_disconnected = re.compile(r'\bstate=S1_IDLE\b', re.IGNORECASE)
+    re_modem_info = re.compile(r'\bEVENT_TYPE_MODEMINFO:\s*(?P<body>.*)', re.IGNORECASE)
+    re_csq = re.compile(r'\bcsq\s*:\s*(?P<rssi>\d+)\s*,\s*(?P<ber>\d+)\b', re.IGNORECASE)
+    re_ccid = re.compile(r'\bccid\s*:\s*(?P<ccid>\S+)', re.IGNORECASE)
+    re_modem_version = re.compile(r'\bmodemVersion\s*:\s*(?P<modem_version>\S+)', re.IGNORECASE)
 
     def __init__(self,
                  shared: SharedState,
@@ -63,9 +67,36 @@ class ModemMonitor:
             self._disconnect_key = None
             yield CancelWatch(k)
 
+    def _parse_modem_info(self, msg: str) -> Optional[Dict[str, str]]:
+        m = self.re_modem_info.search(msg)
+        if not m:
+            return None
+
+        body = m.group("body")
+        modem_info: Dict[str, str] = {}
+
+        csq_match = self.re_csq.search(body)
+        if csq_match:
+            modem_info["rssi"] = csq_match.group("rssi")
+            modem_info["ber"] = csq_match.group("ber")
+
+        ccid_match = self.re_ccid.search(body)
+        if ccid_match:
+            modem_info["ccid"] = ccid_match.group("ccid")
+
+        modem_version_match = self.re_modem_version.search(body)
+        if modem_version_match:
+            modem_info["modemVersion"] = modem_version_match.group("modem_version")
+
+        return modem_info or None
+
     def handle(self, ev: LogEvent) -> Optional[Iterable[Action]]:
         msg = ev.msg
         self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
+
+        modem_info = self._parse_modem_info(msg)
+        if modem_info:
+            yield MetaUpdate(device=self.id, data={"modem_info": modem_info})
 
         # Request CONNECT / DISCONNECT
         m = self.re_req_cmd.search(msg)
