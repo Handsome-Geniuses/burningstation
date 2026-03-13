@@ -21,6 +21,7 @@ EXPECTED_DROP_TOLERANCE_mA_2 = 30
 LAMP_ON_DELAY = 8
 LAMP_OFF_DELAY = 8
 
+
 def _parse_power_status_line(res: str, shared: SharedState) -> Dict:
     """
     Parses a journalctl power status log line into structured data.
@@ -95,7 +96,6 @@ def get_numeric_value(val: str) -> float:
 
 
 def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
-    # TODO: Need to also check charge/solar voltage or something
     func_name = inspect.currentframe().f_code.co_name
     subtest = bool(kwargs.get("subtest", False))
 
@@ -110,28 +110,52 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
         lm.lamp(1, False, 100)
         time.sleep(LAMP_OFF_DELAY)
     baseline = get_latest_power_status(meter, shared)
-    charge_off = get_numeric_value(baseline["power_data"]["ChargeCurrent"])
+    baseline_power = baseline["power_data"]
+    charge_off = get_numeric_value(baseline_power["ChargeCurrent"])
+    battery_voltage = get_numeric_value(baseline_power["BatteryVoltage"])
     shared.log(f"charge_off_1: {charge_off}")
+    shared.log(f"battery_voltage: {battery_voltage}")
 
-
-    # ---- Lamp 1 (rear) ----
-    # on
+    # ---- Lamp 1 ON/OFF (rear) ----
     time.sleep(1)
     lm.lamp(0, True, 100)
     time.sleep(LAMP_ON_DELAY)
-    illuminated = get_latest_power_status(meter, shared)
-    charge_on_l1 = get_numeric_value(illuminated["power_data"]["ChargeCurrent"])
+    rear_illuminated = get_latest_power_status(meter, shared)
+    charge_on_l1 = get_numeric_value(rear_illuminated["power_data"]["ChargeCurrent"])
     shared.log(f"charge_on_l1: {charge_on_l1}")
 
-    # off
     lm.lamp(0, False, 100)
+    delta_l1 = charge_on_l1 - charge_off
+
+    # ---- Lamp 2 ON/OFF (top) ----
+    time.sleep(1)
+    lm.lamp(1, True, 100)
+    time.sleep(LAMP_ON_DELAY)
+    top_illuminated = get_latest_power_status(meter, shared)
+    top_power = top_illuminated["power_data"]
+    charge_on_l2 = get_numeric_value(top_power["ChargeCurrent"])
+    solar_voltage = get_numeric_value(top_power["InputVoltage"]) # idk if this is the solar voltage value they want or not
+    shared.log(f"charge_on_l2: {charge_on_l2}")
+    shared.log(f"solar_voltage: {solar_voltage}")
+
+    # both off
+    lm.lamp(1, False, 100)
     time.sleep(LAMP_OFF_DELAY)
     recovery = get_latest_power_status(meter, shared)
-    charge_off_l1 = get_numeric_value(recovery["power_data"]["ChargeCurrent"])
+    recovery_power = recovery["power_data"]
+    charge_off_l1 = get_numeric_value(recovery_power["ChargeCurrent"])
+    charge_off_l2 = charge_off_l1
+    shared.log(f"charge_off_l2: {charge_off_l2}")
     shared.log(f"charge_off_l1: {charge_off_l1}")
 
-    delta_l1 = charge_on_l1 - charge_off
-    shared.device_meta["solar"] = f"rear {delta_l1:.0f} mA"
+    delta_l2 = charge_on_l2 - charge_off
+    solar_data = {
+        "battery mV": battery_voltage,
+        "rear_mA": delta_l1,
+        "top_mA": delta_l2,
+        "solar mV": solar_voltage,
+    }
+    shared.device_meta["solar"] = solar_data
 
     # check
     if charge_on_l1 <= charge_off + EXPECTED_MIN_INCREASE_mA_1:
@@ -142,27 +166,6 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
         s = f"ChargeCurrent did not decrease after lamp 1 turned off. {charge_off_l1} --> {charge_on_l1}"
         shared.log(s)
         raise StopAutomation(s)
-
-    # ---- Lamp 2 (top) ----
-    # on
-    time.sleep(1)
-    lm.lamp(1, True, 100)
-    time.sleep(LAMP_ON_DELAY)
-    illuminated = get_latest_power_status(meter, shared)
-    charge_on_l2 = get_numeric_value(illuminated["power_data"]["ChargeCurrent"])
-    shared.log(f"charge_on_l2: {charge_on_l2}")
-
-    # off
-    lm.lamp(1, False, 100)
-    time.sleep(LAMP_OFF_DELAY)
-    recovery = get_latest_power_status(meter, shared)
-    charge_off_l2 = get_numeric_value(recovery["power_data"]["ChargeCurrent"])
-    shared.log(f"charge_off_l2: {charge_off_l2}")
-
-    delta_l2 = charge_on_l2 - charge_off
-    shared.device_meta["solar"] = f"rear {delta_l1:.0f} mA, top {delta_l2:.0f} mA"
-
-    #check
     if charge_on_l2 <= charge_off + EXPECTED_MIN_INCREASE_mA_2:
         s = f"ChargeCurrent did not increase enough when lamp 2 turned on. {charge_on_l2} --> {charge_off}"
         shared.log(s)
