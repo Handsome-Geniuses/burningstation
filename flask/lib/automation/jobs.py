@@ -42,10 +42,13 @@ PROG2MODULE = {
     "printer":"PRINTER",
     "cycle_coin_shutter":"COIN_SHUTTER", 
     "coin shutter":"COIN_SHUTTER",
+    "coin_shutter":"COIN_SHUTTER",
     "cycle_nfc":"KIOSK_NFC", 
     "nfc":"KIOSK_NFC",
     "cycle_modem":"MK7_XE910", 
     "modem":"MK7_XE910",
+    "robot_keypad": "KEY_PAD_2",
+    "robot_keypad2": "KBD_CONTROLLER"
 }
 
 def get_default_buttons(modules, meter_type):
@@ -317,10 +320,39 @@ def job_done(meter_ip):
         if st.device_meta: data["device_meta"] = st.device_meta
 
     elif current_program == "physical_cycle_all":
+        # Determine overall_status from device results
+        overall_status = "pass"
         for key, val in st.device_results.items():
             if val == "fail":
                 overall_status = "fail"
                 break
+
+        default_info = {'ver': -1, 'mod': -1, 'id': -1}
+        job_results = {}
+
+        for key, val in st.device_results.items():
+            info = meter.module_info.get(PROG2MODULE.get(key), default_info)
+
+            job_results[key] = {
+                "status": val,
+                "fw": info.get("ver", -1),
+                "id": info.get("id", -1),
+            }
+            if key == "robot_keypad":
+                info = meter.module_info.get(PROG2MODULE.get("robot_keypad2"), default_info)
+                job_results["robot_keypad2"] = {
+                    "status": val,
+                    "fw": info.get("ver", -1),
+                    "id": info.get("id", -1),
+                }
+
+        data["results"] = job_results
+        if st.last_error:
+            data["last_error"] = st.last_error
+        if st.device_meta:
+            data["device_meta"] = st.device_meta
+
+        
     
     # insertion time!
     job_data = {
