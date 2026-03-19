@@ -222,6 +222,7 @@ def job_status(meter_ip):
 
 def start_passive_job(meter_ip):
     meter = mm.get_meter(meter_ip)
+    meter.set_ui_mode("banner")
     modules = meter.module_info
     has_nfc = "KIOSK_NFC" in modules
     has_modem = "MK7_XE910" in modules
@@ -306,7 +307,7 @@ def job_done(meter_ip):
 
         default_info = {'ver': -1, 'mod': -1, 'id': -1}
         job_results = {}
-        for key, val in meter.results.items():
+        for key, val in st.device_results.items():
             info = meter.module_info.get(PROG2MODULE.get(key), default_info)
 
             job_results[key] = {
@@ -320,8 +321,6 @@ def job_done(meter_ip):
         if st.device_meta: data["device_meta"] = st.device_meta
 
     elif current_program == "physical_cycle_all":
-        # Determine overall_status from device results
-        overall_status = "pass"
         for key, val in st.device_results.items():
             if val == "fail":
                 overall_status = "fail"
@@ -329,7 +328,6 @@ def job_done(meter_ip):
 
         default_info = {'ver': -1, 'mod': -1, 'id': -1}
         job_results = {}
-
         for key, val in st.device_results.items():
             info = meter.module_info.get(PROG2MODULE.get(key), default_info)
 
