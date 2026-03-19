@@ -53,6 +53,7 @@ class StartWatch:
 @dataclass
 class CancelWatch:
     key: str
+    device: Optional[str] = None
 
 @dataclass
 class ClearWatches:
