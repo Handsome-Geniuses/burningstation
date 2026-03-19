@@ -92,7 +92,7 @@ class ModemMonitor:
 
     def handle(self, ev: LogEvent) -> Optional[Iterable[Action]]:
         msg = ev.msg
-        self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
+        # self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
 
         modem_info = self._parse_modem_info(msg)
         if modem_info:

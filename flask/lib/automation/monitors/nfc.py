@@ -111,7 +111,7 @@ class NFCMonitor:
 
     def handle(self, ev: LogEvent) -> Optional[Iterable[Action]]:
         msg = ev.msg
-        self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
+        # self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
 
         # Request ON / OFF
         m = self.re_req_any.search(msg)

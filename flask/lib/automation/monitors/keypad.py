@@ -129,7 +129,7 @@ class KeypadMonitor:
 
     def handle(self, ev: LogEvent) -> Optional[Iterable[Action]]:
         msg = ev.msg
-        self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
+        # self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
 
         m = self._re_line.search(msg)
         if not m:

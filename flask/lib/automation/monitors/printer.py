@@ -28,7 +28,7 @@ class PrinterMonitor:
 
     def handle(self, ev: LogEvent) -> Optional[Iterable[Action]]:
         msg = ev.msg
-        self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
+        # self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
 
         # Request PRINT
         if self.re_start.search(msg):
