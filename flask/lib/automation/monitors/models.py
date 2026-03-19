@@ -54,6 +54,10 @@ class StartWatch:
 class CancelWatch:
     key: str
 
+@dataclass
+class ClearWatches:
+    device: Optional[str] = None
+
 @dataclass(order=True)
 class _Deadline:
     when: float
@@ -74,6 +78,17 @@ class WatchdogManager:
 
     def cancel(self, key: str):
         self.active.pop(key, None)
+
+    def clear(self, device: Optional[str] = None) -> int:
+        if device is None:
+            cleared = len(self.active)
+            self.active.clear()
+            return cleared
+
+        keys = [key for key, deadline in self.active.items() if deadline.device == device]
+        for key in keys:
+            self.active.pop(key, None)
+        return len(keys)
 
     def poll_timeouts(self) -> List[Fault]:
         faults: List[Fault] = []

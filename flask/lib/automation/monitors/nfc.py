@@ -47,6 +47,7 @@ class NFCMonitor:
         return any(n.upper() in p for n in needles)
 
     def _start_on_watch(self, ev: LogEvent):
+        yield from self._cancel_on()
         self._on_key = f"{self.id}:on:{int(ev.ts.timestamp())}"
         self.shared.log(f"[{self.id}] arm ON {self._on_key} t={self.timeout_on_s:.1f}s", color=BLUE)
         yield StartWatch(
@@ -57,6 +58,7 @@ class NFCMonitor:
         )
 
     def _start_off_watch(self, ev: LogEvent):
+        yield from self._cancel_off()
         self._off_key = f"{self.id}:off:{int(ev.ts.timestamp())}"
         self.shared.log(f"[{self.id}] arm OFF {self._off_key} t={self.timeout_off_s:.1f}s", color=BLUE)
         yield StartWatch(

@@ -80,6 +80,8 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState, **kwargs):
     max_duration_s = int(kwargs.get("max_duration_s", 40))
     subtest = bool(kwargs.get("subtest", False))
 
+    shared.set_allowed(set(), reason="NFC navigation in progress")
+
     shared.log(f"{meter.host} {func_name} 1/1")
     if not subtest:
         shared.broadcast_progress(meter.host, func_name, 1, 1)
@@ -104,9 +106,11 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState, **kwargs):
     meter.press('ok')
     meter.press('plus'); meter.press('plus'); meter.press('plus')
     meter.press('ok')
-    time.sleep(1)
 
     #! double check that we made it to the right page
+
+    shared.set_allowed({"nfc"}, reason="NFC page ready; arm monitor")
+    time.sleep(1)
 
     meter.press('plus')
     nfc_enabled = True
@@ -154,6 +158,7 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState, **kwargs):
     finally:
         if nfc_enabled:
             try:
+                shared.set_allowed(set(), reason="NFC cleanup")
                 meter.press('minus')
             except Exception as _e:
                 shared.log(f'Cleanup warning: failed to press [-] | {_e}', console=True)

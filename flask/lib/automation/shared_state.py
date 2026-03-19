@@ -8,6 +8,7 @@ import os
 import inspect
 
 from lib.sse.sse_queue_manager import SSEQM
+from lib.automation.monitors.models import ClearWatches
 
 
 class SharedState:
@@ -32,7 +33,9 @@ class SharedState:
         self._flush_interval = 2.0              # seconds
         self._flush_threshold = 50              # msg lines
 
-    def set_allowed(self, devices: set[str], reason: str = ""):
+    def set_allowed(self, devices: set[str], reason: str = "", clear_watchdogs: bool = True):
+        if clear_watchdogs:
+            self.queue_action(ClearWatches())
         self.allowed_monitors = devices
         self.log(f"allowed_monitors set to {devices} {('- ' + reason) if reason else ''}")
 
