@@ -4,8 +4,9 @@ import paramiko
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple, Iterable, Any
 
+from lib.automation.actions import ClearWatches
 from lib.automation.monitors.models import (
-    LogEvent, Fault, StartWatch, CancelWatch, ClearWatches, WatchdogManager, MarkSuccess, MetaUpdate,
+    LogEvent, Fault, StartWatch, CancelWatch, WatchdogManager, MarkSuccess, MetaUpdate,
     ProgressUpdate, Action, RESET, RED, GREEN, YELLOW, BLUE, DIM, GRAY
 )
 from lib.automation.shared_state import SharedState

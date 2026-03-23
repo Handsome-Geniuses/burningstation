@@ -55,10 +55,6 @@ class CancelWatch:
     key: str
     device: Optional[str] = None
 
-@dataclass
-class ClearWatches:
-    device: Optional[str] = None
-
 @dataclass(order=True)
 class _Deadline:
     when: float

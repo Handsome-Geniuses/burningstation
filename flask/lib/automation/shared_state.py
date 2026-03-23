@@ -8,7 +8,7 @@ import os
 import inspect
 
 from lib.sse.sse_queue_manager import SSEQM
-from lib.automation.monitors.models import ClearWatches
+from lib.automation.actions import ClearWatches
 
 
 class SharedState:
