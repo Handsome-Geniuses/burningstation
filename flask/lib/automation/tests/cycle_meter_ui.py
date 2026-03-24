@@ -91,6 +91,42 @@ def __test_cycle_ms25_ui(meter: SSHMeter, shared: SharedState, payment_type: str
         time.sleep(10) # give enough time for print
         check_stop_event(shared)
 
+def __test_cycle_ms3_ui(meter: SSHMeter, shared: SharedState, payment_type: str, count: int):
+    func_name = inspect.currentframe().f_code.co_name
+
+    for i in range(count):
+        shared.log(f"{meter.host} {func_name} {i+1}/{count}")
+        if shared:
+            shared.broadcast_progress(meter.host, 'cycle_ui', i+1, count)
+        
+        if meter.meter_type == "ms3":
+            shared.log("Toggle printer OFF and back ON to avoid a jam")
+            meter.reboot_printer()
+        
+        meter.press('a', delay=1)
+        check_stop_event(shared)
+
+        # Time entry
+        for _ in range(random.randint(2, 7)):
+            meter.press('plus', delay=0.5)
+        time.sleep(0.25)
+        meter.press('enter', delay=1)
+        time.sleep(0.25)
+        check_stop_event(shared)
+
+        # Payment logic
+        if payment_type == PaymentType.COINS:
+            # Simulate dropping in coins of various values
+            for v in [25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 100, 100, 100]:
+                meter.insert_coin(v, 0.5)
+        else:
+            meter.force_diagnostics()
+            raise ValueError(f"Unknown payment type: {payment_type} for {meter.meter_type}")
+
+        time.sleep(10) # give enough time for print
+        meter.force_diagnostics()
+        check_stop_event(shared)
+
 def __test_cycle_msx_ui(meter: SSHMeter, shared: SharedState, payment_type: str, count: int):
     func_name = inspect.currentframe().f_code.co_name
 
@@ -168,8 +204,10 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
     if meter.in_diagnostics():
         meter.press('diagnostics')
 
-    if meter.meter_type in ['ms2.5', 'ms3']:
+    if meter.meter_type == 'ms2.5':
         __test_cycle_ms25_ui(meter, shared, payment_type, count)
+    elif meter.meter_type == 'ms3':
+        __test_cycle_ms3_ui(meter, shared, payment_type, count)
     elif meter.meter_type == 'msx':
         __test_cycle_msx_ui(meter, shared, payment_type, count)
 

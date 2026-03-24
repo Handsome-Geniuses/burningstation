@@ -4,6 +4,7 @@ import paramiko
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple, Iterable, Any
 
+from lib.automation.actions import ClearWatches
 from lib.automation.monitors.models import (
     LogEvent, Fault, StartWatch, CancelWatch, WatchdogManager, MarkSuccess, MetaUpdate,
     ProgressUpdate, Action, RESET, RED, GREEN, YELLOW, BLUE, DIM, GRAY
@@ -147,6 +148,11 @@ class Listener:
                 self.shared.log(f"[{dev_id}] watch cancel {a.key}", console=self.verbose, color=DIM)
             else:
                 self.shared.log(f"[SUPPRESS][{dev_id}] watch cancel {a.key}", console=self.verbose, color=YELLOW)
+
+        elif isinstance(a, ClearWatches):
+            cleared = self.wd.clear(device=a.device)
+            target = a.device or "all"
+            self.shared.log(f"[watchdog] cleared {cleared} active timer(s) for {target}", console=self.verbose, color=DIM)
 
         elif isinstance(a, MarkSuccess):
             if is_allowed:

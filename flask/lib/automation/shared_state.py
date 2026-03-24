@@ -1,6 +1,6 @@
 # shared_state.py
 import threading
-from typing import Any
+from typing import Any, Optional
 from datetime import datetime
 from collections import deque
 import time
@@ -8,6 +8,7 @@ import os
 import inspect
 
 from lib.sse.sse_queue_manager import SSEQM
+from lib.automation.actions import ClearWatches
 
 
 class SharedState:
@@ -27,12 +28,14 @@ class SharedState:
         self.logs: list[str] = []
         self._log_lock = threading.Lock()       # protects buffer + flush
         self._log_buffer = deque()              # buffered lines before write
-        self._logfile_path: str | None = None
+        self._logfile_path: Optional[str] = None
         self._last_flush = time.time()
         self._flush_interval = 2.0              # seconds
         self._flush_threshold = 50              # msg lines
 
-    def set_allowed(self, devices: set[str], reason: str = ""):
+    def set_allowed(self, devices: set[str], reason: str = "", clear_watchdogs: bool = True):
+        if clear_watchdogs:
+            self.queue_action(ClearWatches())
         self.allowed_monitors = devices
         self.log(f"allowed_monitors set to {devices} {('- ' + reason) if reason else ''}")
 
@@ -57,9 +60,12 @@ class SharedState:
             pending.append(action)
 
     #----- Logging methods -----#
-    def set_logfile(self, path: str):
-        """Set the logfile path at job start. Creates directory if needed."""
+    def set_logfile(self, path: Optional[str]):
+        """Set the logfile path at job start. Creates parent directory if needed."""
         self._logfile_path = path
+        if not path:
+            return
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.log("=== LOG STARTED ===", console=False)
 

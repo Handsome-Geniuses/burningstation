@@ -131,8 +131,8 @@ class RobotKeypadMonitor:
     def _cancel_button_watch(self, button_name: str) -> List[Action]:
         watch_key = self._button_watches.pop(button_name, None)
         if watch_key:
-            self.shared.log(f"CANCELLED timeout for {button_name}", color=GREEN)
-            return [CancelWatch(watch_key)]
+            self.shared.log(f"CancelWatch requested to CANCEL timeout for {button_name}", color=GREEN)
+            return [CancelWatch(watch_key, device=self.id)]
         return []
     
     # ------------------------------------------------------------------ #
@@ -188,9 +188,10 @@ class RobotKeypadMonitor:
         self.shared.log(f"'{key}' pressed -> {self.seen_counts[key]}/{self.required_per_key}", color=GREEN)
 
         # Cancel any pending per-button failure watchdog for this key
-        if key in self._button_watches:
+        cancel_actions = self._cancel_button_watch(key)
+        if cancel_actions:
             self.shared.log(f"meter confirmed press -> cancelling robot timeout for '{key}'", color=GREEN)
-            actions.extend(self._cancel_button_watch(key))
+            actions.extend(cancel_actions)
 
         # Check for completion
         if self._is_complete():

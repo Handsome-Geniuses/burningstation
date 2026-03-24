@@ -38,6 +38,8 @@ def run_and_retrieve_charuco(robot: RobotClient, meter: SSHMeter, shared: Shared
     if charuco_frame is not None:
         meter.set_ui_mode("banner")
 
+    # job_id = robot.run_program("run_button_pic", args={"meter_type": meter.meter_type, "button_name": "i", "charuco_frame": charuco_frame})
+    # robot.wait_for_event("program_done", job_id=job_id, timeout=20)
     return charuco_frame
 
 
@@ -102,8 +104,10 @@ def physical_cycle_all(
             shared.current_device = device_name
             shared.device_results[device_name] = "running"
 
-            if device_name in {"nfc", "robot_keypad"}:
+            if device_name == "robot_keypad":
                 shared.set_allowed({device_name}, reason=f"Running {device_name}")
+            elif device_name == "nfc":
+                shared.set_allowed(set(), reason="Running nfc; test will arm monitor when ready")
             else:
                 shared.set_allowed(set(), reason=f"No monitor for {device_name}")
 

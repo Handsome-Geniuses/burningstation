@@ -108,9 +108,10 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
     st.reset()
     if log:
-        log_dir = "./logs"
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        logfile_name = f"[{meter.hostname}]{ts}-{program_name}.log"
+        now = datetime.now()
+        log_dir = os.path.join("./logs", now.strftime("%Y-%m-%d"))
+        ts = now.strftime("%H-%M-%S")
+        logfile_name = f"{ts}_{meter.hostname}_{program_name}.log"
         logfile_path = os.path.join(log_dir, logfile_name)
         st.set_logfile(logfile_path)
     else:
@@ -118,6 +119,8 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
     st.log(f"STARTING JOB THREAD: {program_name} on {meter.hostname}", console=True)
     st.log(f"Arguments: {kwargs}")
+    st.log(f"Meter System Info: {json.dumps(meter.system_versions)}")
+    st.log(f"Meter Module Info: {json.dumps(meter.module_info)}")
 
     meter.status = "busy"
     master.broadcast('status', {'ip':meter_ip, 'status': meter.status})
@@ -222,6 +225,7 @@ def job_status(meter_ip):
 
 def start_passive_job(meter_ip):
     meter = mm.get_meter(meter_ip)
+    meter.set_ui_mode("banner")
     modules = meter.module_info
     has_nfc = "KIOSK_NFC" in modules
     has_modem = "MK7_XE910" in modules
@@ -257,7 +261,9 @@ def start_physical_job(meter_ip, buttons=None):
     
     has_solar = True
     has_coin_shutter = "COIN_SHUTTER" in modules
-    has_nfc = "KIOSK_NFC" in modules
+    kiosk_nfc_info = modules.get("KIOSK_NFC") or {}
+    kiosk_nfc_ver = kiosk_nfc_info.get("ver")
+    has_nfc = "KIOSK_NFC" in modules and kiosk_nfc_ver not in {2329}
     buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
 
     kwargs = {
@@ -306,7 +312,7 @@ def job_done(meter_ip):
 
         default_info = {'ver': -1, 'mod': -1, 'id': -1}
         job_results = {}
-        for key, val in meter.results.items():
+        for key, val in st.device_results.items():
             info = meter.module_info.get(PROG2MODULE.get(key), default_info)
 
             job_results[key] = {
@@ -320,8 +326,6 @@ def job_done(meter_ip):
         if st.device_meta: data["device_meta"] = st.device_meta
 
     elif current_program == "physical_cycle_all":
-        # Determine overall_status from device results
-        overall_status = "pass"
         for key, val in st.device_results.items():
             if val == "fail":
                 overall_status = "fail"
@@ -329,7 +333,6 @@ def job_done(meter_ip):
 
         default_info = {'ver': -1, 'mod': -1, 'id': -1}
         job_results = {}
-
         for key, val in st.device_results.items():
             info = meter.module_info.get(PROG2MODULE.get(key), default_info)
 
