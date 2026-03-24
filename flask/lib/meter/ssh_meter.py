@@ -659,14 +659,21 @@ fclose($myfile);
     def goto_keypad(self):
         self.force_diagnostics()
 
-        self.press('minus'); self.press('ok')
-        self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('ok')
-        if self.meter_type == 'msx':
-            self.press('minus'); self.press('minus'); self.press('ok')
+        if self.system_versions.get("system_version", "") == "48794":
+            self.press('minus'); self.press('ok')
+            self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('ok')
+            self.press('plus'); self.press('plus'); self.press('plus'); self.press('plus'); self.press('plus'); self.press('plus'); self.press('plus'); self.press('ok')
+
         else:
-            for i in range(8):
-                self.press('plus')
-            self.press('ok')
+            self.press('minus'); self.press('ok')
+            self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('ok')
+            if self.meter_type == 'msx':
+                self.press('minus'); self.press('minus'); self.press('ok')
+            else:
+                for i in range(8):
+                    self.press('plus')
+                self.press('ok')
+        
         time.sleep(0.5)
     
     def print_msg(self, msg):
