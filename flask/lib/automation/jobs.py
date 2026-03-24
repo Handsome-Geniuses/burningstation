@@ -119,6 +119,8 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
     st.log(f"STARTING JOB THREAD: {program_name} on {meter.hostname}", console=True)
     st.log(f"Arguments: {kwargs}")
+    st.log(f"Meter System Info: {json.dumps(meter.system_versions)}")
+    st.log(f"Meter Module Info: {json.dumps(meter.module_info)}")
 
     meter.status = "busy"
     master.broadcast('status', {'ip':meter_ip, 'status': meter.status})
@@ -259,7 +261,9 @@ def start_physical_job(meter_ip, buttons=None):
     
     has_solar = True
     has_coin_shutter = "COIN_SHUTTER" in modules
-    has_nfc = "KIOSK_NFC" in modules
+    kiosk_nfc_info = modules.get("KIOSK_NFC") or {}
+    kiosk_nfc_ver = kiosk_nfc_info.get("ver")
+    has_nfc = "KIOSK_NFC" in modules and kiosk_nfc_ver not in {2329}
     buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
 
     kwargs = {
