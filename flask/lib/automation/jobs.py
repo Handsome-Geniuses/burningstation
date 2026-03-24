@@ -108,9 +108,10 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
     st.reset()
     if log:
-        log_dir = "./logs"
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        logfile_name = f"[{meter.hostname}]{ts}-{program_name}.log"
+        now = datetime.now()
+        log_dir = os.path.join("./logs", now.strftime("%Y-%m-%d"))
+        ts = now.strftime("%H-%M-%S")
+        logfile_name = f"{ts}_{meter.hostname}_{program_name}.log"
         logfile_path = os.path.join(log_dir, logfile_name)
         st.set_logfile(logfile_path)
     else:
