@@ -142,9 +142,12 @@ class SSHMeter(sshkit.Client):
             self.__resolution = self.cli("""fbset -s | grep mode | awk -F'"' '{print $2}' | cut -d- -f1""")
 
         meter_type:MeterType = ""
-        if self.__resolution == "1024x768": meter_type = "msx"
+        if self.__resolution == "1024x768":
+            meter_type = "ms3"
+            required_modules = ("PRINTER", "KEY_PAD_2", "COIN_SHUTTER")
+            if not all(self.firmwares.get(module) for module in required_modules):
+                meter_type = "msx"
         elif self.__resolution == "800x480": meter_type = "ms2.5"
-        if meter_type == "msx" and self.firmwares.get("PRINTER",None): meter_type = "ms3"
         return meter_type
         
     meter_type = property(lambda self: self.get_meter_type())
