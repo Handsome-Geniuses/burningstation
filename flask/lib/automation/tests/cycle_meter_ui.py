@@ -452,7 +452,9 @@ def _build_card_payment_action(context: PaySessionContext, detail: str) -> PayUI
 
 
 def _uses_direct_card_from_payment_amount(meter: SSHMeter) -> bool:
-    return meter.meter_type in {"msx", "ms2.5"}
+    b = meter.meter_type in {"msx", "ms2.5"}
+    print(f"_uses_direct_card_from_payment_amount -> {b}, meter_type={meter.meter_type}")
+    return b
 
 
 def _switch_to_coin_fallback(context: PaySessionContext, shared: SharedState, meter: SSHMeter, reason: str) -> None:
@@ -611,7 +613,7 @@ def execute_pay_ui_action(
     meter: SSHMeter,
     action: PayUIAction,
     context: PaySessionContext,
-    robot_ready_timeout: float = 30.0,
+    robot_ready_timeout: float = 20.0,
 ) -> None:
     if action.kind == "press":
         print(f">> meter.press({action.button}, delay={action.delay})")
@@ -627,14 +629,14 @@ def execute_pay_ui_action(
     elif action.kind == "run_robot_card":
         if context.robot is None:
             raise RuntimeError("robot_contactless payment requested without an initialized RobotClient")
-        print(f">> time.sleep({PRE_CARD_SEND_DELAY_S})")
-        time.sleep(PRE_CARD_SEND_DELAY_S)
+        ## time.sleep(PRE_CARD_SEND_DELAY_S) # skip bc the robot will take a few seconds to move into position, so we can start the card action req immediately
         context.robot.wait_until_ready(robot_ready_timeout)
         context.robot.flush_event_queue()
         job_args = {
             "meter_type": meter.meter_type,
             "meter_id": meter.hostname,
             "charuco_frame": context.charuco_frame,
+            "config_idx": "nfc_gui"
         }
         print(f'>> robot.run_program("{action.robot_program}", {job_args})')
         job_id = context.robot.run_program(action.robot_program, job_args)
