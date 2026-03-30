@@ -94,19 +94,7 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState, **kwargs):
     robot = RobotClient()
     job_id = robot.run_program("run_nfc_card", {"meter_type": meter.meter_type, "meter_id": meter.hostname, "charuco_frame": kwargs.get("charuco_frame")})
 
-    if meter.in_diagnostics():
-        meter.press('diagnostics'); meter.press('diagnostics')
-    else:
-        meter.press('diagnostics')
-
-    meter.press('minus')
-    meter.press('ok')
-    for i in range(8):
-        meter.press('plus')
-    meter.press('ok')
-    meter.press('plus'); meter.press('plus'); meter.press('plus')
-    meter.press('ok')
-
+    meter.goto_nfc()
     #! double check that we made it to the right page
 
     shared.set_allowed({"nfc"}, reason="NFC page ready; arm monitor")

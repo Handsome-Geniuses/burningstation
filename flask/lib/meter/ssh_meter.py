@@ -196,6 +196,9 @@ class SSHMeter(sshkit.Client):
         resp.raise_for_status()
         return resp.text
 
+    def get_ui_page_html(self, timeout: float = 5.0) -> str:
+        return self._get_uipage_html(timeout=timeout)
+
     @staticmethod
     def _strip_html(value: str) -> str:
         text = unescape(value or "")
@@ -298,7 +301,7 @@ class SSHMeter(sshkit.Client):
         path: Sequence,
         *,
         reset_to_service: bool = True,
-        fetch_timeout: float = 3.0,
+        fetch_timeout: float = 4.5,
         press_delay: float = 0.15,
         settle_delay: float = 0.4,
         page_timeout: float = 5.0,
@@ -312,8 +315,9 @@ class SSHMeter(sshkit.Client):
         if reset_to_service:
             self.force_diagnostics()
             time.sleep(settle_delay)
-        elif not self.in_diagnostics():
-            raise RuntimeError("Meter is not currently in diagnostics mode")
+        if not self.in_diagnostics():
+            self.press('diagnostics')
+            time.sleep(settle_delay)
 
         state = self.get_diagnostics_state(timeout=fetch_timeout)
         if not state["title_segments"]:
