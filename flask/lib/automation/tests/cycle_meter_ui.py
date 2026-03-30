@@ -19,7 +19,8 @@ SPACE_RE = re.compile(r"\s+")
 TITLE_RE = re.compile(r"<title>\s*([^<]+)\s*</title>", re.I)
 VALUEBOX_RE = re.compile(r"<div class=valuebox>(.*?)</div>", re.I | re.S)
 MONEY_RE = re.compile(r"\$([0-9]+(?:\.[0-9]{1,2})?)")
-CARD_MASKED_RE = re.compile(r"Card read:\s*([Xx\d ]+)", re.I)
+CARD_MASKED_RE = re.compile(r"Card read:\s*([Xx*\d ]+)", re.I)
+PAN_MASKED_RE = re.compile(r"\bPAN\s+([Xx*\d ]{4,})", re.I)
 CARD_REF_RE = re.compile(r"refStr=(\d{4})", re.I)
 HEX_BYTE_RE = re.compile(r"\b[0-9A-Fa-f]{2}\b")
 PAN_FROM_TRACK_RE = re.compile(r"(\d{12,19})(?=[=^D])")
@@ -174,7 +175,7 @@ def _extract_last4_from_card_line(line: str) -> Optional[str]:
     if ref_match:
         return ref_match.group(1)
 
-    masked_match = CARD_MASKED_RE.search(line)
+    masked_match = CARD_MASKED_RE.search(line) or PAN_MASKED_RE.search(line)
     if masked_match:
         digits = re.sub(r"\D", "", masked_match.group(1))
         if len(digits) >= 4:
@@ -196,7 +197,7 @@ def _extract_last4_from_card_line(line: str) -> Optional[str]:
 def _get_latest_card_last4(meter: SSHMeter, since: str) -> Optional[str]:
     cmd = (
         f"journalctl -u MS3_Platform.service --since \"{since}\" -n 800 --no-pager | "
-        "grep -E 'CARD_READ_DATA|refStr=|Card read:' | tail -n 40"
+        "grep -E 'CARD_READ_DATA|refStr=|Card read:|receiptText=|PAN [Xx*0-9 ]+' | tail -n 60"
     )
     res = meter.cli(cmd)
     if not res:
@@ -835,12 +836,8 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
             raise
 
         if shared and session_result.get("effective_payment_type", "") != PaymentType.COINS.name:
-            card_meta = shared.device_meta.setdefault("screen_test_cards", {})
-            card_meta[str(i + 1)] = {
-                "last4": session_result.get("card_last4"),
-            }
-            if session_result.get("card_last4"):
-                shared.device_meta["last4"] = session_result["card_last4"]
+            card_meta = shared.device_meta.setdefault("nfc_gui_cards", {})
+            card_meta[str(i + 1)] = session_result.get("card_last4")
 
         check_stop_event(shared)
 

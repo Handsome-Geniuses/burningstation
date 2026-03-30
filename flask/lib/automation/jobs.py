@@ -261,9 +261,7 @@ def start_physical_job(meter_ip, buttons=None):
     
     has_solar = True
     has_coin_shutter = "COIN_SHUTTER" in modules
-    kiosk_nfc_info = modules.get("KIOSK_NFC") or {}
-    kiosk_nfc_ver = kiosk_nfc_info.get("ver")
-    has_nfc = "KIOSK_NFC" in modules and kiosk_nfc_ver not in {2329}
+    has_nfc = "KIOSK_NFC" in modules
     buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
 
     kwargs = {
@@ -275,7 +273,7 @@ def start_physical_job(meter_ip, buttons=None):
         "nfc_gui": {
             "enabled": has_nfc,
             "payment_type": "robot_contactless",
-            "robot_ready_timeout": 30.0,
+            "robot_ready_timeout": 20.0,
         },
         "robot_keypad": {"enabled": bool(buttons), "buttons": buttons},
 
