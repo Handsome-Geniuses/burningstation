@@ -6,7 +6,7 @@ from lib.automation.shared_state import SharedState
 from lib.automation.helpers import StopAutomation
 from lib.automation.tests.test_solar import test_solar
 from lib.automation.tests.test_robot_coin_shutter import test_robot_coin_shutter
-from lib.automation.tests.test_robot_nfc_read import test_robot_nfc_read
+from lib.automation.tests.cycle_meter_ui import test_cycle_meter_ui
 from lib.automation.tests.test_robot_keypad import test_robot_keypad
 from lib.robot.robot_client import RobotClient
 
@@ -14,7 +14,8 @@ from lib.robot.robot_client import RobotClient
 PHYSICAL_DEVICES = [
     ("solar",          test_solar, {}),
     ("coin_shutter",   test_robot_coin_shutter, {}),
-    ("nfc",            test_robot_nfc_read,     {}),
+    ### ("nfc",            test_robot_nfc_read,     {}),
+    ("nfc_gui",        test_cycle_meter_ui,     {"payment_type": "robot_contactless"}),
     ("robot_keypad",   test_robot_keypad,       {
         "buttons": ["1","2","3"],
         "inactivity_timeout_s": 40.0,
@@ -91,8 +92,12 @@ def physical_cycle_all(
             missing = False
             if device_name == "coin_shutter" and not meter.device_firmware("coin shutter"):
                 missing = True
-            elif device_name == "nfc" and not meter.device_firmware("nfc"):
-                missing = True
+            elif device_name == "screen test":
+                payment_type = str(
+                    custom_cfg.get("payment_type", default_cfg.get("payment_type", ""))
+                ).strip().lower()
+                if payment_type == "robot_contactless" and not meter.device_firmware("nfc"):
+                    missing = True
 
             if missing:
                 shared.log(f"skipping {device_name} subtest: missing hardware")
@@ -106,8 +111,6 @@ def physical_cycle_all(
 
             if device_name == "robot_keypad":
                 shared.set_allowed({device_name}, reason=f"Running {device_name}")
-            elif device_name == "nfc":
-                shared.set_allowed(set(), reason="Running nfc; test will arm monitor when ready")
             else:
                 shared.set_allowed(set(), reason=f"No monitor for {device_name}")
 

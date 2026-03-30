@@ -119,6 +119,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
     st.log(f"STARTING JOB THREAD: {program_name} on {meter.hostname}", console=True)
     st.log(f"Arguments: {kwargs}")
+    st.log(f"Meter Type: {meter.meter_type}")
     st.log(f"Meter System Info: {json.dumps(meter.system_versions)}")
     st.log(f"Meter Module Info: {json.dumps(meter.module_info)}")
 
@@ -234,13 +235,13 @@ def start_passive_job(meter_ip):
     has_screen_test = True  # all meters have screen test
 
     kwargs = {
-        "nfc": 1 if has_nfc else 0,
-        "modem": 1 if has_modem else 0 ,
-        "printer": 1 if has_printer else 0,
-        "coin shutter": 1 if has_coin_shutter else 0,
-        "screen test": 1 if has_screen_test else 0,
         "numBurnCycles": 1,
-        "numBurnDelay": 10   
+        "numBurnDelay": 10,
+        "nfc": {"enabled": has_nfc},
+        "modem": {"enabled": has_modem},
+        "printer": {"enabled": has_printer},
+        "coin shutter": {"enabled": has_coin_shutter},
+        "screen test": {"enabled": has_screen_test, "payment_type": "coins", "debug_ui": 0},
     }
 
     if states["mode"] == "auto":
@@ -261,9 +262,7 @@ def start_physical_job(meter_ip, buttons=None):
     
     has_solar = True
     has_coin_shutter = "COIN_SHUTTER" in modules
-    kiosk_nfc_info = modules.get("KIOSK_NFC") or {}
-    kiosk_nfc_ver = kiosk_nfc_info.get("ver")
-    has_nfc = "KIOSK_NFC" in modules and kiosk_nfc_ver not in {2329}
+    has_nfc = "KIOSK_NFC" in modules
     buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
 
     kwargs = {
@@ -271,11 +270,15 @@ def start_physical_job(meter_ip, buttons=None):
         "numBurnDelay": 5,
         "solar": {"enabled": has_solar},
         "coin_shutter": {"enabled": has_coin_shutter},
-        "nfc": {"enabled": has_nfc},
+        ### "nfc": {"enabled": has_nfc},
+        "nfc_gui": {
+            "enabled": has_nfc,
+            "payment_type": "robot_contactless",
+            "robot_ready_timeout": 20.0,
+        },
         "robot_keypad": {"enabled": bool(buttons), "buttons": buttons},
 
         "monitors": [
-            ("nfc", {"timeout_on_s": 6.0, "timeout_off_s": 5.0}),
             ("robot_keypad", {"buttons": buttons})
         ]
     }
@@ -305,7 +308,7 @@ def job_done(meter_ip):
     
     # for cycle all passive
     if current_program == 'cycle_all':
-        for key, val in meter.results.items():
+        for key, val in st.device_results.items():
             if val == "fail":
                 overall_status = "fail"
                 break

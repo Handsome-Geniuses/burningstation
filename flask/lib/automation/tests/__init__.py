@@ -70,7 +70,7 @@ _PROGRAM_MONITORS = {
     "test_robot_nfc_read":  [("nfc",  {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
     "test_robot_keypad":    [("robot_keypad",  {"buttons": ["0", "1", "2", "3"]})],
     "physical_cycle_all":   [
-        ("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
+        # ("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
         ("robot_keypad", {"inactivity_timeout_s": 40})
     ]
 }

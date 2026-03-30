@@ -11,16 +11,65 @@ import inspect
 
 
 DEVICES = [
-    ("coin shutter", test_cycle_coin_shutter),
-    ("nfc", test_cycle_nfc),
-    ("modem", test_cycle_modem),
-    ("printer", test_cycle_print),
-    ("screen test", test_cycle_meter_ui),
+    ("coin shutter", test_cycle_coin_shutter, {}),
+    ("nfc", test_cycle_nfc, {}),
+    ("modem", test_cycle_modem, {}),
+    ("printer", test_cycle_print, {}),
+    ("screen test", test_cycle_meter_ui, {}),
 ]
 
+CYCLE_ALL_GLOBAL_KEYS = {"numBurnCycles", "numBurnDelay", "monitors", "broadcast_job"}
 
-def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, count):
-    if count == 0:
+
+def _device_key_variants(device: str):
+    return (device, device.replace(" ", "_"))
+
+
+def _cycle_all_shared_kwargs(kwargs):
+    reserved = set(CYCLE_ALL_GLOBAL_KEYS)
+    for device_name, _, _ in DEVICES:
+        reserved.update(_device_key_variants(device_name))
+
+    return {k: v for k, v in kwargs.items() if k not in reserved}
+
+
+def _resolve_subtest_kwargs(device: str, kwargs, default_cfg=None):
+    shared_kwargs = _cycle_all_shared_kwargs(kwargs)
+    default_cfg = dict(default_cfg or {})
+
+    for key in _device_key_variants(device):
+        cfg = kwargs.get(key)
+        if isinstance(cfg, dict):
+            enabled = cfg.get("enabled", True)
+            custom_cfg = {k: v for k, v in cfg.items() if k != "enabled"}
+            return bool(enabled), {**shared_kwargs, **default_cfg, **custom_cfg}
+
+    raw_value = 0
+    for key in _device_key_variants(device):
+        if key in kwargs:
+            raw_value = kwargs[key]
+            break
+
+    enabled = bool(raw_value)
+    if not enabled:
+        return False, {}
+
+    final_kwargs = {**shared_kwargs, **default_cfg}
+    if isinstance(raw_value, bool):
+        final_kwargs.setdefault("count", 1)
+    elif isinstance(raw_value, (int, float)):
+        final_kwargs["count"] = int(raw_value)
+    else:
+        final_kwargs.setdefault("count", 1)
+
+    return True, final_kwargs
+
+
+def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, subtest_kwargs=None):
+    subtest_kwargs = dict(subtest_kwargs or {})
+    count = int(subtest_kwargs.get("count", 1))
+
+    if count <= 0:
         shared.device_results[device] = "n/a"
         return
 
@@ -39,7 +88,8 @@ def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, count):
     shared.device_results[device] = "running"
 
     try:
-        fn(meter, shared=shared, count=count, subtest=True)
+        subtest_kwargs["subtest"] = True
+        fn(meter, shared=shared, **subtest_kwargs)
         if not shared.stop_event.is_set():
             shared.device_results[device] = "pass"
     except StopAutomation:
@@ -58,19 +108,23 @@ def test_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
     burn_count = kwargs.get("numBurnCycles", 1)
     burn_delay = kwargs.get("numBurnDelay", 10)
 
-    shared.device_results.update({name: "pending" for name, _ in DEVICES})
+    shared.device_results.update({name: "pending" for name, _, _ in DEVICES})
 
     for i in range(burn_count):
         shared.log(f"{meter.host} {func_name} {i+1}/{burn_count}")
         shared.broadcast_progress(meter.host, "burn-in", i + 1, burn_count)
 
-        for name, fn in DEVICES:
+        for name, fn, default_cfg in DEVICES:
             if shared.stop_event.is_set():
                 # leave remaining devices as 'pending' (or 'n/a')
                 return
 
-            count = kwargs.get(name, 0)
-            _run_device(meter, shared, name, fn, count)
+            enabled, subtest_kwargs = _resolve_subtest_kwargs(name, kwargs, default_cfg=default_cfg)
+            if not enabled:
+                shared.device_results[name] = "n/a"
+                continue
+
+            _run_device(meter, shared, name, fn, subtest_kwargs=subtest_kwargs)
             time.sleep(0.5)
 
         time.sleep(burn_delay)

@@ -1,5 +1,5 @@
 # class to hold ssh-meter. for states or what not
-from typing import  Optional, Literal, TypedDict, Dict, Tuple
+from typing import Optional, Literal, TypedDict, Dict, Tuple, List, Sequence
 # from lib.ssh.client import SSHClient
 from paramiko import SSHException
 import sshkit
@@ -9,6 +9,7 @@ import time
 import os
 import math
 import json
+from html import unescape
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -77,6 +78,20 @@ class InfoDict(TypedDict):
     meter_type: MeterType
     module_info: Dict[str, ModuleInfo]
     system_versions: SystemVersions
+
+
+class DiagMenuItem(TypedDict):
+    text: str
+    selected: bool
+
+
+class DiagPageState(TypedDict):
+    title: str
+    title_segments: List[str]
+    menu_items: List[DiagMenuItem]
+    selected_index: Optional[int]
+    is_menu: bool
+    page_html: str
 
 def_user = bytes(a ^ b for a, b in zip(bytes([238,149,49,210]), [156,250,94,166])).decode()
 def_pswd = bytes(a ^ b for a, b in zip(bytes([236,108,173,77,97,238,131,254,65,42,46]), [156,44,223,6,8,128,228,201,118,25,25])).decode()
@@ -157,17 +172,14 @@ class SSHMeter(sshkit.Client):
 
     def in_diagnostics(self):
         """Returns True if the meter is in diagnostics mode, False otherwise."""
-        url = f"http://{self.host}:8005/UIPage.php"
         try:
-            resp = requests.get(url, timeout=5)
-            resp.raise_for_status()
-            page_text = resp.text.lower()
+            page_text = self._get_uipage_html(timeout=5).lower()
             for diag_key in ["diagtitle", "diagcontent", "diaginfo"]:
                 if diag_key in page_text:
                     return True
             return False
         except Exception as e:
-            print(f"[in_diagnostics] Error fetching {url}: {e}")
+            print(f"[in_diagnostics] Error fetching http://{self.host}:8005/UIPage.php: {e}")
             return False
 
     def force_diagnostics(self):
@@ -177,6 +189,210 @@ class SSHMeter(sshkit.Client):
             self.press('diagnostics')
         else:
             self.press('diagnostics')
+
+    def _get_uipage_html(self, timeout: float = 5.0) -> str:
+        url = f"http://{self.host}:8005/UIPage.php"
+        resp = requests.get(url, timeout=timeout)
+        resp.raise_for_status()
+        return resp.text
+
+    def get_ui_page_html(self, timeout: float = 5.0) -> str:
+        return self._get_uipage_html(timeout=timeout)
+
+    @staticmethod
+    def _strip_html(value: str) -> str:
+        text = unescape(value or "")
+        text = text.replace("\xa0", " ")
+        text = re.sub(r"<[^>]+>", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    @classmethod
+    def _diag_label_key(cls, value: str) -> str:
+        text = cls._strip_html(value).lower()
+        text = re.sub(r"\[[^\]]*\]", " ", text)
+        text = re.sub(r"[^a-z0-9]+", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    @classmethod
+    def _diag_label_variants(cls, value: str) -> set[str]:
+        base = cls._diag_label_key(value)
+        if not base:
+            return set()
+
+        tokens = base.split()
+        variants = {base, "".join(tokens)}
+        if tokens and tokens[-1] == "menu":
+            core = tokens[:-1]
+            if core:
+                variants.add(" ".join(core))
+                variants.add("".join(core))
+        return {variant for variant in variants if variant}
+
+    @classmethod
+    def _diag_step_aliases(cls, step) -> set[str]:
+        if isinstance(step, str):
+            raw_aliases = [part.strip() for part in re.split(r"[|/]", step) if part.strip()]
+            if not raw_aliases:
+                raw_aliases = [step]
+        else:
+            raw_aliases = [str(part).strip() for part in step if str(part).strip()]
+
+        aliases: set[str] = set()
+        for alias in raw_aliases:
+            aliases.update(cls._diag_label_variants(alias))
+        return aliases
+
+    @classmethod
+    def _diag_matches(cls, aliases: set[str], candidate: str) -> bool:
+        return bool(aliases & cls._diag_label_variants(candidate))
+
+    @staticmethod
+    def _menu_move(current_index: int, target_index: int, item_count: int) -> Tuple[str, int]:
+        down_steps = (target_index - current_index) % item_count
+        up_steps = (current_index - target_index) % item_count
+        if down_steps <= up_steps:
+            return "plus", down_steps
+        return "minus", up_steps
+
+    def get_diagnostics_state(self, timeout: float = 5.0) -> DiagPageState:
+        page_html = self._get_uipage_html(timeout=timeout)
+
+        title_match = re.search(
+            r"<div[^>]*class\s*=\s*[\"']?diagtitle[\"']?[^>]*>\s*<div[^>]*>(.*?)</div>",
+            page_html,
+            flags=re.I | re.S,
+        )
+        title = self._strip_html(title_match.group(1)) if title_match else ""
+        title = re.sub(r"\s*\[[^\]]*\]\s*", "", title).strip()
+        title_segments = [segment.strip() for segment in title.split(":") if segment.strip()]
+
+        pre_match = re.search(r"<pre[^>]*>(.*?)</pre>", page_html, flags=re.I | re.S)
+        pre_text = unescape(pre_match.group(1)).replace("\r", "") if pre_match else ""
+
+        menu_items: List[DiagMenuItem] = []
+        selected_index: Optional[int] = None
+        for line in pre_text.splitlines():
+            if not line.strip():
+                continue
+
+            selected = bool(re.match(r"^\s*->\s*", line))
+            item_text = re.sub(r"^\s*->\s*", "", line).strip()
+            if not item_text:
+                continue
+
+            menu_items.append({"text": item_text, "selected": selected})
+            if selected:
+                selected_index = len(menu_items) - 1
+
+        if selected_index is None:
+            menu_items = []
+
+        return {
+            "title": title,
+            "title_segments": title_segments,
+            "menu_items": menu_items,
+            "selected_index": selected_index,
+            "is_menu": selected_index is not None,
+            "page_html": page_html,
+        }
+
+    def goto_diagnostics_path(
+        self,
+        path: Sequence,
+        *,
+        reset_to_service: bool = True,
+        fetch_timeout: float = 4.5,
+        press_delay: float = 0.15,
+        settle_delay: float = 0.4,
+        page_timeout: float = 5.0,
+    ) -> DiagPageState:
+        steps: List[set[str]] = []
+        for step in path:
+            aliases = self._diag_step_aliases(step)
+            if aliases:
+                steps.append(aliases)
+
+        if reset_to_service:
+            self.force_diagnostics()
+            time.sleep(settle_delay)
+        if not self.in_diagnostics():
+            self.press('diagnostics')
+            time.sleep(settle_delay)
+
+        state = self.get_diagnostics_state(timeout=fetch_timeout)
+        if not state["title_segments"]:
+            raise RuntimeError("Unable to parse the current diagnostics page title")
+
+        service_aliases = self._diag_step_aliases("service")
+        if reset_to_service and not self._diag_matches(service_aliases, state["title_segments"][-1]):
+            raise RuntimeError(
+                f"Expected diagnostics home page after reset, found '{state['title']}'"
+            )
+
+        for target_aliases in steps:
+            state = self.get_diagnostics_state(timeout=fetch_timeout)
+            if state["title_segments"] and self._diag_matches(target_aliases, state["title_segments"][-1]):
+                continue
+
+            if not state["is_menu"]:
+                raise RuntimeError(
+                    f"Cannot navigate from non-menu diagnostics page '{state['title']}'"
+                )
+
+            matching_indexes = [
+                index for index, item in enumerate(state["menu_items"])
+                if self._diag_matches(target_aliases, item["text"])
+            ]
+            if not matching_indexes:
+                available = ", ".join(item["text"] for item in state["menu_items"])
+                raise RuntimeError(
+                    f"Unable to find diagnostics item matching {sorted(target_aliases)} on "
+                    f"'{state['title']}'. Available items: {available}"
+                )
+
+            if state["selected_index"] is None:
+                raise RuntimeError(f"Unable to determine the selected diagnostics item on '{state['title']}'")
+
+            target_index = min(
+                matching_indexes,
+                key=lambda index: min(
+                    (index - state["selected_index"]) % len(state["menu_items"]),
+                    (state["selected_index"] - index) % len(state["menu_items"]),
+                ),
+            )
+
+            button, count = self._menu_move(
+                state["selected_index"],
+                target_index,
+                len(state["menu_items"]),
+            )
+            for _ in range(count):
+                self.press(button, delay=press_delay)
+
+            previous_title = state["title"]
+            previous_selected = state["selected_index"]
+            self.press("ok", delay=press_delay)
+
+            deadline = time.time() + page_timeout
+            while True:
+                if time.time() > deadline:
+                    raise RuntimeError(
+                        f"Timed out opening diagnostics item matching {sorted(target_aliases)} "
+                        f"from '{previous_title}'"
+                    )
+
+                state = self.get_diagnostics_state(timeout=fetch_timeout)
+                title_changed = state["title"] != previous_title
+                selection_changed = state["selected_index"] != previous_selected
+
+                if state["title_segments"] and self._diag_matches(target_aliases, state["title_segments"][-1]):
+                    break
+                if title_changed or selection_changed:
+                    time.sleep(settle_delay)
+                else:
+                    time.sleep(settle_delay)
+
+        return self.get_diagnostics_state(timeout=fetch_timeout)
 
 
     def press(self, button: str, value: Optional[str] = "1", delay: float = 0.1):
@@ -641,39 +857,14 @@ fclose($myfile);
 
 
     def goto_nfc(self):
-        if self.in_diagnostics():
-            self.press('diagnostics'); self.press('diagnostics')
-        else:
-            self.press('diagnostics')
-
-        self.press('minus')
-        self.press('ok')
-
-        for i in range(8):
-            self.press('plus')
-        self.press('ok')
-
-        self.press('plus'); self.press('plus'); self.press('plus')
-        self.press('ok')
+        self.goto_diagnostics_path(
+            ["Utilities", "Peripherals", ("Contact(less)", "NFC", "Contactless", "Contactless EMV")]
+        )
     
     def goto_keypad(self):
-        self.force_diagnostics()
-
-        if self.system_versions.get("system_version", "") == "48794":
-            self.press('minus'); self.press('ok')
-            self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('ok')
-            self.press('plus'); self.press('plus'); self.press('plus'); self.press('plus'); self.press('plus'); self.press('plus'); self.press('plus'); self.press('ok')
-
-        else:
-            self.press('minus'); self.press('ok')
-            self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('minus'); self.press('ok')
-            if self.meter_type == 'msx':
-                self.press('minus'); self.press('minus'); self.press('ok')
-            else:
-                for i in range(8):
-                    self.press('plus')
-                self.press('ok')
-        
+        self.goto_diagnostics_path(
+            ["Utilities", "Peripherals", ("Keyboard", "Keypad")]
+        )
         time.sleep(0.5)
     
     def print_msg(self, msg):
