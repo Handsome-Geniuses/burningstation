@@ -119,6 +119,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
     st.log(f"STARTING JOB THREAD: {program_name} on {meter.hostname}", console=True)
     st.log(f"Arguments: {kwargs}")
+    st.log(f"Meter Type: {meter.meter_type}")
     st.log(f"Meter System Info: {json.dumps(meter.system_versions)}")
     st.log(f"Meter Module Info: {json.dumps(meter.module_info)}")
 
