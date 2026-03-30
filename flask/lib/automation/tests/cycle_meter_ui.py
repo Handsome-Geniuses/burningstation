@@ -454,7 +454,6 @@ def _build_card_payment_action(context: PaySessionContext, detail: str) -> PayUI
 
 def _uses_direct_card_from_payment_amount(meter: SSHMeter) -> bool:
     b = meter.meter_type in {"msx", "ms2.5"}
-    print(f"_uses_direct_card_from_payment_amount -> {b}, meter_type={meter.meter_type}")
     return b
 
 
@@ -612,20 +611,22 @@ def plan_pay_ui_action(
 
 def execute_pay_ui_action(
     meter: SSHMeter,
+    shared: SharedState,
     action: PayUIAction,
     context: PaySessionContext,
+    debug_ui: bool = False,
     robot_ready_timeout: float = 20.0,
 ) -> None:
     if action.kind == "press":
-        print(f">> meter.press({action.button}, delay={action.delay})")
+        _debug_log(shared, meter, debug_ui, f">> meter.press({action.button}, delay={action.delay})")
         meter.press(action.button, delay=action.delay)
     elif action.kind == "insert_coin":
-        print(f">> meter.insert_coin({action.coin_value}, delay={action.delay})")
+        _debug_log(shared, meter, debug_ui, f">> meter.insert_coin({action.coin_value}, delay={action.delay})")
         meter.insert_coin(action.coin_value, delay=action.delay)
     elif action.kind == "send_card":
-        print(f">> time.sleep({PRE_CARD_SEND_DELAY_S})")
+        _debug_log(shared, meter, debug_ui, f">> time.sleep({PRE_CARD_SEND_DELAY_S})")
         time.sleep(PRE_CARD_SEND_DELAY_S)
-        print(f'>> meter.custom_busdev("CONTACT", {action.card_value}, delay={action.delay})')
+        _debug_log(shared, meter, debug_ui, f'>> meter.custom_busdev("CONTACT", {action.card_value}, delay={action.delay})')
         meter.custom_busdev("CONTACT", action.card_value, delay=action.delay)
     elif action.kind == "run_robot_card":
         if context.robot is None:
@@ -639,13 +640,13 @@ def execute_pay_ui_action(
             "charuco_frame": context.charuco_frame,
             "config_idx": "nfc_gui"
         }
-        print(f'>> robot.run_program("{action.robot_program}", {job_args})')
+        _debug_log(shared, meter, debug_ui, f'>> robot.run_program("{action.robot_program}", {job_args})')
         job_id = context.robot.run_program(action.robot_program, job_args)
         if not job_id:
             raise RuntimeError(f"Robot did not accept program '{action.robot_program}'")
         context.robot_payment_job_id = job_id
     elif action.kind == "wait":
-        print(f">> time.sleep({action.delay})")
+        _debug_log(shared, meter, debug_ui, f">> time.sleep({action.delay})")
         time.sleep(action.delay)
     elif action.kind in {"done", "fail"}:
         return
@@ -734,8 +735,10 @@ def run_pay_to_park_session(
 
         execute_pay_ui_action(
             meter,
+            shared,
             action,
             context,
+            debug_ui=debug_ui,
             robot_ready_timeout=robot_ready_timeout,
         )
 
