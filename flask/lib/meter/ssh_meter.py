@@ -143,9 +143,18 @@ class SSHMeter(sshkit.Client):
 
         meter_type:MeterType = ""
         if self.__resolution == "1024x768":
-            meter_type = "ms3"
             required_modules = ("PRINTER", "KEY_PAD_2", "COIN_SHUTTER")
-            if not all(self.firmwares.get(module) for module in required_modules):
+            firmware_map = self.firmwares
+            missing_modules = [
+                module_name
+                for module_name in required_modules
+                if not firmware_map.get(module_name)
+            ]
+            # print(f"missing_modules: {missing_modules}")
+            are_all_required_modules_missing = len(missing_modules) == len(required_modules)
+
+            meter_type = "ms3"
+            if are_all_required_modules_missing:
                 meter_type = "msx"
         elif self.__resolution == "800x480": meter_type = "ms2.5"
         return meter_type
