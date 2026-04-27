@@ -239,7 +239,8 @@ def start_passive_job(meter_ip):
         "numBurnDelay": 10,
         "nfc": {"enabled": has_nfc},
         "modem": {"enabled": has_modem},
-        "printer": {"enabled": has_printer},
+        # "printer": {"enabled": has_printer},
+        "printer": {"enabled": 0},
         "coin shutter": {"enabled": has_coin_shutter},
         "screen test": {"enabled": has_screen_test, "payment_type": "coins", "debug_ui": 0},
     }
@@ -392,12 +393,12 @@ if __name__ == "__main__":
     fresh,stale,meters = mm.refresh()
     # for f in fresh: print(f)
     # ip = meters[0]
-    ip = "192.168.137.32"
+    ip = "192.168.169.34"
     # print(ip)
     meter = mm.get_meter(ip)
 
-    start_passive_job(ip) 
-    # start_job(ip, "screen test", {"count":1})
+    # start_passive_job(ip) 
+    start_job(ip, "test_solar", {"count":1})
     # input("press enter to stop\n")
     while meter.status != "ready": time.sleep(1)
     

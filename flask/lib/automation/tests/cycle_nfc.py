@@ -13,21 +13,14 @@ def test_cycle_nfc(meter: SSHMeter, shared: SharedState, **kwargs):
     count = int(kwargs.get("count", 3))
     delay = max(float(kwargs.get("delay", 7.0)), MIN_NFC_DELAY)
     subtest = bool(kwargs.get("subtest", False))
+
+    shared.set_allowed(set(), reason="NFC navigation in progress")
+    time.sleep(1)
     
-    if meter.in_diagnostics():
-        meter.press('diagnostics'); meter.press('diagnostics')
-    else:
-        meter.press('diagnostics')
+    meter.goto_nfc()
 
-    meter.press('minus')
-    meter.press('ok')
-
-    for i in range(8):
-        meter.press('plus')
-    meter.press('ok')
-
-    meter.press('plus'); meter.press('plus'); meter.press('plus')
-    meter.press('ok')
+    shared.set_allowed({"nfc"}, reason="NFC page ready; arm monitor")
+    time.sleep(1)
 
     for i in range(count):
         shared.log(f"{meter.host} {func_name} {i+1}/{count}")
@@ -41,9 +34,7 @@ def test_cycle_nfc(meter: SSHMeter, shared: SharedState, **kwargs):
         check_stop_event(shared)
 
     time.sleep(1)
-    if meter.in_diagnostics():
-        meter.press('diagnostics'); meter.press('diagnostics')
-    else:
-        meter.press('diagnostics')
-
+    shared.set_allowed(set(), reason="NFC cleanup")
+    time.sleep(1)
+    meter.force_diagnostics()
 

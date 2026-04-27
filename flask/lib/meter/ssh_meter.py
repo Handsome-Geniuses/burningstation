@@ -110,7 +110,20 @@ class SSHMeter(sshkit.Client):
 
     def connect(self):
         # need to increase timeout for wireless
-        super(sshkit.Client, self).connect(self.host, username=self.user, password=self.pswd, timeout=1.0, banner_timeout=2)
+        with self._lock:
+            transport = self.get_transport()
+            self.connected = bool(transport and transport.is_active())
+            if self.connected:
+                return
+
+            super(sshkit.Client, self).connect(
+                self.host,
+                username=self.user,
+                password=self.pswd,
+                timeout=1.0,
+                banner_timeout=2,
+            )
+            self.connected = True
 
     def get_info(self, force=False)->InfoDict:
         if force:
@@ -210,6 +223,27 @@ class SSHMeter(sshkit.Client):
 
     def get_ui_page_html(self, timeout: float = 5.0) -> str:
         return self._get_uipage_html(timeout=timeout)
+
+    @staticmethod
+    def _parse_modem_state(value: str) -> Optional[str]:
+        if not value:
+            return None
+
+        match = re.search(
+            r"MODEM:\s*state=(S\d+_[A-Z_]+|\(unknown:-?\d+\))",
+            value,
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+
+        return match.group(1)
+
+    def get_meter_status_text(self) -> str:
+        return self.cli("echo 'cmd.main.meter:status' | socat - UDP:127.0.0.1:8008")
+
+    def get_modem_state(self) -> Optional[str]:
+        return self._parse_modem_state(self.get_meter_status_text())
 
     @staticmethod
     def _strip_html(value: str) -> str:
@@ -879,6 +913,15 @@ fclose($myfile);
         )
         time.sleep(0.5)
     
+    def goto_power(self):
+        self.goto_diagnostics_path(["Power Info"])
+
+    def goto_callin(self):
+        self.goto_diagnostics_path(["Call In"])
+
+    def goto_modem_connection(self):
+        self.goto_diagnostics_path(["Utilities", "Peripherals", "Modem Connection"])
+
     def print_msg(self, msg):
         msg  = re.sub(r'\n[ \t]+', '\n', msg)
         url = f"http://{self.host}:8005/web/control_print_direct.php"

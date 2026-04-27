@@ -1,6 +1,8 @@
 import psycopg
 from lib.meter.ssh_meter import SSHMeter
 from lib.utils import secrets
+from typing import Optional
+from datetime import date
 import json
 
 dbcs = secrets.DBCS
@@ -161,6 +163,80 @@ def retrieve_jobs(limit=10, offset=0, conn: None | psycopg.Connection = None,):
     with psycopg.connect(dbcs, row_factory=psycopg.rows.dict_row) as conn:
         with conn.cursor() as cur:
             cur.execute(sql, (limit, offset))
+            return cur.fetchall()
+
+def retrieve_jobs_filtered(
+    limit: int = 10,
+    date_start: Optional[date | str] = None,
+    date_end: Optional[date | str] = None,
+    meter_id: Optional[int] = None,
+    status: Optional[str] = None,
+    conn: None | psycopg.Connection = None,
+):
+    """
+    Retrieve meter jobs with optional filters.
+
+    Args:
+        limit: number of entries, sorted by latest created_at first
+        date_start: start date for created_at filter
+        date_end: end date for created_at filter; if blank, uses date_start
+        meter_id: optional meter_id filter
+        status: optional status filter ('pass' or 'fail' or others if needed)
+        conn: optional existing psycopg connection
+
+    Returns:
+        List of rows.
+    """
+
+    if date_start and not date_end:
+        date_end = date_start
+
+    query = """
+        SELECT
+            mj.*,
+            m.hostname
+        FROM meter_job mj
+        JOIN meter m ON mj.meter_id = m.id
+    """
+
+    where_clauses = []
+    params = []
+
+    if date_start:
+        where_clauses.append("mj.created_at >= %s")
+        params.append(date_start)
+
+    if date_end:
+        # Make end-date inclusive for the whole day:
+        # created_at < next day
+        where_clauses.append("mj.created_at < (%s::date + INTERVAL '1 day')")
+        params.append(date_end)
+
+    if meter_id is not None:
+        where_clauses.append("mj.meter_id = %s")
+        params.append(meter_id)
+
+    if status:
+        where_clauses.append("mj.status = %s")
+        params.append(status)
+
+    if where_clauses:
+        query += " WHERE " + " AND ".join(where_clauses)
+
+    query += """
+        ORDER BY mj.created_at DESC
+        LIMIT %s;
+    """
+    params.append(limit)
+
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+
+    with psycopg.connect(dbcs, row_factory=psycopg.rows.dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
             return cur.fetchall()
 
 

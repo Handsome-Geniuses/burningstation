@@ -71,7 +71,7 @@ def __mock_start_physical_job(meter_up, buttons=None):
         time.sleep(1)
         print("[👽 mock_start_physical_job] working ...")
     print("[👽 mock_start_physical_job] ... DONE!")
-patch("lib.automation.jobs.start_physical_job", __mock_start_physical_job).start()
+# patch("lib.automation.jobs.start_physical_job", __mock_start_physical_job).start()
 
 if __name__ == "__main__":
     # meter = SSHMeter("192.168.169.20")

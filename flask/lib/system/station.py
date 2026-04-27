@@ -195,13 +195,23 @@ def load_R_to_M(**kwargs):
     return "[load_R_to_M] completed", 200
 
 
+# going to reuse the R to M precheck
+@am_station.operation(timeout=20.0, precheck=load_R_to_M_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
+def load_R_to_L(**kwargs):
+    """Moves meter from right station (R) back to LEFT station (L)"""
+    rm.set_value_list([rm.REVERSE, rm.REVERSE, rm.REVERSE])
+    while not states['mds'][0]: 
+        time.sleep(0.1)
+    print("✅[Station] load_R_to_L completed.", fg="#00ff00", style=STYLE.BOLD)
+    return "[load_R_to_L] completed", 200
+
 # ----------------------------------------------------
 # handle moving meter around
 # ----------------------------------------------------   
 def on_load(**kwargs):
     option = kwargs.get('type', None)
     
-    if option in ("M", "R", "ALL", "ML", "RM"):
+    if option in ("M", "R", "ALL", "ML", "RM", "RL"):
         check_robot_clear_of_conveyor()
     
     if option==None: return
@@ -211,6 +221,7 @@ def on_load(**kwargs):
     elif option=='ALL': return load_ALL() 
     elif option=='ML': return load_M_to_L()
     elif option=='RM': return load_R_to_M()
+    elif option=='RL': return load_R_to_L() # dont actually use this.33
 
 
 # ----------------------------------------------------
@@ -266,6 +277,24 @@ def on_mode(**kwargs):
     else: states['mode'] = mode
     SSEQM.broadcast("state", key_payload("mode", states['mode']))
 
+
+
+# idk what the program name is for shut down?
+def on_robot(**kwargs):
+    action = kwargs.get('wdyw', None)
+    print(kwargs)
+    print("hello?")
+    if action == None: return 
+    elif action == "home": 
+        robot = RobotClient()
+        job_id = robot.run_program("run_safe_home")
+        robot.wait_for_event("program_done", job_id=job_id, timeout=10)
+    elif action == "off" : 
+        robot = RobotClient()
+        job_id = robot.run_program("run_safe_home")
+        robot.wait_for_event("program_done", job_id=job_id, timeout=10)
+        
+
 # ----------------------------------------------------
 # determine action and go!
 # ----------------------------------------------------
@@ -277,6 +306,7 @@ def on_action(action, **kwargs):
     elif action=="tower": res = on_tower(**kwargs)
     elif action=="lamp":  res = on_lamp(**kwargs)
     elif action=="mode":  res = on_mode(**kwargs)
+    elif action=="robot": res = on_robot(**kwargs)
 
     return res if res is not None else ("", 200)
 

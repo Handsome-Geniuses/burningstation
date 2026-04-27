@@ -116,6 +116,47 @@ def __database(table):
     return flask.jsonify(res), 200
 
 
+@bp.get("/database/meter_job")
+def get_meter_jobs():
+    args = flask.request.args.to_dict()
+
+    try:
+        limit = int(args.get("limit", 10))
+    except ValueError:
+        return flask.jsonify({"error": "invalid limit"}), 400
+
+    date_start = args.get("date_start")
+    date_end = args.get("date_end")
+    meter_id_raw = args.get("meter_id")
+    status = args.get("status")
+
+    try:
+        meter_id = int(meter_id_raw) if meter_id_raw not in (None, "") else None
+    except ValueError:
+        return flask.jsonify({"error": "invalid meter_id"}), 400
+
+    if status == "":
+        status = None
+
+    allowed_statuses = {"missing", "n/a", "pass", "fail"}
+    if status is not None and status not in allowed_statuses:
+        return flask.jsonify({
+            "error": f"invalid status '{status}'",
+            "allowed": sorted(allowed_statuses),
+        }), 400
+
+    try:
+        res = database.retrieve_jobs_filtered(
+            limit=limit,
+            date_start=date_start,
+            date_end=date_end,
+            meter_id=meter_id,
+            status=status,
+        )
+    except Exception as e:
+        return flask.jsonify({"error": str(e)}), 500
+
+    return flask.jsonify(res), 200
 
 
 

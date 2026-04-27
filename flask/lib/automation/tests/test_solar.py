@@ -1,9 +1,7 @@
-import os
 import time
 import re
 import inspect
-from datetime import datetime
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Union
 
 from lib.meter.ssh_meter import SSHMeter
 from lib.automation.shared_state import SharedState
@@ -12,14 +10,13 @@ from lib.automation.helpers import check_stop_event, StopAutomation
 from lib.system import lm
 
 
-EXPECTED_MIN_INCREASE_mA = 15
 EXPECTED_MIN_INCREASE_mA_1 = 50
 EXPECTED_MIN_INCREASE_mA_2 = 50
-EXPECTED_DROP_TOLERANCE_mA = 30
 EXPECTED_DROP_TOLERANCE_mA_1 = 30
 EXPECTED_DROP_TOLERANCE_mA_2 = 30
-LAMP_ON_DELAY = 8
-LAMP_OFF_DELAY = 8
+POWER_STATUS_WINDOW_SIZE = 100
+POWER_STATUS_POLL_SECONDS = 3
+POWER_STATUS_WAIT_TIMEOUT_SECONDS = 60
 
 
 def _parse_power_status_line(res: str, shared: SharedState) -> Dict:
@@ -74,19 +71,114 @@ def _parse_power_status_line(res: str, shared: SharedState) -> Dict:
         'power_data': power_data
     }
 
-def get_latest_power_status(meter: SSHMeter, shared: SharedState):
+
+def _parse_power_status_lines(res: str, shared: SharedState) -> List[Dict]:
+    parsed_lines: List[Dict] = []
+    for line in res.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed_lines.append(_parse_power_status_line(line, shared))
+        except ValueError as exc:
+            shared.log(f"Warning: failed to parse power status line '{line}': {exc}")
+    return parsed_lines
+
+
+def get_latest_power_status(
+    meter: SSHMeter,
+    shared: SharedState,
+    count: int = 1,
+    window_size: int = POWER_STATUS_WINDOW_SIZE,
+    log_result: bool = True,
+    log_missing: bool = True,
+) -> Optional[Union[Dict, List[Dict]]]:
+    if count < 1:
+        raise ValueError(f"count must be >= 1, got {count}")
+
     cmd = (
-        "journalctl -u MS3_Platform.service -n 250 --no-pager | "
+        f"journalctl -u MS3_Platform.service -n {window_size} --no-pager | "
         "grep 'Meter:sProcessIPSBusMessage:' | "
         "grep 'Power status:' | "
-        "tail -1"
+        f"tail -n {count}"
     )
     res = meter.cli(cmd)
-    parsed = _parse_power_status_line(res, shared)
-    shared.log(f"Latest power status: {parsed}")
-    # for k,v in parsed.items(): print(f"{k}: {v}")
+    parsed_statuses = _parse_power_status_lines(res, shared)
+    if not parsed_statuses:
+        if log_missing:
+            shared.log(
+                f"No power status found in last {window_size} journal lines "
+                f"(requested count={count})"
+            )
+        return None
 
+    if count == 1:
+        parsed = parsed_statuses[-1]
+        if log_result:
+            shared.log(f"Latest power status: {parsed}")
+        return parsed
+
+    parsed = parsed_statuses[-count:]
+    if log_result:
+        shared.log(f"Latest {len(parsed)} power statuses: {parsed}")
     return parsed
+
+
+def _power_status_identity(status: Optional[Dict]) -> Optional[str]:
+    if not status:
+        return None
+    return f"{status.get('datetime_str', '')}|{status.get('power_status_raw', '')}"
+
+
+def _sleep_with_stop(shared: SharedState, seconds: float, poll_interval: float = 0.25) -> None:
+    deadline = time.time() + max(0.0, seconds)
+    while True:
+        check_stop_event(shared)
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return
+        time.sleep(min(poll_interval, remaining))
+
+
+def wait_for_fresh_power_status(
+    meter: SSHMeter,
+    shared: SharedState,
+    previous_status: Optional[Dict],
+    reason: str,
+    timeout_s: float = POWER_STATUS_WAIT_TIMEOUT_SECONDS,
+    poll_s: float = POWER_STATUS_POLL_SECONDS,
+    window_size: int = POWER_STATUS_WINDOW_SIZE,
+) -> Dict:
+    previous_identity = _power_status_identity(previous_status)
+    previous_datetime = previous_status.get("datetime_str") if previous_status else None
+    shared.log(
+        "Waiting for fresh power status after "
+        f"{reason}. previous_datetime_str={previous_datetime!r}, "
+        f"window_size={window_size}, poll_s={poll_s}, timeout_s={timeout_s}"
+    )
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        latest_status = get_latest_power_status(
+            meter,
+            shared,
+            count=1,
+            window_size=window_size,
+            log_result=False,
+            log_missing=False,
+        )
+        if latest_status is not None:
+            latest_identity = _power_status_identity(latest_status)
+            if previous_identity is None or latest_identity != previous_identity:
+                shared.log(f"Fresh power status after {reason}: {latest_status}")
+                return latest_status
+        _sleep_with_stop(shared, poll_s)
+
+    raise StopAutomation(
+        "Timed out waiting for a fresh power status after "
+        f"{reason} (timeout={timeout_s}s, window_size={window_size})"
+    )
+
 
 def get_numeric_value(val: str) -> float:
     """Extract number from value like '9337mV' -> 9337.0 or '25C' -> 25.0"""
@@ -102,14 +194,21 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     shared.log(f"{meter.host} {func_name} 1/1")
     if not subtest:
         shared.broadcast_progress(meter.host, func_name, 1, 1)
+    
+    meter.goto_power()
 
-    # ensure off and get baseline
     curr = lm.get_value_list()
     if curr[0] or curr[1]:
         lm.lamp(0, False, 100)
         lm.lamp(1, False, 100)
-        time.sleep(LAMP_OFF_DELAY)
-    baseline = get_latest_power_status(meter, shared)
+
+    latest_seen_status = get_latest_power_status(meter, shared)
+    baseline = wait_for_fresh_power_status(
+        meter,
+        shared,
+        latest_seen_status,
+        "capturing baseline with both lamps off",
+    )
     baseline_power = baseline["power_data"]
     charge_off = get_numeric_value(baseline_power["ChargeCurrent"])
     battery_voltage = get_numeric_value(baseline_power["BatteryVoltage"])
@@ -117,10 +216,14 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     shared.log(f"battery_voltage: {battery_voltage}")
 
     # ---- Lamp 1 ON/OFF (rear) ----
-    time.sleep(1)
+    _sleep_with_stop(shared, 1)
     lm.lamp(0, True, 100)
-    time.sleep(LAMP_ON_DELAY)
-    rear_illuminated = get_latest_power_status(meter, shared)
+    rear_illuminated = wait_for_fresh_power_status(
+        meter,
+        shared,
+        baseline,
+        "turning lamp 1 on",
+    )
     charge_on_l1 = get_numeric_value(rear_illuminated["power_data"]["ChargeCurrent"])
     shared.log(f"charge_on_l1: {charge_on_l1}")
 
@@ -128,10 +231,14 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     delta_l1 = charge_on_l1 - charge_off
 
     # ---- Lamp 2 ON/OFF (top) ----
-    time.sleep(1)
+    _sleep_with_stop(shared, 1)
     lm.lamp(1, True, 100)
-    time.sleep(LAMP_ON_DELAY)
-    top_illuminated = get_latest_power_status(meter, shared)
+    top_illuminated = wait_for_fresh_power_status(
+        meter,
+        shared,
+        rear_illuminated,
+        "turning lamp 2 on",
+    )
     top_power = top_illuminated["power_data"]
     charge_on_l2 = get_numeric_value(top_power["ChargeCurrent"])
     solar_voltage = get_numeric_value(top_power["InputVoltage"]) # idk if this is the solar voltage value they want or not
@@ -140,8 +247,12 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
 
     # both off
     lm.lamp(1, False, 100)
-    time.sleep(LAMP_OFF_DELAY)
-    recovery = get_latest_power_status(meter, shared)
+    recovery = wait_for_fresh_power_status(
+        meter,
+        shared,
+        top_illuminated,
+        "turning lamp 2 off",
+    )
     recovery_power = recovery["power_data"]
     charge_off_l1 = get_numeric_value(recovery_power["ChargeCurrent"])
     charge_off_l2 = charge_off_l1

@@ -24,6 +24,17 @@ import { notify } from "@/lib/notify";
 
 const retrieve_limit = 10;
 
+const formatDate = (date: string | number | Date) =>
+    new Date(date).toLocaleString("en-US", {
+        month: "2-digit",
+        day: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true
+    });
+
 const retrieveJobHistoryPlaceholder = async (limit: number, offset: number) => {
     // Placeholder for fetching job history data
     return [
@@ -84,7 +95,8 @@ const JobRow = ({ job, onClick }: { job: any, onClick?: () => void }) => {
             <td className="text-left">{job.id}</td>
             <td className="text-left">{job.hostname}</td>
             <td className="text-left">{job.name}</td>
-            <td className="text-left">{new Date(job.created_at).toLocaleString()}</td>
+            {/* <td className="text-left">{new Date(job.created_at).toLocaleString()}</td> */}
+            <td className="text-left">{job?.created_at.replace(" GMT", "")}</td>
         </tr>
     )
 }
@@ -96,7 +108,7 @@ const Copyable = ({ text }: { text: string }) => {
     return <LucideCopy className="cursor-pointer ml-2" onClick={copyToClipboard} />
 }
 
-const copyme = (text:string) => {
+const copyme = (text: string) => {
     navigator.clipboard.writeText(text)
     notify.info('Copied to clipboard')
 }
@@ -107,7 +119,7 @@ const JobDialog = ({ job }: { job: any }) => {
     const icon = statusIcon(job?.status)
     return (
         <>
-            <DialogContent className="min-w-[85vw] ">
+            <DialogContent className="min-w-[85vw]">
                 <DialogHeader className="gap-0 space-y-0 m-0 p-0 border-0">
                     <DialogTitle>Job Details — {job?.hostname} — {job?.name} — {job?.status}{icon}</DialogTitle>
                     <DialogDescription>
@@ -117,7 +129,7 @@ const JobDialog = ({ job }: { job: any }) => {
 
                 <ScrollArea className="mt-2 max-h-80 overflow-y-auto w-full rounded-md border border-border px-2 mr-2">
                     <Accordion type="single" collapsible>
-                        { job?.data?.kwargs &&
+                        {job?.data?.kwargs &&
                             <AccordionItem value="kwargs">
                                 <AccordionTrigger>program parameters(kwargs)</AccordionTrigger>
                                 <AccordionContent>
@@ -128,7 +140,7 @@ const JobDialog = ({ job }: { job: any }) => {
                                 </AccordionContent>
                             </AccordionItem>
                         }
-                        { job?.data?.results &&
+                        {job?.data?.results &&
                             <AccordionItem value="results">
                                 <AccordionTrigger>results</AccordionTrigger>
                                 <AccordionContent>
@@ -139,7 +151,7 @@ const JobDialog = ({ job }: { job: any }) => {
                                 </AccordionContent>
                             </AccordionItem>
                         }
-                        { job?.jctl &&
+                        {job?.jctl &&
                             <AccordionItem value="journalctl">
                                 <AccordionTrigger>journalctl</AccordionTrigger>
                                 <AccordionContent>

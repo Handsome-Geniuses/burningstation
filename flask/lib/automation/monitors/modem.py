@@ -33,7 +33,23 @@ class ModemMonitor:
         m = msg.lower()
         return ("modem" in m)
 
+    def _clear_connect_watch(self, reason: str):
+        if self._connect_key:
+            key = self._connect_key
+            self._connect_key = None
+            self.shared.log(f"[{self.id}] {reason}; cancel {key}", color=DIM)
+            yield CancelWatch(key)
+
+    def _clear_disconnect_watch(self, reason: str):
+        if self._disconnect_key:
+            key = self._disconnect_key
+            self._disconnect_key = None
+            self.shared.log(f"[{self.id}] {reason}; cancel {key}", color=DIM)
+            yield CancelWatch(key)
+
     def _arm_connect(self, ev: LogEvent):
+        yield from self._clear_connect_watch("replace pending CONNECT watch")
+        yield from self._clear_disconnect_watch("CONNECT requested while waiting for DISCONNECT")
         self._connect_key = f"{self.id}:connect:{int(ev.ts.timestamp())}"
         self.shared.log(f"[{self.id}] arm CONNECT {self._connect_key} t={self.connect_timeout_s:.1f}s", color=BLUE)
         yield StartWatch(
@@ -44,6 +60,8 @@ class ModemMonitor:
         )
 
     def _arm_disconnect(self, ev: LogEvent):
+        yield from self._clear_disconnect_watch("replace pending DISCONNECT watch")
+        yield from self._clear_connect_watch("DISCONNECT requested while waiting for CONNECT")
         self._disconnect_key = f"{self.id}:disconnect:{int(ev.ts.timestamp())}"
         self.shared.log(f"[{self.id}] arm DISCONNECT {self._disconnect_key} t={self.disconnect_timeout_s:.1f}s", color=BLUE)
         yield StartWatch(
@@ -94,9 +112,9 @@ class ModemMonitor:
         msg = ev.msg
         # self.shared.log(f"[{self.id}] Handle: {msg}", color=DIM)
 
-        modem_info = self._parse_modem_info(msg)
-        if modem_info:
-            yield MetaUpdate(device=self.id, data={"modem_info": modem_info})
+        # modem_info = self._parse_modem_info(msg)
+        # if modem_info:
+        #     yield MetaUpdate(device=self.id, data={"modem_info": modem_info})
 
         # Request CONNECT / DISCONNECT
         m = self.re_req_cmd.search(msg)

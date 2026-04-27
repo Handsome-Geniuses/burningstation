@@ -75,7 +75,7 @@ class METERMANAGER:
                         print(f"[{hn}-{ip}]🔧 Just booted? Giving it time to load up ...", fg="#008800")
                         cls.__booted[ip] = time.time()
                         raise cls.__FINALLY
-                    elif time.time() - t0 > 20: pass
+                    elif time.time() - t0 > 30: pass
                     else: raise cls.__FINALLY
 
                 # here, has booted+10s or was booted already
