@@ -759,6 +759,18 @@ def run_pay_to_park_session(
                     f"(payment_type={context.effective_payment_type.name}, since={context.card_journal_since or cycle_journal_since})"
                 )
 
+    # Future reference: the UI can hit success here and still fall into
+    # Out Of Order a few seconds later if receipt printing stays PENDING long
+    # enough to trigger UXAppSetPrintResult(... false) / Fault PRINTER, which
+    # then flips PAYANDDISPLAY to isCanPrint=false. If we need to catch the
+    # cause in the same run, this post-success window is the place to watch it.
+    # Helpful references:
+    # - run_pay_to_park_session() / reset_to_parking_home()
+    # - flask/logs/2026-04-27/13-56-00_30004201_physical_cycle_all.log
+    # - flask/logs/2026-04-27/14-41-07_30004201_cycle_all.log
+    # - flask/logs/2026-04-27/14-54-08_30004201_cycle_all.log
+    # - flask/logs/2026-04-27/14-58-34_30004201_physical_cycle_all.log
+    # - flask/logs/2026-04-27/14-58-34_30004201_out_of_order_page.log
     post_success_deadline = time.time() + (8.0 if meter.device_firmware("printer") else 4.0)
     last_post_success_signature = None
     while time.time() < post_success_deadline:
@@ -852,4 +864,4 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
     end = time.time() + 40
     while time.time() < end:
         check_stop_event(shared)
-        time.sleep(5)
+        time.sleep(1)
