@@ -51,6 +51,28 @@ PROG2MODULE = {
     "robot_keypad2": "KBD_CONTROLLER"
 }
 
+def _wait_for_middle_bay_full(
+    timeout_s: float = 20.0,
+    middle_bay_channel: int = 1,
+    poll_interval_s: float = 0.5,
+):
+    deadline = time.time() + max(timeout_s, 0.0)
+    last_sensor_value = 0
+    start_index = middle_bay_channel * 3
+    end_index = start_index + 3
+
+    while True:
+        bay_states = states.get("mds", [False] * 9)[start_index:end_index]
+        last_sensor_value = sum(int(state) << i for i, state in enumerate(bay_states))
+        # print(f"Middle bay sensor value: {last_sensor_value:03b}, states: {bay_states}, time left: {deadline - time.time():.1f}s")
+
+        if len(bay_states) == 3 and all(bay_states):
+            return True, last_sensor_value
+        if time.time() >= deadline:
+            return False, last_sensor_value
+
+        time.sleep(poll_interval_s)
+
 def get_default_buttons(modules, meter_type):
     buttons = []
     if "KEY_PAD_2" in modules:
@@ -228,6 +250,8 @@ def start_passive_job(meter_ip):
     meter = mm.get_meter(meter_ip)
     meter.set_ui_mode("banner")
     modules = meter.module_info
+    meter.setup_custom_display()
+    
     has_nfc = "KIOSK_NFC" in modules
     has_modem = "MK7_XE910" in modules
     has_printer = "PRINTER" in modules
@@ -252,10 +276,15 @@ def start_passive_job(meter_ip):
 
 
 def start_physical_job(meter_ip, buttons=None):
+    loaded, sensor_value = _wait_for_middle_bay_full(timeout_s=20.0)
+    if not loaded:
+        msg = f"Cannot start physical job since station M is not fully occupied; middle-bay sensors read {sensor_value:03b} (expected 111)"
+        master.broadcast('notify', {'ntype': 'error', 'msg': msg})
+        return False, msg
+
     robot = RobotClient()
     robot.flush_event_queue()
 
-    time.sleep(10) # wait for meter to move from L to M
     meter = mm.get_meter(meter_ip)
     modules = meter.module_info
     meter.set_brightness(15)
@@ -286,6 +315,7 @@ def start_physical_job(meter_ip, buttons=None):
 
     success, msg = start_job(meter_ip, "physical_cycle_all", kwargs, verbose=True)
     time.sleep(5) # incase robot needs to get out of there
+    return success, msg
 
 
 
