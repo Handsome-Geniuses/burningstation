@@ -80,7 +80,7 @@ def task_refresh_meters(count):
     if count % 6 == 0:
         fresh,stale,ips = mm.refresh()
         # print(f"ips: {ips}")
-        print(f"fresh: {fresh}, stale: {stale}, ips: {ips}")
+        # print(f"fresh: {fresh}, stale: {stale}, ips: {ips}")
         for ip in fresh: 
             print(f"fresh ip: {ip}")
             if states['mode']=='auto':

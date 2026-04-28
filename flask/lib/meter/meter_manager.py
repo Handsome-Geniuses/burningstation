@@ -78,7 +78,7 @@ class METERMANAGER:
                     elif time.time() - t0 > 30: pass
                     else: raise cls.__FINALLY
 
-                # here, has booted+10s or was booted already
+                # here, has booted + X seconds or was booted already
                 print(f"[{hn}-{ip}] Attempting to enter diagnostics ...", fg="#888800")
                 meter.force_diagnostics()
                 time.sleep(0.1)

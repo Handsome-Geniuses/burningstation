@@ -290,6 +290,7 @@ def test_cycle_modem(meter: SSHMeter, shared: SharedState, **kwargs):
                 modem_on = False
                 raise RuntimeError("Modem Connection Error")
 
+            _sleep_with_stop(shared, 5.0)
             meter.toggle_modem(False)
             modem_on = False
             disconnected_state, disconnect_elapsed_s = _wait_for_modem_state(
@@ -305,6 +306,8 @@ def test_cycle_modem(meter: SSHMeter, shared: SharedState, **kwargs):
                 f"{meter.host} modem cycle {cycle_num}: "
                 f"disconnected={disconnected_state} in {disconnect_elapsed_s:.1f}s",
             )
+            _sleep_with_stop(shared, 5.0)
+
         except Exception as exc:
             if modem_on:
                 _stop_modem_after_error(

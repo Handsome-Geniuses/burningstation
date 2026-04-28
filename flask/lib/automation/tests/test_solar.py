@@ -194,7 +194,8 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     shared.log(f"{meter.host} {func_name} 1/1")
     if not subtest:
         shared.broadcast_progress(meter.host, func_name, 1, 1)
-    
+
+    meter.set_ui_mode("banner") # shouldnt matter if kwargs.charuco_frame is None bc robot isnt used
     meter.goto_power()
 
     curr = lm.get_value_list()
