@@ -31,6 +31,7 @@ PROG2DEVICE = {
     "cycle_coin_shutter":"coin shutter", "coin shutter":"coin shutter",
     "cycle_nfc":"nfc", "nfc":"nfc",
     "cycle_modem":"modem", "modem":"modem",
+    "cycle_call_in":"call in", "call in":"call in", "call_in":"call in",
     "cycle_meter_ui":"screen test", "screen test":"screen test",
     "cycle_all": None,
     "keypad": "keypad",
@@ -47,6 +48,9 @@ PROG2MODULE = {
     "nfc":"KIOSK_NFC",
     "cycle_modem":"MK7_XE910", 
     "modem":"MK7_XE910",
+    "cycle_call_in":"MK7_XE910",
+    "call in":"MK7_XE910",
+    "call_in":"MK7_XE910",
     "robot_keypad": "KEY_PAD_2",
     "robot_keypad2": "KBD_CONTROLLER"
 }

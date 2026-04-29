@@ -27,6 +27,7 @@ DEVICE_TO_MODULE = {
     'coin shutter': 'COIN_SHUTTER',
     'nfc': 'KIOSK_NFC',
     'modem': 'MK7_XE910',
+    'call in': 'MK7_XE910',
     'screen test': 'yes'
 }
 
