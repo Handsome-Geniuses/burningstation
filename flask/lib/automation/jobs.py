@@ -21,6 +21,7 @@ import requests
 import time
 
 from lib.system.states import states
+from lib.automation.settings import *
 
 
 StatusType = Literal['idle', 'running', 'finished', 'error', 'cancelled']
@@ -252,22 +253,23 @@ def start_passive_job(meter_ip):
     modules = meter.module_info
     meter.setup_custom_display()
     
-    has_nfc = "KIOSK_NFC" in modules
-    has_modem = "MK7_XE910" in modules
-    has_printer = "PRINTER" in modules
-    has_coin_shutter = "COIN_SHUTTER" in modules
-    has_screen_test = True  # all meters have screen test
+    # has_nfc = "KIOSK_NFC" in modules
+    # has_modem = "MK7_XE910" in modules
+    # has_printer = "PRINTER" in modules
+    # has_coin_shutter = "COIN_SHUTTER" in modules
+    # has_screen_test = True  # all meters have screen test
 
-    kwargs = {
-        "numBurnCycles": 1,
-        "numBurnDelay": 10,
-        "nfc": {"enabled": has_nfc},
-        "modem": {"enabled": has_modem},
-        # "printer": {"enabled": has_printer},
-        "printer": {"enabled": 0},
-        "coin shutter": {"enabled": has_coin_shutter},
-        "screen test": {"enabled": has_screen_test, "payment_type": "coins", "debug_ui": 0},
-    }
+    # kwargs = {
+    #     "numBurnCycles": 1,
+    #     "numBurnDelay": 10,
+    #     "nfc": {"enabled": has_nfc},
+    #     "modem": {"enabled": has_modem},
+    #     # "printer": {"enabled": has_printer},
+    #     "printer": {"enabled": 0},
+    #     "coin shutter": {"enabled": has_coin_shutter},
+    #     "screen test": {"enabled": has_screen_test, "payment_type": "coins", "debug_ui": 0},
+    # }
+    kwargs = build_passive_kwargs(modules)
 
     if states["mode"] == "auto":
         response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"L"})
@@ -290,28 +292,30 @@ def start_physical_job(meter_ip, buttons=None):
     meter.set_brightness(15)
     meter.setup_custom_display()
     
-    has_solar = True
-    has_coin_shutter = "COIN_SHUTTER" in modules
-    has_nfc = "KIOSK_NFC" in modules
-    buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
+    # has_solar = True
+    # has_coin_shutter = "COIN_SHUTTER" in modules
+    # has_nfc = "KIOSK_NFC" in modules
+    # buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
 
-    kwargs = {
-        "numBurnCycles": 1,
-        "numBurnDelay": 5,
-        "solar": {"enabled": has_solar},
-        "coin_shutter": {"enabled": has_coin_shutter},
-        ### "nfc": {"enabled": has_nfc},
-        "nfc_gui": {
-            "enabled": has_nfc,
-            "payment_type": "robot_contactless",
-            "robot_ready_timeout": 20.0,
-        },
-        "robot_keypad": {"enabled": bool(buttons), "buttons": buttons},
+    # kwargs = {
+    #     "numBurnCycles": 1,
+    #     "numBurnDelay": 5,
+    #     "solar": {"enabled": has_solar},
+    #     "coin_shutter": {"enabled": has_coin_shutter},
+    #     ### "nfc": {"enabled": has_nfc},
+    #     "nfc_gui": {
+    #         "enabled": has_nfc,
+    #         "payment_type": "robot_contactless",
+    #         "robot_ready_timeout": 20.0,
+    #     },
+    #     "robot_keypad": {"enabled": bool(buttons), "buttons": buttons},
 
-        "monitors": [
-            ("robot_keypad", {"buttons": buttons})
-        ]
-    }
+    #     "monitors": [
+    #         ("robot_keypad", {"buttons": buttons})
+    #     ]
+    # }
+
+    kwargs = build_physical_kwargs(modules)
 
     success, msg = start_job(meter_ip, "physical_cycle_all", kwargs, verbose=True)
     time.sleep(5) # incase robot needs to get out of there
