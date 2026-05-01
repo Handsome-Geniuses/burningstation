@@ -75,6 +75,42 @@ It also waits for the Call In diagnostics page text to change from
 `Wait for the current Call In to complete.` to `Press [+] to Call In.` so we do
 not press `+` while the UI is still blocking manual call-in.
 
+### Fresh boot or fresh MS3 runtime restart
+
+MS3 has a separate startup call-in path in `assets/ms3/main/MS3.c`.
+
+Important source detail:
+
+- The code currently uses `RESTART_CALLIN_SECS = 60`.
+- The nearby comment still says "after 5 minutes", but that comment is stale.
+
+That startup timer calls `CIMCallInNow()`, which only does work when
+CallInManager is still in `S1_WAITING_FOR_CALL_TIME`.
+
+This means two things:
+
+1. A startup call-in should not stack on top of an already-started manual
+   call-in, because `CIMCallInNow()` is ignored once CIM has already left `S1`.
+2. The automation can still race the startup timer if the test starts very
+   soon after boot or after an MS3 runtime restart. In that case the test might
+   begin just before the startup call-in fires and effectively pre-empt that
+   one-shot startup attempt.
+
+To avoid that race, `cycle_call_in.py` now performs a startup guard before the
+normal ready/idle pre-check:
+
+1. It estimates how old the current MS3 runtime is from the platform journal.
+2. If the runtime is still fresh, it waits until the platform journal shows the
+   explicit `startup call-in` marker, or until the guard window expires.
+3. It then falls through to the existing ready/idle pre-check, which still
+   waits for any active call-in to finish before pressing `+`.
+#! I'm not really sure how it will handle if the startup call-in receives and begins an automatic update...
+#! I also dont really know what page the auto update leaves off on, or if it created another startup Call-In
+
+The guard is intentionally based on source-backed behavior and gives extra
+cushion. It uses current runtime age first, not only system boot age, because
+MS3 can restart within the same Linux boot.
+
 ### Call In Manager suspended
 
 The diagnostics page allows manual call-in even when CIM is suspended. The test
@@ -129,8 +165,10 @@ The most important kwargs in `cycle_call_in.py` are:
 - `recovery_timeout_s`
 - `post_recovery_guard_s`
 - `post_recovery_timeout_s`
+- `startup_guard_s`
 - `platform_journal_max_lines`
 - `modem_journal_max_lines`
+- `startup_platform_journal_max_lines`
 
 If you need tighter journal windows, reduce the journal line counts first
 before changing the state-machine timeouts.
