@@ -67,7 +67,12 @@ def on_load_done(stopped):
 
 @async_fire_and_forget
 def on_load_timeout():
-    pass
+    emergency.state = True
+
+@async_fire_and_forget
+def on_load_exception(e: Exception):
+    print(f"❌[Station] load error: {e}", fg="#ff5555", style=STYLE.BOLD)
+    emergency.state = True
 # ----------------------------------------------------
 # Align meter in loading bay
 # ----------------------------------------------------
@@ -79,7 +84,7 @@ def load_L_precheck(**kwargs):
         return "Nothing to load", 409
     return None     # passed pre-check
 
-@am_station.operation(timeout=20.0, precheck=load_L_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
+@am_station.operation(timeout=20.0, precheck=load_L_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout, on_exception=on_load_exception)
 def load_L(**kwargs):
     """Meter was loaded onto station1. Needs alignment"""
     rm.set_value_list([rm.FORWARD, rm.COAST, rm.COAST])
@@ -99,7 +104,7 @@ def load_M_precheck(**kwargs):
         return "M is occupied", 409
     return None     # passed pre-check
 
-@am_station.operation(timeout=20.0, precheck=load_M_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
+@am_station.operation(timeout=20.0, precheck=load_M_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout, on_exception=on_load_exception)
 def load_M(**kwargs):
     """Moves meter from station1 to station2"""
     rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.COAST])
@@ -118,7 +123,7 @@ def load_R_precheck(**kwargs):
         return "R is occupied", 409
     return None     # passed pre-check
 
-@am_station.operation(timeout=20.0, precheck=load_R_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
+@am_station.operation(timeout=20.0, precheck=load_R_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout, on_exception=on_load_exception)
 def load_R(**kwargs):
     """Moves meter from station2 to station3"""
     rm.set_value_list([rm.COAST, rm.FORWARD, rm.FORWARD])
@@ -141,7 +146,7 @@ def load_ALL_precheck(**kwargs):
         return "[load_ALL] R occupied", 204
     return None     # passed pre-check
 
-@am_station.operation(timeout=3.0, precheck=load_ALL_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
+@am_station.operation(timeout=3.0, precheck=load_ALL_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout, on_exception=on_load_exception)
 def load_ALL(**kwargs):
     value = mdm.get_value()
     rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.FORWARD])
@@ -168,7 +173,7 @@ def load_M_to_L_precheck(**kwargs):
         return "L is occupied", 409
     return None  # passed pre-check
 
-@am_station.operation(timeout=20.0, precheck=load_M_to_L_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
+@am_station.operation(timeout=20.0, precheck=load_M_to_L_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout, on_exception=on_load_exception)
 def load_M_to_L(**kwargs):
     """Moves meter from middle station (M) back to left station (L)"""
     rm.set_value_list([rm.REVERSE, rm.REVERSE, rm.COAST])
@@ -185,7 +190,7 @@ def load_R_to_M_precheck(**kwargs):
         return "M is occupied", 409
     return None  # passed pre-check
 
-@am_station.operation(timeout=20.0, precheck=load_R_to_M_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
+@am_station.operation(timeout=20.0, precheck=load_R_to_M_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout, on_exception=on_load_exception)
 def load_R_to_M(**kwargs):
     """Moves meter from right station (R) back to middle station (M)"""
     rm.set_value_list([rm.COAST, rm.REVERSE, rm.REVERSE])
@@ -196,7 +201,7 @@ def load_R_to_M(**kwargs):
 
 
 # going to reuse the R to M precheck
-@am_station.operation(timeout=20.0, precheck=load_R_to_M_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout)
+@am_station.operation(timeout=20.0, precheck=load_R_to_M_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout, on_exception=on_load_exception)
 def load_R_to_L(**kwargs):
     """Moves meter from right station (R) back to LEFT station (L)"""
     rm.set_value_list([rm.REVERSE, rm.REVERSE, rm.REVERSE])
@@ -277,6 +282,13 @@ def on_mode(**kwargs):
     else: states['mode'] = mode
     SSEQM.broadcast("state", key_payload("mode", states['mode']))
 
+def on_emergency(**kwargs):
+    value = kwargs.get('value', None)
+    if value is None:
+        return "Missing emergency value", 400
+    emergency.state = bool(value)
+    return "", 200
+
 
 
 # idk what the program name is for shut down?
@@ -306,6 +318,7 @@ def on_action(action, **kwargs):
     elif action=="tower": res = on_tower(**kwargs)
     elif action=="lamp":  res = on_lamp(**kwargs)
     elif action=="mode":  res = on_mode(**kwargs)
+    elif action=="emergency": res = on_emergency(**kwargs)
     elif action=="robot": res = on_robot(**kwargs)
 
     return res if res is not None else ("", 200)

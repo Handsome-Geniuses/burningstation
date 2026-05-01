@@ -14,7 +14,7 @@ from lib.gpio.gpio_setup import hardware_map
 from lib.system import sim,override,station,program
 from lib import database
 
-
+from lib.store import store
 bp = flask.Blueprint("hello", __name__)
 
 # ================================================================
@@ -198,3 +198,61 @@ def __testing():
     return {"status": "started"}, 200
 
     return "testing", 200
+
+
+
+
+# ================================================================
+# settings
+# ================================================================
+@bp.get("/settings")
+def get_settings():
+    return flask.jsonify(store.to_frontend())
+
+@bp.get("/settings/values")
+def get_values():
+    return flask.jsonify(store.to_dict())
+
+@bp.get("/settings/schema")
+def get_schema():
+    return flask.jsonify(store.get_schema())
+
+@bp.post("/settings") # careful here, for lazy update full tree
+def set_settings():
+    data = flask.request.get_json()
+
+    if not data:
+        return {"error": "No JSON body provided"}, 400
+
+    try:
+        store.set_from_dict(data)
+        return {"status": "ok"}
+    except Exception as e:
+        return {"error": str(e)}, 400
+    
+@bp.patch("/settings")  # will probably use this mostly. partial updates
+def update_settings():
+    data = flask.request.get_json()
+
+    if not data:
+        return {"error": "No JSON body provided"}, 400
+
+    try:
+        updated = store.update_from_dict(data)
+        return flask.jsonify(updated.model_dump())
+    except Exception as e:
+        return {"error": str(e)}, 400
+    
+@bp.post("/settings/save")
+def save_settings():
+    store.save()
+    return {"status": "saved"}
+
+@bp.post("/settings/reload")
+def reload_settings():
+    settings = store.reload()
+    return flask.jsonify(settings.model_dump())
+
+
+
+

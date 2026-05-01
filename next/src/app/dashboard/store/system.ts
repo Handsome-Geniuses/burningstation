@@ -20,6 +20,9 @@ export interface SystemState {
     // flag for ?handsome 
     handsome: boolean,
 
+    // flag for ?playground
+    playground: boolean,
+
     // flag for sse connection
     connected: boolean
 
@@ -42,6 +45,7 @@ export const initialSystemState: SystemState = {
     mds: [false, false, false, false, false, false, false, false, false],
     emergency: false,
     handsome: false,
+    playground: false,
     connected: false,
     currentTab: undefined,
     running: false,

@@ -31,6 +31,7 @@ log.setLevel(logging.ERROR)
 
 # app setup
 app = flask.Flask(__name__)
+app.json.sort_keys = False
 # cors = CORS(app, supports_credentials=True)
 cors = CORS(
     app,

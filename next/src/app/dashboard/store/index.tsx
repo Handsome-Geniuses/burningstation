@@ -84,7 +84,9 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
 
     // Initial setup
     useEffect(() => {
-        systemDispatch({ type: 'set', key: 'handsome', value: new URLSearchParams(window.location.search).has('handsome') })
+        const searchParams = new URLSearchParams(window.location.search)
+        systemDispatch({ type: 'set', key: 'handsome', value: searchParams.has('handsome') })
+        systemDispatch({ type: 'set', key: 'playground', value: searchParams.has('playground') })
         flaskconnect()
         return () => { flasksse.current?.close() }
     }, [])

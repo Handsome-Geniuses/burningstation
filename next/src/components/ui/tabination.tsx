@@ -43,7 +43,10 @@ const TTrigger = (props: React.ComponentPropsWithoutRef<typeof TabsTrigger>) => 
 
 const TContent = (props: React.ComponentPropsWithoutRef<typeof TabsContent>) => {
     return (
-        <TabsContent {...props} />
+        <TabsContent
+            {...props}
+            className={`h-full min-h-0 mt-0 ${props.className ?? ""}`}
+        />
     )
 }
 
@@ -72,12 +75,12 @@ export const Tabination = ({ tabs, ...props }: TabinationProps & React.Component
         <Tabs
             value={systemState.currentTab ?? defaultValue}
             onValueChange={changeTab}
-            className="h-full w-full gap-0"
+            className="h-full min-h-0 w-full gap-0"
             {...props}
         >
             {tabs.map((tab) => (
                 <TContent key={tab.value} value={tab.value}>
-                    <div className="w-full h-full relative flex flex-col [&>*]:flex-1">
+                    <div className="relative flex h-full min-h-0 w-full flex-col [&>*]:flex-1 [&>*]:min-h-0">
                         {tab.content}
                     </div>
                 </TContent>
