@@ -969,7 +969,6 @@ def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
             shared.broadcast_progress(meter.host, "call in", cycle_num, count)
 
         meter.goto_callin()
-        shared.set_allowed(set(), reason="Call-in pre-check in progress")
         startup_guard = _wait_for_startup_call_in_guard(
             meter,
             shared,
