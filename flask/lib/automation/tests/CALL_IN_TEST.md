@@ -105,7 +105,6 @@ normal ready/idle pre-check:
 3. It then falls through to the existing ready/idle pre-check, which still
    waits for any active call-in to finish before pressing `+`.
 #! I'm not really sure how it will handle if the startup call-in receives and begins an automatic update...
-#! I also dont really know what page the auto update leaves off on, or if it created another startup Call-In
 
 The guard is intentionally based on source-backed behavior and gives extra
 cushion. It uses current runtime age first, not only system boot age, because
@@ -126,7 +125,7 @@ The test handles this by:
 1. Detecting runtime loss or splash after call-in start.
 2. Waiting for the meter runtime to recover.
 3. Optionally checking the previous boot's journals if recovery suggests a
-   restart happened.
+   restart happened. #! meter does not support previous boot journals, only current.
 4. Holding a post-recovery guard window so the meter can settle before the test
    exits.
 
@@ -134,6 +133,33 @@ The source basis for this is `UpdaterCheckForUpdates()` in `assets/ms3/main/Upda
 Updater logic only runs when the UI is idle and ConnectionServer no longer has
 an active connection need, so updater markers are valid evidence that the
 connection was already released.
+
+#### Observed example: added-to-DMS meter, manual Call In, then update
+
+The log
+`logs/2026-04-28/listen_during_call-in_and_update_20260428_091920-listen_all.log`
+shows a useful real case:
+
+1. A manual diagnostics Call In completed.
+2. Updater then logged `Installing legacy config` and `Restarting, to use new
+   legacy config`.
+3. That restart was an MS3 services/runtime restart via `systemctl restart
+   MS3.target`, not a full Linux reboot.
+4. After restart, MS3 came back through `Loading.html`, then normal idle/home
+   UI activity was seen, including `Idle.jpg`.
+5. Later diagnostics key presses re-entered diagnostics, so the meter did not
+   appear to remain parked on `Services > Call In` by itself.
+6. About 60 seconds after the restarted runtime came up, MS3 logged the
+   explicit `startup call-in` marker and began another call-in through the
+   normal CallInManager path.
+
+So for this scenario, the practical takeaway is:
+
+- post-update behavior looked like an MS3 runtime/services restart, not a full
+  OS reboot
+- the meter appears to have returned to normal idle/home UI before automation
+  navigated back into diagnostics
+- the restarted runtime did perform another startup call-in
 
 ## Key Source References
 
