@@ -1,7 +1,7 @@
 # Call-In Test Notes
 
-`cycle_call_in.py` is the end-to-end modem/server validation for MS3 meters.
-It is intentionally different from `cycle_modem.py`.
+`flask\lib\automation\tests\cycle_call_in.py` is the end-to-end modem/server validation for MS3 meters.
+It is intentionally different from `flask\lib\automation\tests\cycle_modem.py`.
 
 ## What This Test Proves
 

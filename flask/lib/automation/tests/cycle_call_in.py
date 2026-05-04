@@ -7,7 +7,7 @@ Call In `+` key, then validates the session using three sources:
 2. `journalctl -u MS3_Modem.service` for compact modem attach/detach proof.
 3. `journalctl -u MS3_Platform.service` for Session Agent and updater events.
 
-See `CALL_IN_TEST.md` in this directory for maintenance notes and expected
+See `flask\lib\docs\meter\cycle_call_in.md` for maintenance notes and expected
 behavior.
 """
 
