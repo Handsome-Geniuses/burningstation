@@ -5,6 +5,7 @@ from lib.automation.tests.cycle_nfc import test_cycle_nfc
 from lib.automation.tests.cycle_modem import test_cycle_modem
 from lib.automation.tests.cycle_print import test_cycle_print
 from lib.automation.tests.cycle_meter_ui import test_cycle_meter_ui
+from lib.automation.tests.cycle_call_in import test_cycle_call_in
 from lib.automation.helpers import StopAutomation
 import time
 import inspect
@@ -16,6 +17,7 @@ DEVICES = [
     ("modem", test_cycle_modem, {}),
     ("printer", test_cycle_print, {}),
     ("screen test", test_cycle_meter_ui, {}),
+    ("call in", test_cycle_call_in, {}),
 ]
 
 CYCLE_ALL_GLOBAL_KEYS = {"numBurnCycles", "numBurnDelay", "monitors", "broadcast_job"}

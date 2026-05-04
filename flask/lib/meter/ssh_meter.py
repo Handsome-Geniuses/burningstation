@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from lib.utils import secrets
 from lib.automation.shared_state import SharedState
+from lib.meter.coin_utils import clear_coin_tallies as clear_coin_tallies_impl
 from lib.meter.display_utils import (
     CHARUCO_PATHS, write_ui_page, write_ui_overlay,
     upload_image, is_custom_display_current,
@@ -27,8 +28,38 @@ DEVICE_TO_MODULE = {
     'coin shutter': 'COIN_SHUTTER',
     'nfc': 'KIOSK_NFC',
     'modem': 'MK7_XE910',
+    'call in': 'MK7_XE910',
     'screen test': 'yes'
 }
+
+SPECIAL_CARD_TRACK2 = {
+    "COINCOLLECTION": "1011977700005667=2612201201018400000",
+    "METERDIAGNOSTICS": "1111977700003893=2612201201018400000",
+}
+
+LEGACY_CARD_READ_TEMPLATE_HEX = (
+    "00018800004ab79ec30b42cba2dd0100"
+    "01000132313039002400000000000000"
+    "00000000000000000000000000000000"
+    "00000000000000000000000000000000"
+    "00000000000000000000000000000000"
+    "00000000000000000000000000000000"
+    "00000000000000000000000000003431"
+    "30303339303435373834323937353d32"
+    "31303932303132303130313834303030"
+    "303000000000"
+)
+
+CARD_READ_HEADER_LEN = 14
+CARD_READ_SRC_MODULE_OFFSET = 5
+CARD_READ_READ_TYPE_OFFSET = 2
+CARD_READ_ENCRYPTION_TYPE_OFFSET = 3
+CARD_READ_CARD_TYPE_OFFSET = 4
+CARD_READ_EXP_DATE_OFFSET = 5
+CARD_READ_TRACK2_OFFSET = 16 + 80
+CARD_READ_TRACK2_MAX_LEN = 40
+CARD_READ_NFC_MODULE = 75
+CARD_READ_TYPE_MSD_CONTACTLESS = 3
 
 class Firmwares(TypedDict):
     MK7_XE910: str
@@ -447,6 +478,8 @@ class SSHMeter(sshkit.Client):
             press('plus'), press('cancel'), press('1'), press('A'), press('Enter')
         """
         label_map = {
+            "+": "plus",
+            "-": "minus",
             "enter": "aEnter",
             "back": "aBack",
             "ok": "okay",
@@ -921,6 +954,9 @@ fclose($myfile);
 
     def goto_modem_connection(self):
         self.goto_diagnostics_path(["Utilities", "Peripherals", "Modem Connection"])
+    
+    def goto_coins(self):
+        self.goto_diagnostics_path(["Utilities", "Coins"])
 
     def print_msg(self, msg):
         msg  = re.sub(r'\n[ \t]+', '\n', msg)
@@ -1087,6 +1123,110 @@ fclose($myfile);
                 f"{self.host} Sent coin (index={index}, value={value}) | Status: {resp.status_code}"
             )
         return resp
+
+    def clear_coin_tallies(
+        self,
+        *,
+        wallet_reset_delay: float = 0.3,
+        collection_start_timeout: float = 4.0,
+        collection_flow_timeout: float = 30.0,
+        verify_timeout: float = 10.0,
+        poll_interval: float = 1.0,
+    ) -> bool:
+        return clear_coin_tallies_impl(
+            self,
+            wallet_reset_delay=wallet_reset_delay,
+            collection_start_timeout=collection_start_timeout,
+            collection_flow_timeout=collection_flow_timeout,
+            verify_timeout=verify_timeout,
+            poll_interval=poll_interval,
+        )
+
+    def _send_raw_ipsbus_hex(self, hex_payload: str, delay: float = 0.1) -> None:
+        compact = re.sub(r"\s+", "", hex_payload or "")
+        if not compact:
+            raise ValueError("Raw IPSBus payload must not be empty")
+        if len(compact) % 2 != 0:
+            raise ValueError(f"Raw IPSBus payload has odd hex length: {len(compact)}")
+
+        escaped = "".join(
+            f"\\x{compact[index:index + 2]}"
+            for index in range(0, len(compact), 2)
+        )
+        cmd = f"printf '%b' '{escaped}' | socat -u - udp-send:127.0.0.1:8002"
+        self.cli(cmd)
+        time.sleep(delay)
+
+    @staticmethod
+    def _build_legacy_special_card_hex(
+        track2: str,
+        *,
+        module: int = CARD_READ_NFC_MODULE,
+        read_type: int = CARD_READ_TYPE_MSD_CONTACTLESS,
+    ) -> str:
+        if not track2:
+            raise ValueError("track2 must not be empty")
+        if len(track2) > CARD_READ_TRACK2_MAX_LEN:
+            raise ValueError(
+                f"track2 too long for legacy card frame: {len(track2)} > {CARD_READ_TRACK2_MAX_LEN}"
+            )
+
+        match = re.search(r"=(\d{4})", track2)
+        if not match:
+            raise ValueError(f"track2 is missing YYMM expiry: {track2!r}")
+
+        payload = bytearray.fromhex(LEGACY_CARD_READ_TEMPLATE_HEX)
+        payload[CARD_READ_SRC_MODULE_OFFSET] = module & 0xFF
+        payload[CARD_READ_HEADER_LEN + CARD_READ_READ_TYPE_OFFSET] = read_type & 0xFF
+        payload[CARD_READ_HEADER_LEN + CARD_READ_ENCRYPTION_TYPE_OFFSET] = 0
+        payload[CARD_READ_HEADER_LEN + CARD_READ_CARD_TYPE_OFFSET] = 0
+
+        exp_yymm = match.group(1).encode("ascii")
+        payload[
+            CARD_READ_HEADER_LEN + CARD_READ_EXP_DATE_OFFSET:
+            CARD_READ_HEADER_LEN + CARD_READ_EXP_DATE_OFFSET + len(exp_yymm)
+        ] = exp_yymm
+
+        track2_bytes = track2.encode("ascii")
+        track2_start = CARD_READ_HEADER_LEN + CARD_READ_TRACK2_OFFSET
+        track2_end = track2_start + CARD_READ_TRACK2_MAX_LEN
+        payload[track2_start:track2_end] = b"\x00" * CARD_READ_TRACK2_MAX_LEN
+        payload[track2_start:track2_start + len(track2_bytes)] = track2_bytes
+        return payload.hex()
+
+    def present_special_card_raw(
+        self,
+        card_name: str,
+        *,
+        delay: float = 0.1,
+        module: int = CARD_READ_NFC_MODULE,
+    ) -> requests.Response:
+        normalized = re.sub(r"[^A-Z]", "", str(card_name or "").upper())
+        track2 = SPECIAL_CARD_TRACK2.get(normalized)
+        if track2 is None:
+            supported = ", ".join(sorted(SPECIAL_CARD_TRACK2))
+            raise ValueError(f"Unsupported special card '{card_name}'. Supported: {supported}")
+
+        hex_payload = self._build_legacy_special_card_hex(track2, module=module)
+        self._send_raw_ipsbus_hex(hex_payload, delay=delay)
+
+        if getattr(self, "verbose", False):
+            print(
+                f"{self.host} Sent raw special card: {normalized} | "
+                f"module={module} | payload_len={len(hex_payload) // 2}"
+            )
+
+        resp = requests.Response()
+        resp.status_code = 200
+        resp._content = hex_payload.encode("ascii")
+        resp.headers["X-Busdev-Bypass"] = "raw-ipsbus"
+        return resp
+
+    def present_coin_collection_card(self, delay: float = 0.1) -> requests.Response:
+        return self.present_special_card_raw("COINCOLLECTION", delay=delay)
+
+    def present_meter_diagnostics_card(self, delay: float = 0.1) -> requests.Response:
+        return self.present_special_card_raw("METERDIAGNOSTICS", delay=delay)
     
     def custom_busdev(self, button_name, button_value, delay=0.1):
         url = f"http://{self.host}:8005/web/busdev.php"

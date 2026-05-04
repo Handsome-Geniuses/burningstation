@@ -122,6 +122,23 @@ def random_plate(length: int = 7) -> str:
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
 
+def _clear_screen_test_coin_tallies(
+    meter: SSHMeter,
+    shared: Optional[SharedState],
+    *,
+    reason: str,
+) -> None:
+    try:
+        coin_tally_reset = meter.clear_coin_tallies()
+    except Exception as exc:
+        if shared:
+            shared.log(f"{meter.host} screen test clear_coin_tallies warning ({reason}) | {exc}")
+        return
+
+    if shared:
+        shared.log(f"{meter.host} screen test clear_coin_tallies result = {coin_tally_reset} ({reason})")
+
+
 def _coerce_bool(value, default: bool = False) -> bool:
     if value is None:
         return default
@@ -816,6 +833,8 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
         robot.wait_until_ready(robot_ready_timeout)
         # robot.flush_event_queue()
 
+    should_clear_coin_tallies = payment_type in {PaymentType.AUTO, PaymentType.COINS}
+
     for i in range(count):
         if shared:
             shared.log(f"{meter.host} {func_name} {i + 1}/{count}")
@@ -848,7 +867,16 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
             except Exception as cleanup_exc:
                 if shared:
                     shared.log(f"{meter.host} screen test cleanup warning: failed to cancel active session | {cleanup_exc}")
+            if should_clear_coin_tallies:
+                _clear_screen_test_coin_tallies(
+                    meter,
+                    shared,
+                    reason=f"exception during cycle {i + 1}/{count}",
+                )
             raise
+
+        if session_result.get("effective_payment_type", "") == PaymentType.COINS.name:
+            should_clear_coin_tallies = True
 
         if shared and session_result.get("effective_payment_type", "") != PaymentType.COINS.name:
             card_meta = shared.device_meta.setdefault("nfc_gui_cards", {})
@@ -857,11 +885,15 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
         check_stop_event(shared)
 
     time.sleep(1)
+    if should_clear_coin_tallies:
+        _clear_screen_test_coin_tallies(
+            meter,
+            shared,
+            reason=f"completed {count}/{count} cycles",
+        )
+    
+    time.sleep(1)
     if not meter.in_diagnostics():
         meter.press("diagnostics")
 
-    #! KEEP - Sleep is necessary for modem to finish its shutdown
-    end = time.time() + 40
-    while time.time() < end:
-        check_stop_event(shared)
-        time.sleep(1)
+    # Excpect the modem to be ON after this test finishes. The meter's session agent will eventually turn it off
