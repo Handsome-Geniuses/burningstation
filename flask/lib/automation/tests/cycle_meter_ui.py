@@ -816,7 +816,7 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
     func_name = inspect.currentframe().f_code.co_name
     payment_type = kwargs.get("payment_type", "auto")
     allow_coin_fallback = _coerce_bool(kwargs.get("allow_coin_fallback", False))
-    count = int(kwargs.get("count", 1))
+    job_count = int(kwargs.get("job_count", 1))
     timeout_s = float(kwargs.get("timeout_s", 60))
     debug_ui = _coerce_bool(kwargs.get("debug_ui", False))
     robot_ready_timeout = float(kwargs.get("robot_ready_timeout", 20.0))
@@ -835,11 +835,12 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
 
     should_clear_coin_tallies = payment_type in {PaymentType.AUTO, PaymentType.COINS}
 
-    for i in range(count):
+    for i in range(job_count):
+        cycle_num = i + 1
         if shared:
-            shared.log(f"{meter.host} {func_name} {i + 1}/{count}")
+            shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")
             if not subtest:
-                shared.broadcast_progress(meter.host, "cycle_ui", i + 1, count)
+                shared.broadcast_progress(meter.host, "cycle_ui", cycle_num, job_count)
 
         if meter.meter_type == "ms3":
             if shared:
@@ -871,7 +872,7 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
                 _clear_screen_test_coin_tallies(
                     meter,
                     shared,
-                    reason=f"exception during cycle {i + 1}/{count}",
+                    reason=f"exception during cycle {cycle_num}/{job_count}",
                 )
             raise
 
@@ -880,7 +881,7 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
 
         if shared and session_result.get("effective_payment_type", "") != PaymentType.COINS.name:
             card_meta = shared.device_meta.setdefault("nfc_gui_cards", {})
-            card_meta[str(i + 1)] = session_result.get("card_last4")
+            card_meta[str(cycle_num)] = session_result.get("card_last4")
 
         check_stop_event(shared)
 
@@ -889,7 +890,7 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
         _clear_screen_test_coin_tallies(
             meter,
             shared,
-            reason=f"completed {count}/{count} cycles",
+            reason=f"completed {cycle_num}/{job_count} cycles",
         )
     
     time.sleep(1)

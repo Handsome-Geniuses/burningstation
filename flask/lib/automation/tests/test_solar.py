@@ -187,102 +187,110 @@ def get_numeric_value(val: str) -> float:
     return float(numeric_part)
 
 
+def _get_solar_meta(shared: SharedState) -> dict:
+    return shared.device_meta.setdefault("solar", {})
+
+
 def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
     func_name = inspect.currentframe().f_code.co_name
     subtest = bool(kwargs.get("subtest", False))
-
-    shared.log(f"{meter.host} {func_name} 1/1")
-    if not subtest:
-        shared.broadcast_progress(meter.host, func_name, 1, 1)
+    job_count = int(kwargs.get("job_count", 1))
 
     meter.set_ui_mode("banner") # shouldnt matter if kwargs.charuco_frame is None bc robot isnt used
     meter.goto_power()
 
-    curr = lm.get_value_list()
-    if curr[0] or curr[1]:
+    for i in range(job_count):
+        cycle_num = i + 1
+        shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")
+        if not subtest:
+            shared.broadcast_progress(meter.host, 'solar', cycle_num, job_count)
+
+        curr = lm.get_value_list()
+        if curr[0] or curr[1]:
+            lm.lamp(0, False, 100)
+            lm.lamp(1, False, 100)
+
+        latest_seen_status = get_latest_power_status(meter, shared)
+        baseline = wait_for_fresh_power_status(
+            meter,
+            shared,
+            latest_seen_status,
+            "capturing baseline with both lamps off",
+        )
+        baseline_power = baseline["power_data"]
+        charge_off = get_numeric_value(baseline_power["ChargeCurrent"])
+        battery_voltage = get_numeric_value(baseline_power["BatteryVoltage"])
+        shared.log(f"charge_off_1: {charge_off}")
+        shared.log(f"battery_voltage: {battery_voltage}")
+
+        # ---- Lamp 1 ON/OFF (rear) ----
+        _sleep_with_stop(shared, 1)
+        lm.lamp(0, True, 100)
+        rear_illuminated = wait_for_fresh_power_status(
+            meter,
+            shared,
+            baseline,
+            "turning lamp 1 on",
+        )
+        charge_on_l1 = get_numeric_value(rear_illuminated["power_data"]["ChargeCurrent"])
+        shared.log(f"charge_on_l1: {charge_on_l1}")
+
         lm.lamp(0, False, 100)
+        delta_l1 = charge_on_l1 - charge_off
+
+        # ---- Lamp 2 ON/OFF (top) ----
+        _sleep_with_stop(shared, 1)
+        lm.lamp(1, True, 100)
+        top_illuminated = wait_for_fresh_power_status(
+            meter,
+            shared,
+            rear_illuminated,
+            "turning lamp 2 on",
+        )
+        top_power = top_illuminated["power_data"]
+        charge_on_l2 = get_numeric_value(top_power["ChargeCurrent"])
+        solar_voltage = get_numeric_value(top_power["InputVoltage"]) # idk if this is the solar voltage value they want or not
+        shared.log(f"charge_on_l2: {charge_on_l2}")
+        shared.log(f"solar_voltage: {solar_voltage}")
+
+        # both off
         lm.lamp(1, False, 100)
+        recovery = wait_for_fresh_power_status(
+            meter,
+            shared,
+            top_illuminated,
+            "turning lamp 2 off",
+        )
+        recovery_power = recovery["power_data"]
+        charge_off_l1 = get_numeric_value(recovery_power["ChargeCurrent"])
+        charge_off_l2 = charge_off_l1
+        shared.log(f"charge_off_l2: {charge_off_l2}")
+        shared.log(f"charge_off_l1: {charge_off_l1}")
 
-    latest_seen_status = get_latest_power_status(meter, shared)
-    baseline = wait_for_fresh_power_status(
-        meter,
-        shared,
-        latest_seen_status,
-        "capturing baseline with both lamps off",
-    )
-    baseline_power = baseline["power_data"]
-    charge_off = get_numeric_value(baseline_power["ChargeCurrent"])
-    battery_voltage = get_numeric_value(baseline_power["BatteryVoltage"])
-    shared.log(f"charge_off_1: {charge_off}")
-    shared.log(f"battery_voltage: {battery_voltage}")
+        delta_l2 = charge_on_l2 - charge_off
+        solar_data = {
+            "battery mV": battery_voltage,
+            "rear_mA": delta_l1,
+            "top_mA": delta_l2,
+            "solar mV": solar_voltage,
+        }
+        solar_meta = _get_solar_meta(shared)
+        solar_meta[cycle_num] = solar_data
 
-    # ---- Lamp 1 ON/OFF (rear) ----
-    _sleep_with_stop(shared, 1)
-    lm.lamp(0, True, 100)
-    rear_illuminated = wait_for_fresh_power_status(
-        meter,
-        shared,
-        baseline,
-        "turning lamp 1 on",
-    )
-    charge_on_l1 = get_numeric_value(rear_illuminated["power_data"]["ChargeCurrent"])
-    shared.log(f"charge_on_l1: {charge_on_l1}")
-
-    lm.lamp(0, False, 100)
-    delta_l1 = charge_on_l1 - charge_off
-
-    # ---- Lamp 2 ON/OFF (top) ----
-    _sleep_with_stop(shared, 1)
-    lm.lamp(1, True, 100)
-    top_illuminated = wait_for_fresh_power_status(
-        meter,
-        shared,
-        rear_illuminated,
-        "turning lamp 2 on",
-    )
-    top_power = top_illuminated["power_data"]
-    charge_on_l2 = get_numeric_value(top_power["ChargeCurrent"])
-    solar_voltage = get_numeric_value(top_power["InputVoltage"]) # idk if this is the solar voltage value they want or not
-    shared.log(f"charge_on_l2: {charge_on_l2}")
-    shared.log(f"solar_voltage: {solar_voltage}")
-
-    # both off
-    lm.lamp(1, False, 100)
-    recovery = wait_for_fresh_power_status(
-        meter,
-        shared,
-        top_illuminated,
-        "turning lamp 2 off",
-    )
-    recovery_power = recovery["power_data"]
-    charge_off_l1 = get_numeric_value(recovery_power["ChargeCurrent"])
-    charge_off_l2 = charge_off_l1
-    shared.log(f"charge_off_l2: {charge_off_l2}")
-    shared.log(f"charge_off_l1: {charge_off_l1}")
-
-    delta_l2 = charge_on_l2 - charge_off
-    solar_data = {
-        "battery mV": battery_voltage,
-        "rear_mA": delta_l1,
-        "top_mA": delta_l2,
-        "solar mV": solar_voltage,
-    }
-    shared.device_meta["solar"] = solar_data
-
-    # check
-    if charge_on_l1 <= charge_off + EXPECTED_MIN_INCREASE_mA_1:
-        s = f"ChargeCurrent did not increase enough when lamp 1 turned on. {charge_on_l1} --> {charge_off}"
-        shared.log(s)
-        raise StopAutomation(s)
-    if charge_off_l1 > charge_on_l1 - EXPECTED_DROP_TOLERANCE_mA_1:
-        s = f"ChargeCurrent did not decrease after lamp 1 turned off. {charge_off_l1} --> {charge_on_l1}"
-        shared.log(s)
-        raise StopAutomation(s)
-    if charge_on_l2 <= charge_off + EXPECTED_MIN_INCREASE_mA_2:
-        s = f"ChargeCurrent did not increase enough when lamp 2 turned on. {charge_on_l2} --> {charge_off}"
-        shared.log(s)
-        raise StopAutomation(s)
-    if charge_off_l2 > charge_on_l2 - EXPECTED_DROP_TOLERANCE_mA_2:
-        s = f"ChargeCurrent did not decrease after lamp 2 turned off. {charge_off_l2} --> {charge_on_l2}"
-        shared.log(s)
-        raise StopAutomation(s)
+        # check
+        if charge_on_l1 <= charge_off + EXPECTED_MIN_INCREASE_mA_1:
+            s = f"ChargeCurrent did not increase enough when lamp 1 turned on. {charge_on_l1} --> {charge_off} (cycle {cycle_num}/{job_count})"
+            shared.log(s)
+            raise StopAutomation(s)
+        if charge_off_l1 > charge_on_l1 - EXPECTED_DROP_TOLERANCE_mA_1:
+            s = f"ChargeCurrent did not decrease after lamp 1 turned off. {charge_off_l1} --> {charge_on_l1} (cycle {cycle_num}/{job_count})"
+            shared.log(s)
+            raise StopAutomation(s)
+        if charge_on_l2 <= charge_off + EXPECTED_MIN_INCREASE_mA_2:
+            s = f"ChargeCurrent did not increase enough when lamp 2 turned on. {charge_on_l2} --> {charge_off} (cycle {cycle_num}/{job_count})"
+            shared.log(s)
+            raise StopAutomation(s)
+        if charge_off_l2 > charge_on_l2 - EXPECTED_DROP_TOLERANCE_mA_2:
+            s = f"ChargeCurrent did not decrease after lamp 2 turned off. {charge_off_l2} --> {charge_on_l2} (cycle {cycle_num}/{job_count})"
+            shared.log(s)
+            raise StopAutomation(s)

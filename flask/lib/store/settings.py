@@ -15,6 +15,7 @@ class DummySettings(BaseModel):
 class PassiveJobs(BaseModel):
     nfc: int = Field(1, ge=0, le=10)
     modem: int = Field(1, ge=0, le=10)
+    call_in: int = Field(1, ge=0, le=10)
     printer: int = Field(1, ge=0, le=10)
     coin_shutter: int = Field(1, ge=0, le=10)
     screen_test: int = Field(1, ge=0, le=10)

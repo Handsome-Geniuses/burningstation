@@ -23,7 +23,64 @@ PHYSICAL_DEVICES = [
     }),
 ]
 
-    
+PHYSICAL_CYCLE_GLOBAL_KEYS = {
+    "numBurnCycles",
+    "numBurnDelay",
+    "monitors",
+    "broadcast_job",
+    "robot_ready_timeout",
+}
+
+
+def _device_key_variants(device: str):
+    return tuple(dict.fromkeys((device, device.replace("_", " "), device.replace(" ", "_"))))
+
+
+def _physical_cycle_shared_kwargs(kwargs):
+    reserved = set(PHYSICAL_CYCLE_GLOBAL_KEYS)
+    for device_name, _, _ in PHYSICAL_DEVICES:
+        reserved.update(_device_key_variants(device_name))
+
+    return {k: v for k, v in kwargs.items() if k not in reserved}
+
+
+def _coerce_job_count(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{value!r} is not a valid job_count")
+
+
+def _resolve_subtest_kwargs(device: str, kwargs, default_cfg=None):
+    shared_kwargs = _physical_cycle_shared_kwargs(kwargs)
+    default_cfg = dict(default_cfg or {})
+
+    cfg = None
+    for key in _device_key_variants(device):
+        if key in kwargs:
+            cfg = kwargs[key]
+            break
+
+    if cfg is None:
+        raise KeyError(f"Missing subtest config for {device!r}")
+    if not isinstance(cfg, dict):
+        raise TypeError(f"Subtest config for {device!r} must be a dict, got {type(cfg).__name__}")
+    if "job_count" not in cfg:
+        raise KeyError(f"Subtest config for {device!r} is missing job_count")
+
+    job_count = _coerce_job_count(cfg["job_count"])
+    if job_count <= 0:
+        return False, {}
+
+    custom_cfg = {k: v for k, v in cfg.items() if k != "job_count"}
+    return True, {
+        **shared_kwargs,
+        **default_cfg,
+        **custom_cfg,
+        "job_count": job_count,
+    }
+
+
 def run_and_retrieve_charuco(robot: RobotClient, meter: SSHMeter, shared: SharedState, wait_timeout):
     robot.wait_until_ready(wait_timeout)
 
@@ -67,35 +124,26 @@ def physical_cycle_all(
     charuco_frame = run_and_retrieve_charuco(robot, meter, shared, robot_ready_timeout)
 
     for cycle in range(burn_count):
-        shared.log(f"{meter.host} {func_name} {cycle + 1}/{burn_count}")
-        shared.broadcast_progress(meter.host, "physical_cycle", cycle + 1, burn_count)
+        cycle_num = cycle + 1
+        shared.log(f"{meter.host} {func_name} {cycle_num}/{burn_count}")
+        shared.broadcast_progress(meter.host, "physical_cycle", cycle_num, burn_count)
 
         for device_name, test_func, default_cfg in PHYSICAL_DEVICES:
             if shared.stop_event.is_set():
                 return
 
-            # Config resolution
-            cfg = kwargs.get(device_name, {})
-            if isinstance(cfg, dict):
-                enabled = cfg.get("enabled", True)
-                custom_cfg = {k: v for k, v in cfg.items() if k != "enabled"}
-            else:
-                enabled = bool(cfg)
-                custom_cfg = {}
-
-            if not enabled:
-                shared.log(f"skipping {device_name} subtest: not enabled")
+            should_run, final_kwargs = _resolve_subtest_kwargs(device_name, kwargs, default_cfg=default_cfg)
+            if not should_run:
+                shared.log(f"skipping {device_name} subtest: job_count <= 0")
                 shared.device_results[device_name] = "n/a"
                 continue
 
-            # Hardware presence check
+            # Hardware presence check #
             missing = False
             if device_name == "coin_shutter" and not meter.device_firmware("coin shutter"):
                 missing = True
-            elif device_name == "screen test":
-                payment_type = str(
-                    custom_cfg.get("payment_type", default_cfg.get("payment_type", ""))
-                ).strip().lower()
+            elif device_name == "nfc_gui":
+                payment_type = str(final_kwargs.get("payment_type", "")).strip().lower()
                 if payment_type == "robot_contactless" and not meter.device_firmware("nfc"):
                     missing = True
 
@@ -115,7 +163,6 @@ def physical_cycle_all(
                 shared.set_allowed(set(), reason=f"No monitor for {device_name}")
 
             try:
-                final_kwargs = {**default_cfg, **custom_cfg}
                 final_kwargs["subtest"] = True
                 final_kwargs["charuco_frame"] = charuco_frame
 

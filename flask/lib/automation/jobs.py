@@ -45,9 +45,9 @@ PROG2MODULE = {
     "cycle_coin_shutter":"COIN_SHUTTER", 
     "coin shutter":"COIN_SHUTTER",
     "coin_shutter":"COIN_SHUTTER",
-    "cycle_nfc":"KIOSK_NFC", 
+    "cycle_nfc":"KIOSK_NFC",
     "nfc":"KIOSK_NFC",
-    "cycle_modem":"MK7_XE910", 
+    "cycle_modem":"MK7_XE910",
     "modem":"MK7_XE910",
     "cycle_call_in":"MK7_XE910",
     "call in":"MK7_XE910",
@@ -295,6 +295,7 @@ def start_physical_job(meter_ip, buttons=None):
     modules = meter.module_info
     meter.set_brightness(15)
     meter.setup_custom_display()
+    buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
     
     # has_solar = True
     # has_coin_shutter = "COIN_SHUTTER" in modules
@@ -319,7 +320,7 @@ def start_physical_job(meter_ip, buttons=None):
     #     ]
     # }
 
-    kwargs = build_physical_kwargs(modules)
+    kwargs = build_physical_kwargs(modules, buttons=buttons)
 
     success, msg = start_job(meter_ip, "physical_cycle_all", kwargs, verbose=True)
     time.sleep(5) # incase robot needs to get out of there

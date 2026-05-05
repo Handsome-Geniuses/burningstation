@@ -927,7 +927,7 @@ def _get_call_in_meta(shared: SharedState) -> dict:
 
 def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
     func_name = inspect.currentframe().f_code.co_name
-    count = int(kwargs.get("count", 3))
+    job_count = int(kwargs.get("job_count", 3))
     ready_timeout_s = float(kwargs.get("ready_timeout_s", DEFAULT_CALL_IN_READY_TIMEOUT_S))
     ready_stable_s = float(kwargs.get("ready_stable_s", DEFAULT_CALL_IN_READY_STABLE_S))
     start_timeout_s = float(kwargs.get("start_timeout_s", DEFAULT_CALL_IN_START_TIMEOUT_S))
@@ -962,11 +962,11 @@ def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
     )
     subtest = bool(kwargs.get("subtest", False))
 
-    for i in range(count):
+    for i in range(job_count):
         cycle_num = i + 1
-        shared.log(f"{meter.host} {func_name} {cycle_num}/{count}")
+        shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")
         if not subtest:
-            shared.broadcast_progress(meter.host, "call in", cycle_num, count)
+            shared.broadcast_progress(meter.host, "call in", cycle_num, job_count)
 
         meter.goto_callin()
         startup_guard = _wait_for_startup_call_in_guard(

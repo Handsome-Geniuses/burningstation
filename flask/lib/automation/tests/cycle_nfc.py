@@ -10,7 +10,7 @@ MIN_NFC_DELAY = 7.0
 def test_cycle_nfc(meter: SSHMeter, shared: SharedState, **kwargs):
     """ Toggle ON/OFF NFC Reader N times. Stops early if shared.stop_event is set. """
     func_name = inspect.currentframe().f_code.co_name
-    count = int(kwargs.get("count", 3))
+    job_count = int(kwargs.get("job_count", 3))
     delay = max(float(kwargs.get("delay", 7.0)), MIN_NFC_DELAY)
     subtest = bool(kwargs.get("subtest", False))
 
@@ -22,11 +22,12 @@ def test_cycle_nfc(meter: SSHMeter, shared: SharedState, **kwargs):
     shared.set_allowed({"nfc"}, reason="NFC page ready; arm monitor")
     time.sleep(1)
 
-    for i in range(count):
-        shared.log(f"{meter.host} {func_name} {i+1}/{count}")
+    for i in range(job_count):
+        cycle_num = i + 1
+        shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")
         if not subtest:
-            shared.broadcast_progress(meter.host, 'nfc', i+1, count)
-        
+            shared.broadcast_progress(meter.host, 'nfc', cycle_num, job_count)
+
         meter.press('plus')
         time.sleep(delay)
         meter.press('minus')

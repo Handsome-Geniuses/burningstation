@@ -35,41 +35,46 @@ def _cycle_all_shared_kwargs(kwargs):
     return {k: v for k, v in kwargs.items() if k not in reserved}
 
 
+def _coerce_job_count(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{value!r} is not a valid job_count")
+
+
 def _resolve_subtest_kwargs(device: str, kwargs, default_cfg=None):
     shared_kwargs = _cycle_all_shared_kwargs(kwargs)
     default_cfg = dict(default_cfg or {})
 
-    for key in _device_key_variants(device):
-        cfg = kwargs.get(key)
-        if isinstance(cfg, dict):
-            enabled = cfg.get("enabled", True)
-            custom_cfg = {k: v for k, v in cfg.items() if k != "enabled"}
-            return bool(enabled), {**shared_kwargs, **default_cfg, **custom_cfg}
-
-    raw_value = 0
+    cfg = None
     for key in _device_key_variants(device):
         if key in kwargs:
-            raw_value = kwargs[key]
+            cfg = kwargs[key]
             break
 
-    enabled = bool(raw_value)
-    if not enabled:
+    if cfg is None:
+        raise KeyError(f"Missing subtest config for {device!r}")
+    if not isinstance(cfg, dict):
+        raise TypeError(f"Subtest config for {device!r} must be a dict, got {type(cfg).__name__}")
+    if "job_count" not in cfg:
+        raise KeyError(f"Subtest config for {device!r} is missing job_count")
+
+    job_count = _coerce_job_count(cfg["job_count"])
+    if job_count <= 0:
         return False, {}
 
-    final_kwargs = {**shared_kwargs, **default_cfg}
-    if isinstance(raw_value, bool):
-        final_kwargs.setdefault("count", 1)
-    elif isinstance(raw_value, (int, float)):
-        final_kwargs["count"] = int(raw_value)
-    else:
-        final_kwargs.setdefault("count", 1)
-
-    return True, final_kwargs
+    custom_cfg = {k: v for k, v in cfg.items() if k != "job_count"}
+    return True, {
+        **shared_kwargs,
+        **default_cfg,
+        **custom_cfg,
+        "job_count": job_count,
+    }
 
 
 def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, subtest_kwargs=None):
     subtest_kwargs = dict(subtest_kwargs or {})
-    count = int(subtest_kwargs.get("count", 1))
+    count = int(subtest_kwargs.get("job_count", 1))
 
     if count <= 0:
         shared.device_results[device] = "n/a"
@@ -121,8 +126,8 @@ def test_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
                 # leave remaining devices as 'pending' (or 'n/a')
                 return
 
-            enabled, subtest_kwargs = _resolve_subtest_kwargs(name, kwargs, default_cfg=default_cfg)
-            if not enabled:
+            should_run, subtest_kwargs = _resolve_subtest_kwargs(name, kwargs, default_cfg=default_cfg)
+            if not should_run:
                 shared.device_results[name] = "n/a"
                 continue
 

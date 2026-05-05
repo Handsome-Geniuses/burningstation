@@ -408,7 +408,7 @@ def _wait_for_modem_state(
 def test_cycle_modem(meter: SSHMeter, shared: SharedState, **kwargs):
     """ Toggle ON/OFF Modem N times. Stops early if shared.stop_event is set. """
     func_name = inspect.currentframe().f_code.co_name
-    count = int(kwargs.get("count", 3))
+    job_count = int(kwargs.get("job_count", 3))
     connect_timeout_s = float(kwargs.get("connect_timeout_s", kwargs.get("delay_on", DEFAULT_MODEM_CONNECT_TIMEOUT_S)))
     disconnect_timeout_s = float(kwargs.get("disconnect_timeout_s", kwargs.get("delay_off", DEFAULT_MODEM_DISCONNECT_TIMEOUT_S)))
     precheck_timeout_s = float(kwargs.get("precheck_timeout_s", MODEM_PRECHECK_TIMEOUT_S))
@@ -426,11 +426,11 @@ def test_cycle_modem(meter: SSHMeter, shared: SharedState, **kwargs):
     )
     subtest = bool(kwargs.get("subtest", False))
 
-    for i in range(count):
+    for i in range(job_count):
         cycle_num = i + 1
-        shared.log(f"{meter.host} {func_name} {i+1}/{count}")
+        shared.log(f"{meter.host} {func_name} {i+1}/{job_count}")
         if not subtest:
-            shared.broadcast_progress(meter.host, 'modem', cycle_num, count)
+            shared.broadcast_progress(meter.host, 'modem', cycle_num, job_count)
 
         shared.set_allowed(set(), reason="Modem pre-check in progress")
 
@@ -459,7 +459,7 @@ def test_cycle_modem(meter: SSHMeter, shared: SharedState, **kwargs):
         )
         if not ready:
             shared.log(
-                f"{meter.host} {func_name} {cycle_num}/{count} skipped; modem stayed busy in {modem_state}",
+                f"{meter.host} {func_name} {cycle_num}/{job_count} skipped; modem stayed busy in {modem_state}",
             )
             continue
 
