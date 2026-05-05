@@ -3,6 +3,7 @@ from .cycle_coin_shutter import test_cycle_coin_shutter
 from .cycle_meter_ui import test_cycle_meter_ui
 from .cycle_nfc import test_cycle_nfc
 from .cycle_modem import test_cycle_modem
+from .cycle_call_in import test_cycle_call_in
 from .cycle_all import test_cycle_all
 from .test_keypad import test_keypad
 from .test_nfc_read import test_nfc_read
@@ -32,6 +33,10 @@ PROGRAM_REGISTRY = {
  
     "cycle_modem": test_cycle_modem,
     "modem": test_cycle_modem,
+
+    "cycle_call_in": test_cycle_call_in,
+    "call in": test_cycle_call_in,
+    "call_in": test_cycle_call_in,
     
     "cycle_all": test_cycle_all,
     "all tests": test_cycle_all,
@@ -58,6 +63,7 @@ _PROGRAM_MONITORS = {
     "cycle_coin_shutter":[],
     "cycle_nfc":         [("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
     "cycle_modem":       [("modem",   {"connect_timeout_s": 25.0, "disconnect_timeout_s": 20.0})],
+    "cycle_call_in":     [],
     "cycle_meter_ui":    [],
     "cycle_all": [
         ("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
