@@ -13,6 +13,8 @@ import {
     setValueAtPath,
 } from "./_components/shared"
 import type { SchemaNode, SettingsObject, SettingsPayload, SettingsValue } from "./_components/types"
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
+import { cn } from "@/lib/utils"
 
 export const SettingsTab = () => {
     const formRef = React.useRef<HTMLFormElement | null>(null)
@@ -144,52 +146,62 @@ export const SettingsTab = () => {
     }
 
     return (
-        <form onSubmit={onSave} ref={formRef} className="select-none flex h-full min-h-0 flex-col gap-4 overflow-y-auto bg-background pb-4">
-            <div className="px-4 py-2 sticky top-0 inset-0 z-10 bg-background flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shadow">
-                <div className="flex flex-col gap-0 space-y-0">
-                    <div className="text-lg font-semibold leading-6 z-20">Settings</div>
-                    <div className="pt-0 text-sm text-muted-foreground leading-4">
-                        {saving ? "Saving..." : reloading ? "Reloading..." : isDirty ? "Unsaved changes" : "Up to date"}
+        <ScrollArea>
+            <ScrollBar
+                className={cn(
+                    "z-[10000] w-3 p-0 m-0",
+                    "bg-transparent border-0 border-sidebar-foreground",
+                    "[&>div]:bg-sidebar-foreground",
+                    "[&>div:hover]:bg-sidebar-primary"
+                )}
+            />
+            <form onSubmit={onSave} ref={formRef} className=" select-none flex h-full min-h-0 flex-col gap-4  bg-background pb-4">
+                <div className="px-4 py-2 sticky top-0 inset-0 z-10 bg-background flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shadow">
+                    <div className="flex flex-col gap-0 space-y-0">
+                        <div className="text-lg font-semibold leading-6 z-20">Settings</div>
+                        <div className="pt-0 text-sm text-muted-foreground leading-4">
+                            {saving ? "Saving..." : reloading ? "Reloading..." : isDirty ? "Unsaved changes" : "Up to date"}
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <Button type="button" variant="outline" onClick={onReset} disabled={!isDirty || saving || reloading}>
+                            Reset
+                        </Button>
+                        <Button type="button" variant="outline" onClick={onReload} disabled={saving || reloading}>
+                            Reload
+                        </Button>
+                        <Button type="submit" disabled={!isDirty || saving || reloading}>
+                            Save
+                        </Button>
                     </div>
                 </div>
+                {error && (
+                    <div className="bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                        {error}
+                    </div>
+                )}
 
-                <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" onClick={onReset} disabled={!isDirty || saving || reloading}>
-                        Reset
-                    </Button>
-                    <Button type="button" variant="outline" onClick={onReload} disabled={saving || reloading}>
-                        Reload
-                    </Button>
-                    <Button type="submit" disabled={!isDirty || saving || reloading}>
-                        Save
-                    </Button>
-                </div>
-            </div>
-            {error && (
-                <div className="bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                    {error}
-                </div>
-            )}
+                <Accordion type="multiple" className="flex flex-col gap-4 px-4">
+                    {topLevelEntries.map(([sectionKey, sectionNode]) => (
+                        <SectionCard
+                            key={sectionKey}
+                            sectionKey={sectionKey}
+                            node={sectionNode}
+                            value={draft[sectionKey]}
+                            rootSchema={schema}
+                            disabled={saving || reloading}
+                            onChange={onFieldChange}
+                        />
+                    ))}
+                </Accordion>
 
-            <Accordion type="multiple" className="flex flex-col gap-4 px-4">
-                {topLevelEntries.map(([sectionKey, sectionNode]) => (
-                    <SectionCard
-                        key={sectionKey}
-                        sectionKey={sectionKey}
-                        node={sectionNode}
-                        value={draft[sectionKey]}
-                        rootSchema={schema}
-                        disabled={saving || reloading}
-                        onChange={onFieldChange}
-                    />
-                ))}
-            </Accordion>
-
-            {topLevelEntries.length === 0 && (
-                <div className="pt-2 text-sm text-muted-foreground">
-                    No supported settings sections were returned by the backend schema.
-                </div>
-            )}
-        </form>
+                {topLevelEntries.length === 0 && (
+                    <div className="pt-2 text-sm text-muted-foreground">
+                        No supported settings sections were returned by the backend schema.
+                    </div>
+                )}
+            </form>
+        </ScrollArea>
     )
 }
