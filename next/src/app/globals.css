@@ -15,9 +15,11 @@
     *::before,
     *::after {
         /* box-sizing: border-box; */
-        @apply box-border border-border outline-ring/50 antialiased;
+        @apply box-border border-border outline-ring/50 antialiased touch-pan-y;
         /* touch-action: none; */
-        touch-action: pan-y;
+        /* touch-action: pan-y; */
+        /* scrollbar-width: thin;
+        scrollbar-color: hsl(var(--sidebar-foreground)) hsl(var(--sidebar)); */
     }
 
     html {
@@ -36,23 +38,24 @@
 
 
     /* width */
-    ::-webkit-scrollbar {
+    *::-webkit-scrollbar {
         @apply w-2;
     }
 
     /* Track */
-    ::-webkit-scrollbar-track {
+    *::-webkit-scrollbar-track {
         @apply bg-sidebar border-sidebar-foreground border-l-1;
     }
     /* Handle */
-    ::-webkit-scrollbar-thumb {
+    *::-webkit-scrollbar-thumb {
         @apply bg-sidebar-foreground;
     }
 
     /* Handle on hover */
-    ::-webkit-scrollbar-thumb:hover {
+    *::-webkit-scrollbar-thumb:hover {
         @apply bg-sidebar-primary
     }
+
 }
 
 
