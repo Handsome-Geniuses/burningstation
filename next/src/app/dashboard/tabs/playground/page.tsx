@@ -32,13 +32,34 @@ const VirtualEmergency = ({ state }: { state: boolean }) => {
         </div>
     )
 }
+const RandomMeterSim = () => {
+    return (
+        <div className="w-full max-w-xs rounded-lg border border-border bg-card p-4 shadow-md">
+            <div className="text-lg font-semibold">Random Meter</div>
+            <div className="text-sm text-muted-foreground">
+                Trigger simulated random meter occupancy
+            </div>
+
+            <div className="mt-2">
+                <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => flask.handleAction('sim', 'meter', { type: 0 })}
+                >
+                    randomize
+                </Button>
+            </div>
+        </div>
+    )
+}
 
 export const PlaygroundTab = () => {
     const { systemState } = useStoreContext()
 
     return (
-        <div className="p-4">
+        <div className="p-4 space-y-1 space-x-1">
             <VirtualEmergency state={systemState.emergency} />
+            <RandomMeterSim />
         </div>
     )
 }

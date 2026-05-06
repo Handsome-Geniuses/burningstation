@@ -10,6 +10,7 @@
 /* @import "./themes/default.css"; */
 
 @layer base {
+
     *,
     *::before,
     *::after {
@@ -22,16 +23,38 @@
     html {
         font-size: 2rem;
     }
-    html,body {
+
+    html,
+    body {
         /* touch-action: pan-x pan-y; */
         @apply touch-pan-x touch-pan-y;
     }
-}
+
+    button {
+        @apply cursor-pointer;
+    }
 
 
-button {
-    cursor: pointer;
+    /* width */
+    ::-webkit-scrollbar {
+        @apply w-2;
+    }
+
+    /* Track */
+    ::-webkit-scrollbar-track {
+        @apply bg-sidebar border-sidebar-foreground border-l-1;
+    }
+    /* Handle */
+    ::-webkit-scrollbar-thumb {
+        @apply bg-sidebar-foreground;
+    }
+
+    /* Handle on hover */
+    ::-webkit-scrollbar-thumb:hover {
+        @apply bg-sidebar-primary
+    }
 }
+
 
 .scrollbar-hide::-webkit-scrollbar {
     display: none;

@@ -54,6 +54,9 @@ def mock_init(self, host, **kwargs):
 # patch.object(SSHMeter, "__init__", mock_init).start()
 patch("lib.meter.ssh_meter.SSHMeter.__init__", mock_init).start()
 
+# this disables the robot check
+patch("lib.system.station.check_robot_clear_of_conveyor", lambda: None).start()
+
 # # mocking get_power_info to return dummy data
 # def mock_get_power_info(self):
 #     return {"Voltage": "5000mV", "Current": "0.7A"}
