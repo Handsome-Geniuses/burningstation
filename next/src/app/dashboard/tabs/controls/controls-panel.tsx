@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { PANEL } from "./shared";
+import { PANEL, PANEL_HEADER } from "./shared";
 import { ManualAutoBox } from "./manual-auto-box";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/lib/notify";
@@ -66,17 +66,9 @@ const RobotDivider = ({ isManual }: { isManual: boolean }) => {
 }
 
 export function ControlsPanel({ systemState, className }: { systemState: SystemState } & React.ComponentProps<"div">) {
-    const robotShutDown = async () => {
-        notify.info("[test] shut down")
-        flask.handleAction('station', 'robot', { "wdyw": "home" })
-    }
-    const robotSafeHome = async () => {
-        notify.info("[test] robot safe home")
-        flask.handleAction('station', 'robot', { "wdyw": "home" })
-    }
     return (
         <div className={cn(PANEL, className)}>
-            <div className="rounded-t-lg border border-border text-center p-2 bg-secondary">
+            <div className={PANEL_HEADER}>
                 Control Panel
             </div>
             <div className="flex flex-col p-4">

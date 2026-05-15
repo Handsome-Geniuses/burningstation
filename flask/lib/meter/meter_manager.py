@@ -1,14 +1,22 @@
 from typing import Dict, Set, TypedDict
 import ip_scanner
+from lib.sse.sse_queue_manager import SSEQM
 from lib.meter.fun import send_fun_meter
 from lib.meter.ssh_meter import SSHMeter
 from lib.utils import secrets
 from lib.database import insert_sshmeter
 from prettyprint import STYLE, prettyprint as print
-def __print(*args,**kwargs): pass
-if not secrets.VERBOSE: print = __print
+
+
+def __print(*args, **kwargs):
+    pass
+
+
+if not secrets.VERBOSE:
+    print = __print
 import time
 import datetime
+
 
 class METERMANAGER:
     MeterClass = SSHMeter
@@ -17,79 +25,118 @@ class METERMANAGER:
     __limit = 30
     __meters: Set[str] = set()
     __splash: Set[str] = set()
-    __attempts:dict[str, int] = {}
-    __booted:dict[str, int] = {}
+    __attempts: dict[str, int] = {}
+    __booted: dict[str, int] = {}
     __stale_counts: Dict[str, int] = {}
     __STALE_THRESHOLD = 2
 
     meters: Dict[str, MeterClass] = {}
 
-    class __FINALLY(Exception): pass
-    
+    class __FINALLY(Exception):
+        pass
+
     @staticmethod
     def _timestamp():
         return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    
+
     @classmethod
     def __on_stale(cls, ip: str):
         cls.__stale_counts[ip] = cls.__stale_counts.get(ip, 0) + 1
-        
+
         if cls.__stale_counts[ip] >= cls.__STALE_THRESHOLD:
+            hn = "unknown"
             if ip in cls.meters:
-                hn = cls.meters[ip].hostname if hasattr(cls.meters[ip], 'hostname') else "unknown"
-                print(f"[{cls._timestamp()}] STALE: {ip} ({hn}) removed from known meters", fg="#888800")
-            
+                hn = (
+                    cls.meters[ip].hostname
+                    if hasattr(cls.meters[ip], "hostname")
+                    else "unknown"
+                )
+                print(
+                    f"[{cls._timestamp()}] STALE: {ip} ({hn}) removed from known meters",
+                    fg="#888800",
+                )
+                SSEQM.broadcast(
+                    "notify",
+                    {
+                        "ntype": "warn",
+                        "msg": "Meter Disconnected",
+                        "description": f"{ip} | {hn}",
+                    },
+                )
+
             cls.meters[ip].close()
-            cls.meters.pop(ip,None)
+            cls.meters.pop(ip, None)
             cls.__meters.discard(ip)
             cls.__splash.discard(ip)
-            cls.__booted.pop(ip,None)
+            cls.__booted.pop(ip, None)
             cls.__stale_counts.pop(ip, None)
             cls.__attempts.pop(ip, None)
         else:
-            print(f"[{cls._timestamp()}] STALE (ignored): {ip} failed ping, count={cls.__stale_counts[ip]}/{cls.__STALE_THRESHOLD}", fg="#888800")
+            print(
+                f"[{cls._timestamp()}] STALE (ignored): {ip} failed ping, count={cls.__stale_counts[ip]}/{cls.__STALE_THRESHOLD}",
+                fg="#888800",
+            )
+
+        SSEQM.broadcast(
+            "meter",
+            {
+                "ip": ip,
+                "alive": False,
+                "info": None,
+            },
+        )
 
     @classmethod
     def __on_fresh(cls, ip: str):
-        if ip in cls.__meters: return False
-        if cls.__attempts.get(ip,0) >= cls.__limit: return False
+        if ip in cls.__meters:
+            return False
+        if cls.__attempts.get(ip, 0) >= cls.__limit:
+            return False
 
         meter = METERMANAGER.MeterClass(ip)
         try:
             meter.connect()
-            
+
             # check if booting
-            if (splash:=meter.is_booting()):
+            if splash := meter.is_booting():
                 cls.__splash.add(ip)
                 raise cls.__FINALLY
             # check if in splash
-            elif (splash:=meter.in_splash()):
+            elif splash := meter.in_splash():
                 cls.__splash.add(ip)
                 raise cls.__FINALLY
             else:
                 hn = meter.hostname
                 # if just booted, give it some time
                 if ip in cls.__splash or ip in cls.__attempts:
-                    t0 = cls.__booted.get(ip,None)
-                    if t0==None: 
-                        print(f"[{hn}-{ip}]🔧 Just booted? Giving it time to load up ...", fg="#008800")
+                    t0 = cls.__booted.get(ip, None)
+                    if t0 == None:
+                        print(
+                            f"[{hn}-{ip}]🔧 Just booted? Giving it time to load up ...",
+                            fg="#008800",
+                        )
                         cls.__booted[ip] = time.time()
                         raise cls.__FINALLY
-                    elif time.time() - t0 > 30: pass
-                    else: raise cls.__FINALLY
+                    elif time.time() - t0 > 30:
+                        pass
+                    else:
+                        raise cls.__FINALLY
 
                 # here, has booted + X seconds or was booted already
                 print(f"[{hn}-{ip}] Attempting to enter diagnostics ...", fg="#888800")
                 meter.force_diagnostics()
                 time.sleep(0.1)
-                if not meter.in_diagnostics(): raise Exception
-
+                if not meter.in_diagnostics():
+                    raise Exception
 
                 # successfully entered diagnostics, add information to database?
-                try: 
+                try:
                     res = insert_sshmeter(meter)
                     meter_id = res[0]  # meter row id
-                    print(f"💾 [{hn}] database insert success (id={meter_id})", fg="#00aa00")
+                    print(
+                        f"💾 [{hn}] database insert success (id={meter_id})",
+                        fg="#00aa00",
+                    )
                     meter.db_id = meter_id
 
                 except Exception as e:
@@ -103,17 +150,42 @@ class METERMANAGER:
                 # send FUN data
                 # try: send_fun_meter(meter)
                 # except: pass
-                print(f"✅ [{hn}-{ip}] added to active meters", fg="#00ff00", style=STYLE.BOLD)
+                print(
+                    f"✅ [{hn}-{ip}] added to active meters",
+                    fg="#00ff00",
+                    style=STYLE.BOLD,
+                )
+                SSEQM.broadcast(
+                    "notify",
+                    {
+                        "ntype": "success",
+                        "msg": "Meter Connected",
+                        "description": f"{ip} | {hn}",
+                    },
+                )
+                SSEQM.broadcast(
+                    "meter",
+                    {
+                        "ip": ip,
+                        "alive": True,
+                        "info": meter.get_info(),
+                    },
+                )
                 return True
 
-                
-
-
-        except cls.__FINALLY: pass
-        except Exception as e: 
+        except cls.__FINALLY:
+            pass
+        except Exception as e:
             if ip not in cls.__attempts:
-                print(f"[{ip}]⚠️ couldn't connect. Meter booting or not a meter.", fg="#880000")
-                print(f"[{ip}]ℹ️ will continue to try in background ...", fg="#888888", style=STYLE.DIM)
+                print(
+                    f"[{ip}]⚠️ couldn't connect. Meter booting or not a meter.",
+                    fg="#880000",
+                )
+                print(
+                    f"[{ip}]ℹ️ will continue to try in background ...",
+                    fg="#888888",
+                    style=STYLE.DIM,
+                )
             cls.__attempts[ip] = cls.__attempts.get(ip, 0) + 1
             if cls.__attempts[ip] >= cls.__limit:
                 print(f"[{ip}] failed to many times. gonna stop trying", fg="#ff0000")
@@ -127,7 +199,15 @@ class METERMANAGER:
 
     @classmethod
     def refresh(cls):
-        current = set(ip_scanner.get_ips(base=cls.base, start=cls.address_range[0], end=cls.address_range[1], timeout=1, concurrency=500))
+        current = set(
+            ip_scanner.get_ips(
+                base=cls.base,
+                start=cls.address_range[0],
+                end=cls.address_range[1],
+                timeout=1,
+                concurrency=500,
+            )
+        )
         fresh = current - cls.__meters
         stale = cls.__meters - current
         # if fresh: print(f"[{cls._timestamp()}] REFRESH: Found {len(fresh)} new live IPs: {sorted(fresh)}", fg="#000fff")
@@ -139,29 +219,39 @@ class METERMANAGER:
 
         valid_fresh = set()
 
-        for ip in fresh: 
+        for ip in fresh:
             if cls.__on_fresh(ip):
                 valid_fresh.add(ip)
 
-        for ip in stale: cls.__on_stale(ip)
-
+        for ip in stale:
+            cls.__on_stale(ip)
 
         return valid_fresh, stale, list(cls.__meters)
-    
+
     @classmethod
-    def list_meters(cls): return list(cls.__meters)
+    def list_meters(cls):
+        return list(cls.__meters)
+
     @classmethod
-    def get_meter(cls, ip: str): return cls.meters[ip]
-        
+    def get_meter(cls, ip: str):
+        return cls.meters[ip]
+
+    @classmethod
+    def stale_meter(cls, ip: str):
+        cls.__on_stale(ip)
+
+    @classmethod
+    def stale_all_meters(cls):
+        for ip in list(cls.__meters):
+            cls.__on_stale(ip)
+
 
 if __name__ == "__main__":
 
-
     import time
+
     while True:
         time.sleep(1)
-        fresh,stale,ips = METERMANAGER.refresh()
+        fresh, stale, ips = METERMANAGER.refresh()
         print(f"ips: {ips}")
         print(f"fresh: {fresh}, stale: {stale}")
-
- 

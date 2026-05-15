@@ -26,7 +26,7 @@ export default function RootLayout({
             >
                 <Globals/>
                 {children}
-                <Toaster position="bottom-left" className="" expand={true}/>
+                <Toaster position="top-center" className="w-fit" expand={true}/>
             </body>
         </html>
     );

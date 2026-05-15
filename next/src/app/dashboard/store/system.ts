@@ -7,6 +7,20 @@ export const MotorStateName: Record<MotorState, string> = {
     3: "brake",
 }
 
+export interface MeterInfo {
+    ip: string
+    status: string
+    hostname: string
+    meter_type: string
+    firmwares: Record<string, string>
+    module_info: Record<string, unknown>
+    system_versions: Record<string, string>
+}
+
+export interface MeterState extends MeterInfo {
+    alive: boolean
+}
+
 export interface SystemState {
     // motors for rollers
     motors: [MotorState, MotorState, MotorState]
@@ -25,6 +39,9 @@ export interface SystemState {
 
     // flag for sse connection
     connected: boolean
+
+    // known connected meters
+    meters: Record<string, MeterState>
 
     // current tab
     currentTab: string | undefined
@@ -47,6 +64,7 @@ export const initialSystemState: SystemState = {
     handsome: false,
     playground: false,
     connected: false,
+    meters: {},
     currentTab: undefined,
     running: false,
     tower: [false, false, false, false],
@@ -54,12 +72,33 @@ export const initialSystemState: SystemState = {
     mode: 'auto'
 }
 
-export type Action = { type: 'set'; key: keyof SystemState; value: SystemState[keyof SystemState] }
+export type Action =
+    | { type: 'set'; key: keyof SystemState; value: SystemState[keyof SystemState] }
+    | { type: 'meter'; ip: string; info?: MeterInfo; alive: boolean }
+    | { type: 'meters:clear' }
 
 export function reducer(state: SystemState, action: Action): SystemState {
     switch (action.type) {
         case 'set':
             return { ...state, [action.key]: action.value }
+        case 'meter': {
+            if (!action.alive) {
+                const nextMeters = { ...state.meters }
+                delete nextMeters[action.ip]
+                return { ...state, meters: nextMeters }
+            }
+
+            if (!action.info) return state
+            return {
+                ...state,
+                meters: {
+                    ...state.meters,
+                    [action.ip]: { ...action.info, alive: true },
+                },
+            }
+        }
+        case 'meters:clear':
+            return { ...state, meters: {} }
         default:
             return state
     }

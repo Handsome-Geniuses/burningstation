@@ -1,6 +1,6 @@
 'use client'
 import React, { useRef, useEffect, useState, useReducer } from "react"
-import { Action, initialSystemState, reducer, SystemState } from "./system"
+import { Action, initialSystemState, MeterInfo, reducer, SystemState } from "./system"
 import { notify } from "@/lib/notify"
 import { Question, QuestionProps } from "./question"
 import { LoadingGif } from "@/components/ui/loading-gif"
@@ -52,8 +52,19 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         else setQuestion(undefined)
     }
     const onNotify = (payload: any) => {
-        const {msg, ntype} = payload
-        notify.notice(ntype,msg)
+        const {msg, ntype, description} = payload
+        notify.notice(ntype, msg, { description })
+    }
+    const onMeter = (payload: any) => {
+        const { ip, alive, info } = payload ?? {}
+        if (typeof ip !== "string" || typeof alive !== "boolean") return
+
+        systemDispatch({
+            type: "meter",
+            ip,
+            alive,
+            info: alive ? (info as MeterInfo | undefined) : undefined,
+        })
     }
 
     function flaskconnect() {
@@ -63,6 +74,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         flasksse.current.onopen = () => {
             console.log("connection established")
             systemDispatch({ type: 'set', key: 'connected', value: true })
+            systemDispatch({ type: 'meters:clear' })
         }
         flasksse.current.onmessage = (e) => {
             const data = JSON.parse(e.data)
@@ -70,6 +82,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             console.log(data)
             if (event === 'keep-alive') return
             else if (event === 'state') onState(payload)
+            else if (event === 'meter') onMeter(payload)
             else if (event === 'question') onQuestion(payload)
             else if (event === 'notify') onNotify(payload)
         }

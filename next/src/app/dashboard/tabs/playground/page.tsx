@@ -63,10 +63,22 @@ const AddFakeMeterSim = () => {
             if (!res.ok) {
                 throw new Error(payload?.error ?? `Failed to add fake meter (${res.status})`)
             }
-
-            notify.success(`Added fake meter ${payload.ip}`)
         } catch (err) {
             const msg = err instanceof Error ? err.message : "Failed to add fake meter"
+            notify.error(msg)
+        }
+    }
+
+    const onWipe = async () => {
+        try {
+            const res = await flask.handleAction("sim", "wipe_mock_meters")
+            const payload = await res.json()
+
+            if (!res.ok) {
+                throw new Error(payload?.error ?? `Failed to wipe fake meters (${res.status})`)
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to wipe fake meters"
             notify.error(msg)
         }
     }
@@ -78,13 +90,20 @@ const AddFakeMeterSim = () => {
                 Add a mock meter to the meter manager
             </div>
 
-            <div className="mt-2">
+            <div className="mt-2 grid grid-cols-2 gap-2">
                 <Button
                     variant="outline"
                     className="w-full"
                     onClick={onAdd}
                 >
                     add fake meter
+                </Button>
+                <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={onWipe}
+                >
+                    wipe
                 </Button>
             </div>
         </div>

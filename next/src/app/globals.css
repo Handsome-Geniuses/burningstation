@@ -46,6 +46,7 @@
     *::-webkit-scrollbar-track {
         @apply bg-sidebar border-sidebar-foreground border-l-1;
     }
+
     /* Handle */
     *::-webkit-scrollbar-thumb {
         @apply bg-sidebar-foreground;
@@ -56,6 +57,18 @@
         @apply bg-sidebar-primary
     }
 
+    pre,
+    code {
+        font-family:
+            "JetBrains Mono",
+            "Fira Code",
+            "Cascadia Mono",
+            "SFMono-Regular",
+            Consolas,
+            monospace;
+        white-space: pre;
+        font-variant-ligatures: none;
+    }
 }
 
 

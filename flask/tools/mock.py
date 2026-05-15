@@ -40,11 +40,10 @@ MOCK_FIRMWARES = {
     "KEY_PAD_2": "1",
 }
 
-MOCK_HOSTNAME = "30001189"
 MOCK_SYSTEM_VERSIONS = {"system_version": "48792", "system_sub_version": "31"}
 MOCK_RESOLUTION = "800x480"
 MOCK_STATUS_TEXT = "mock meter ready"
-MOCK_DB_ID = -1
+MOCK_DB_ID = 1
 
 
 # ================================================================
@@ -59,9 +58,14 @@ _original_sim_on_action = sim.on_action
 # ================================================================
 # Meter patch helpers
 # ================================================================
+def _mock_hostname(host: str):
+    suffix = host.split(".")[-1]
+    return f"3000{int(suffix):04d}"
+
+
 def _mock_meter_init(self, host, **kwargs):
     _original_meter_init(self, host, **kwargs)
-    self._Client__hostname = MOCK_HOSTNAME
+    self._Client__hostname = _mock_hostname(host)
     self._module_info_cache = MOCK_MODULES
     self._firmwares = MOCK_FIRMWARES
     self._system_versions_cache = MOCK_SYSTEM_VERSIONS
@@ -70,6 +74,7 @@ def _mock_meter_init(self, host, **kwargs):
     self._host = host
     self.status = "ready"
     self.results = {}
+    _apply_meter_runtime_mocks(self)
 
 
 def _apply_meter_runtime_mocks(meter: SSHMeter):
@@ -117,6 +122,11 @@ def list_mock_meters():
     ]
 
 
+def _mock_insert_sshmeter(meter: SSHMeter):
+    meter.db_id = MOCK_DB_ID
+    return (MOCK_DB_ID,)
+
+
 def add_mock_meter(host: str | None = None):
     host = host or _next_mock_meter_ip()
 
@@ -125,16 +135,31 @@ def add_mock_meter(host: str | None = None):
         _mock_meter_ips.add(host)
         return _build_meter_payload(host, meter, "exists")
 
-    meter = _apply_meter_runtime_mocks(SSHMeter(host))
-    mm.meters[host] = meter
-    mm._METERMANAGER__meters.add(host)
-    mm._METERMANAGER__splash.discard(host)
-    mm._METERMANAGER__booted.pop(host, None)
-    mm._METERMANAGER__attempts.pop(host, None)
-    mm._METERMANAGER__stale_counts.pop(host, None)
     _mock_meter_ips.add(host)
+    mm._METERMANAGER__stale_counts.pop(host, None)
+    mm._METERMANAGER__attempts.pop(host, None)
+    mm._METERMANAGER__booted.pop(host, None)
+    mm._METERMANAGER__splash.discard(host)
+    mm.refresh()
 
-    return _build_meter_payload(host, meter, "added")
+    meter = mm.meters.get(host)
+    if meter:
+        return _build_meter_payload(host, meter, "added")
+
+    raise RuntimeError(f"Failed to add mock meter {host}")
+
+
+def wipe_mock_meters():
+    hosts = list(_mock_meter_ips)
+    threshold = getattr(mm, "_METERMANAGER__STALE_THRESHOLD", 2)
+    _mock_meter_ips.clear()
+
+    for host in hosts:
+        if host in mm.meters:
+            for _ in range(threshold):
+                mm.stale_meter(host)
+
+    return {"status": "wiped", "count": len(hosts), "ips": hosts}
 
 
 # ================================================================
@@ -149,6 +174,8 @@ def _mock_get_ips(*args, **kwargs):
 def _mock_sim_on_action(action, **kwargs):
     if action == "mock_meter":
         return add_mock_meter(kwargs.get("host")), 200
+    if action == "wipe_mock_meters":
+        return wipe_mock_meters(), 200
     if action == "list_meters":
         return list_mock_meters(), 200
     return _original_sim_on_action(action, **kwargs)
@@ -170,6 +197,7 @@ def _mock_start_physical_job(meter_up, buttons=None):
 # ================================================================
 def _install_patches():
     patch("lib.meter.ssh_meter.SSHMeter.__init__", _mock_meter_init).start()
+    patch("lib.meter.meter_manager.insert_sshmeter", _mock_insert_sshmeter).start()
     patch("ip_scanner.get_ips", _mock_get_ips).start()
     patch("lib.system.station.check_robot_clear_of_conveyor", lambda: None).start()
     patch("lib.system.sim.on_action", _mock_sim_on_action).start()
