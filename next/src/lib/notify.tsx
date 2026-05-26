@@ -9,7 +9,7 @@ import {
 import { cva } from "class-variance-authority";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-
+import type { ExternalToast } from "sonner";
 export type NotifyType = "message" | "info" | "warn" | "error" | "success";
 
 type NotifyAction = {
@@ -17,7 +17,7 @@ type NotifyAction = {
     onClick: () => void;
 };
 
-export type NotifyOptions = {
+export type NotifyOptions = ExternalToast & {
     description?: string;
     duration?: number;
     action?: NotifyAction;
@@ -111,22 +111,20 @@ function base(
         descriptionClassName,
         iconClassName,
         toasterId,
+        ...toastOptions
     } = opts;
 
     const icon =
         tone === "message" ? undefined : renderIcon(tone, iconClassName);
 
     return toast.message(
-        <div className="flex flex-col" >
-            <p className={cn(textVariants({ tone }), textClassName)
-            }> {msg} </p>
-            {
-                description ? (
-                    <p className={cn(descriptionVariants(), descriptionClassName)
-                    }>
-                        {description}
-                    </p>
-                ) : null}
+        <div className="flex flex-col">
+            <p className={cn(textVariants({ tone }), textClassName)}>{msg}</p>
+            {description ? (
+                <p className={cn(descriptionVariants(), descriptionClassName)}>
+                    {description}
+                </p>
+            ) : null}
         </div>,
         {
             className: cn(wrapVariants(), className),
@@ -134,6 +132,7 @@ function base(
             icon,
             action,
             toasterId,
+            ...toastOptions
         }
     );
 }

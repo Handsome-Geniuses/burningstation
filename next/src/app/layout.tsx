@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "sonner";
+import { Toaster } from "@/components/ui/sonner";
 import { Globals } from "./globals";
 
 export const metadata: Metadata = {
@@ -26,10 +26,9 @@ export default function RootLayout({
             >
                 <Globals/>
                 {children}
-                <Toaster position="top-center" className="w-fit" expand={true}/>
+                <Toaster position="top-center" expand={true} richColors />
             </body>
         </html>
     );
 
 }
-
