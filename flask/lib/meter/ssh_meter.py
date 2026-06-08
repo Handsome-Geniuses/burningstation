@@ -781,7 +781,9 @@ class SSHMeter(sshkit.Client):
 
     def press(self, button: str, value: Optional[str] = "1", delay: float = 0.1):
         """
-        Sends a button press using user-friendly string. Examples:
+        Sends a button press using user-friendly string. 
+        ** UK meters need a persistent connection for comamnds to work quickly. Otherwise you will see very slow button presses, etc.
+        Examples:
             press('plus'), press('cancel'), press('1'), press('A'), press('Enter')
         """
         label_map = {
@@ -1487,11 +1489,9 @@ fclose($myfile);
         return resp
 
     def present_coin_collection_card(self, delay: float = 0.1) -> requests.Response:
-        # Not tested with UK
         return self.present_special_card_raw("COINCOLLECTION", delay=delay)
 
     def present_meter_diagnostics_card(self, delay: float = 0.1) -> requests.Response:
-        # Not tested with UK
         return self.present_special_card_raw("METERDIAGNOSTICS", delay=delay)
     
     def custom_busdev(self, button_name, button_value, delay=0.1):
