@@ -9,6 +9,7 @@ import time
 import os
 import math
 import json
+import shlex
 from html import unescape
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -61,6 +62,47 @@ CARD_READ_TRACK2_MAX_LEN = 40
 CARD_READ_NFC_MODULE = 75
 CARD_READ_TYPE_MSD_CONTACTLESS = 3
 
+REMOTE_HTML_ROOT = "/var/volatile/html"
+REMOTE_UI_HTML_PATH = f"{REMOTE_HTML_ROOT}/UI_0.html"
+REMOTE_WEB_ROOT = f"{REMOTE_HTML_ROOT}/web"
+REMOTE_BUSDEV_PATH = f"{REMOTE_WEB_ROOT}/busdev.php"
+REMOTE_PRINT_DIR = "/var/volatile"
+
+BUSDEV_KEY_HEX = {
+    "nAsterisk": "2a00",
+    "nPound": "2300",
+    "aAsterisk": "2a00",
+    "aPound": "2300",
+    "aBack": "7900",
+    "aEnter": "7a00",
+    "globe": "6c00",
+    "plus": "2b00",
+    "minus": "2d00",
+    "cancel": "7800",
+    "okay": "6f00",
+    "question": "6800",
+    "max": "6d00",
+    "softReset": "7f00",
+    "diagnostics": "7200",
+}
+BUSDEV_KEY_PACKET_PREFIX = "00010200000000003e0800000000"
+DIAG_SELECTED_PREFIX_RE = re.compile(r"^\s*(?:->|=>)\s*")
+
+COIN_VALUE_TO_INDEX_BY_REGION: Dict[str, Dict[int, int]] = {
+    "us": {
+        5: 2,   # nickel
+        10: 3,  # dime
+        25: 4,  # quarter
+        100: 5, # dollar coin
+    },
+    "uk": {
+        5: 2,   # 5p
+        10: 3,  # 10p
+        20: 4,  # 20p
+        50: 5,  # 50p
+    },
+}
+
 class Firmwares(TypedDict):
     MK7_XE910: str
     KIOSK_NFC: str
@@ -100,6 +142,7 @@ class SystemVersions(TypedDict):
     system_sub_version: str
 
 MeterType = Literal["","msx","ms3","ms2.5"]
+MeterRegion = Literal["","us","uk"]
 
 class InfoDict(TypedDict):
     ip: str
@@ -107,6 +150,7 @@ class InfoDict(TypedDict):
     hostname: str
     firmwares: Firmwares
     meter_type: MeterType
+    meter_region: MeterRegion
     module_info: Dict[str, ModuleInfo]
     system_versions: SystemVersions
 
@@ -138,6 +182,8 @@ class SSHMeter(sshkit.Client):
         self._module_details_cache: Optional[Dict[str, Dict[str, str]]] = None
         self._module_info_cache: Optional[Dict[str, ModuleInfo]] = None
         self._system_versions_cache: Optional[SystemVersions] = None
+        self._meter_region_cache: Optional[MeterRegion] = None
+        self._http_available: Optional[bool] = None
 
     def connect(self):
         # need to increase timeout for wireless
@@ -162,25 +208,222 @@ class SSHMeter(sshkit.Client):
             self._module_details_cache = None
             self._module_info_cache = None
             self._system_versions_cache = None
+            self._meter_region_cache = None
         return {
             'ip': self.host,
             'status': self.status,
             'hostname': self.hostname,
             'firmwares': self.firmwares,
             'meter_type': self.meter_type,
+            'meter_region': self.meter_region,
             'module_info': self.module_info,
             'system_versions': self.system_versions
         }
 
-    def cli(self, cmd:str):
+    def _cli_full(self, cmd: str) -> Tuple[str, str]:
         isConnected = self.connected
         if (not isConnected): self.connect()
-        # stdin, stdout, stderr = self.exec_command(cmd)
         stdin, stdout, stderr = self.safe_exec_command(cmd)
-        res = stdout.read().decode().strip()
+        out = stdout.read().decode(errors="replace").strip()
+        err = stderr.read().decode(errors="replace").strip()
         if (not isConnected): self.close()
-        return res
-    
+        return out, err
+
+    def cli(self, cmd:str):
+        out, _ = self._cli_full(cmd)
+        return out
+
+    @staticmethod
+    def _synthetic_response(url: str, status_code: int = 200, text: str = "") -> requests.Response:
+        response = requests.Response()
+        response.status_code = status_code
+        response.url = url
+        response.encoding = "utf-8"
+        response._content = text.encode("utf-8")
+        return response
+
+    def _http_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        raise_for_status: bool = False,
+        **kwargs,
+    ) -> Optional[requests.Response]:
+        if self._http_available is False:
+            return None
+
+        try:
+            response = requests.request(method, url, **kwargs)
+            if raise_for_status:
+                response.raise_for_status()
+            self._http_available = True
+            return response
+        except Exception:
+            self._http_available = False
+            return None
+
+    def _run_remote_php_script(
+        self,
+        script_path: str,
+        *,
+        post_data: Optional[Dict[str, str]] = None,
+        capture_output: bool = True,
+    ) -> str:
+        script_dir = os.path.dirname(script_path)
+        script_name = os.path.basename(script_path)
+
+        php_parts: List[str] = []
+        php_parts.append(
+            '$_SERVER["REQUEST_METHOD"] = '
+            + ('"POST";' if post_data else '"GET";')
+        )
+        if post_data:
+            for key, value in post_data.items():
+                php_parts.append(
+                    f'$_POST[{json.dumps(str(key))}] = {json.dumps("" if value is None else str(value))};'
+                )
+
+        php_parts.append("ob_start();")
+        php_parts.append(f"include {json.dumps(script_name)};")
+        if capture_output:
+            php_parts.append("$out = ob_get_clean();")
+            php_parts.append("if ($out !== false) { echo $out; }")
+        else:
+            php_parts.append("ob_end_clean();")
+
+        command = (
+            f"cd {shlex.quote(script_dir)} && "
+            f"php -r {shlex.quote(''.join(php_parts))}"
+        )
+        out, err = self._cli_full(command)
+        if err:
+            raise RuntimeError(err)
+        return out
+
+    @staticmethod
+    def _hex_to_printf_payload(packet_hex: str) -> str:
+        packet_hex = re.sub(r"\s+", "", packet_hex)
+        if len(packet_hex) % 2 != 0:
+            raise ValueError(f"Invalid hex payload length: {len(packet_hex)}")
+        return "".join(
+            f"\\x{packet_hex[i:i + 2]}"
+            for i in range(0, len(packet_hex), 2)
+        )
+
+    def _udp_packet_hex_command(self, packet_hex: str, *, port: int) -> str:
+        escaped_payload = self._hex_to_printf_payload(packet_hex)
+        return (
+            f"printf '%b' {shlex.quote(escaped_payload)} | "
+            f"socat - UDP:127.0.0.1:{port}"
+        )
+
+    def _send_udp_packet_hex(self, packet_hex: str, *, port: int) -> None:
+        command = self._udp_packet_hex_command(packet_hex, port=port)
+        out, err = self._cli_full(command)
+        if err and not out:
+            raise RuntimeError(err)
+
+    def _send_udp_packet_hex_detached(self, packet_hex: str, *, port: int) -> None:
+        self._fire_and_forget(self._udp_packet_hex_command(packet_hex, port=port))
+
+    def _send_rtsc_command(self, command: str, port: int = 8008) -> str:
+        out, err = self._cli_full(
+            f"printf %s {shlex.quote(command)} | socat - UDP:127.0.0.1:{port}"
+        )
+        if err and not out:
+            raise RuntimeError(err)
+        return out
+
+    def _write_remote_text(self, remote_path: str, content: str) -> None:
+        remote_dir = os.path.dirname(remote_path)
+        delimiter = "__BURNINGSTATION_EOF__"
+        while delimiter in content:
+            delimiter += "_X"
+
+        command = (
+            f"mkdir -p {shlex.quote(remote_dir)} && "
+            f"cat <<'{delimiter}' > {shlex.quote(remote_path)}\n"
+            f"{content}\n"
+            f"{delimiter}"
+        )
+        _, err = self._cli_full(command)
+        if err:
+            raise RuntimeError(err)
+
+    def _read_uipage_html_via_cli(self) -> str:
+        page_html, err = self._cli_full(f"cat {shlex.quote(REMOTE_UI_HTML_PATH)}")
+        if err and not page_html:
+            raise RuntimeError(err)
+        return page_html
+
+    @staticmethod
+    def _busdev_key_hex(key: str) -> Optional[str]:
+        if key in BUSDEV_KEY_HEX:
+            return BUSDEV_KEY_HEX[key]
+        if re.fullmatch(r"n\d", key):
+            return f"{ord(key[1]):02x}00"
+        if re.fullmatch(r"a[A-Z]", key):
+            return f"{ord(key[1]):02x}00"
+        return None
+
+    def _post_busdev_form(
+        self,
+        data: Dict[str, str],
+        *,
+        delay: float = 0.1,
+        prefer_cli: bool = False,
+    ) -> requests.Response:
+        url = f"http://{self.host}:8005/web/busdev.php"
+
+        if not prefer_cli:
+            resp = self._http_request("post", url, data=data, timeout=0.75)
+            if resp is not None:
+                time.sleep(delay)
+                return resp
+
+        self._run_remote_php_script(REMOTE_BUSDEV_PATH, post_data=data, capture_output=False)
+        time.sleep(delay)
+        return self._synthetic_response(url, text="cli-fallback")
+
+    def _send_key_press_cli(self, key: str, delay: float = 0.1) -> requests.Response:
+        key_hex = self._busdev_key_hex(key)
+        if key_hex is None:
+            return self._post_busdev_form({key: "1"}, delay=delay, prefer_cli=True)
+
+        payload_hex = BUSDEV_KEY_PACKET_PREFIX + key_hex
+        try:
+            if self.connected:
+                self._send_udp_packet_hex_detached(payload_hex, port=8002)
+            else:
+                self._send_udp_packet_hex(payload_hex, port=8002)
+        except Exception:
+            php_code = (
+                f'$buf = hex2bin({json.dumps(payload_hex)});'
+                '$sock = socket_create(AF_INET, SOCK_DGRAM, 0);'
+                'if ($buf === false || $sock === false) { fwrite(STDERR, "Unable to create key packet\\n"); exit(1); }'
+                'if (!socket_sendto($sock, $buf, strlen($buf), 0, "127.0.0.1", 8002)) {'
+                '  fwrite(STDERR, "Unable to send key packet\\n");'
+                '  exit(1);'
+                '}'
+                'socket_close($sock);'
+            )
+            _, err = self._cli_full(f"php -r {shlex.quote(php_code)}")
+            if err:
+                return self._post_busdev_form({key: "1"}, delay=delay, prefer_cli=True)
+
+        time.sleep(delay)
+        url = f"http://{self.host}:8005/web/busdev.php"
+        return self._synthetic_response(url, text="cli-fallback")
+
+    def _get_config_main_html(self, timeout: float = 2.0) -> str:
+        url = f"http://{self.host}:8005/web/config_main.php"
+        resp = self._http_request("get", url, timeout=timeout, raise_for_status=True)
+        if resp is not None:
+            return resp.text
+
+        return self._send_rtsc_command("cmd.main.config")
+       
     def get_meter_type(self)-> MeterType:
         if (self.__resolution == ""):
             self.__resolution = self.cli("""fbset -s | grep mode | awk -F'"' '{print $2}' | cut -d- -f1""")
@@ -202,26 +445,82 @@ class SSHMeter(sshkit.Client):
                 meter_type = "msx"
         elif self.__resolution == "800x480": meter_type = "ms2.5"
         return meter_type
-        
+
     meter_type = property(lambda self: self.get_meter_type())
-    
-    # def __uipage(self, url, timeout=1):
-    #     resp = requests.get(url, timeout=0.2)
-    #     resp.raise_for_status()
-    #     page_text = resp.text.lower()
-    #     return page_text
-    
-    # def in_splash(self):
-    #     """ Checks if the meter is in splash screen """
-    #     page_text = self.__uipage(f"http://{self.host}:8005/UIPage.php", 0.5)
-    #     return 'unable to open file' in page_text
+
+    def _read_remote_file_if_exists(self, path: str) -> str:
+        out, err = self._cli_full(f"cat {shlex.quote(path)}")
+        if err and not out:
+            err_lower = err.lower()
+            if "no such file" in err_lower or "not found" in err_lower:
+                return ""
+            return ""
+        return out.strip()
+
+    def _get_meter_region_registry_values(self) -> Dict[str, str]:
+        registry_files = {
+            "app": "/cfg/registry/appCfg/app",
+            "appCfgVersion": "/cfg/registry/appCfg/appCfgVersion",
+            "appOverlayVersion": "/cfg/registry/appOverlay/appOverlayVersion",
+        }
+        marker = "__BURNINGSTATION_REG__:"
+        command_parts = []
+        for key, path in registry_files.items():
+            command_parts.append(
+                f"printf '%s\\n' {shlex.quote(marker + key)};"
+                f"cat {shlex.quote(path)} 2>/dev/null || true;"
+                "printf '\\n';"
+            )
+
+        out, _ = self._cli_full(" ".join(command_parts))
+        values = {key: "" for key in registry_files}
+        current_key: Optional[str] = None
+        current_lines: List[str] = []
+
+        for line in out.splitlines():
+            if line.startswith(marker):
+                if current_key is not None:
+                    values[current_key] = "\n".join(current_lines).strip()
+                current_key = line[len(marker):]
+                current_lines = []
+            else:
+                current_lines.append(line)
+
+        if current_key is not None:
+            values[current_key] = "\n".join(current_lines).strip()
+
+        return values
+
+    def get_meter_region(self, *, force_refresh: bool = False) -> MeterRegion:
+        if self._meter_region_cache is not None and not force_refresh:
+            return self._meter_region_cache
+
+        meter_region: MeterRegion = ""
+        try:
+            values = self._get_meter_region_registry_values()
+        except Exception:
+            self._meter_region_cache = meter_region
+            return meter_region
+
+        uk_hits = 0
+        for value in values.values():
+            normalized = (value or "").strip().lower()
+            if re.search(r"(?<![a-z])uk(?![a-z])", normalized):
+                uk_hits += 1
+
+        if uk_hits >= 2:
+            meter_region = "uk"
+        else:
+            meter_region = "us"
+
+        self._meter_region_cache = meter_region
+        return meter_region
+
+    meter_region = property(lambda self: self.get_meter_region())
 
     def in_splash(self):
         """ Checks if the meter is in splash screen """
-        url = f"http://{self.host}:8005/UIPage.php"
-        resp = requests.get(url, timeout=0.2)
-        resp.raise_for_status()
-        page_text = resp.text.lower()
+        page_text = self._get_uipage_html(timeout=0.2).lower()
         if 'unable to open file' in page_text:
             return True
         return False
@@ -248,9 +547,11 @@ class SSHMeter(sshkit.Client):
 
     def _get_uipage_html(self, timeout: float = 5.0) -> str:
         url = f"http://{self.host}:8005/UIPage.php"
-        resp = requests.get(url, timeout=timeout)
-        resp.raise_for_status()
-        return resp.text
+        resp = self._http_request("get", url, timeout=timeout, raise_for_status=True)
+        if resp is not None:
+            return resp.text
+
+        return self._read_uipage_html_via_cli()
 
     def get_ui_page_html(self, timeout: float = 5.0) -> str:
         return self._get_uipage_html(timeout=timeout)
@@ -343,7 +644,13 @@ class SSHMeter(sshkit.Client):
         title = re.sub(r"\s*\[[^\]]*\]\s*", "", title).strip()
         title_segments = [segment.strip() for segment in title.split(":") if segment.strip()]
 
-        pre_match = re.search(r"<pre[^>]*>(.*?)</pre>", page_html, flags=re.I | re.S)
+        pre_match = re.search(
+            r"<div[^>]*class\s*=\s*[\"']?diaginfo[\"']?[^>]*>.*?<pre[^>]*>(.*?)</pre>",
+            page_html,
+            flags=re.I | re.S,
+        )
+        if pre_match is None:
+            pre_match = re.search(r"<pre[^>]*>(.*?)</pre>", page_html, flags=re.I | re.S)
         pre_text = unescape(pre_match.group(1)).replace("\r", "") if pre_match else ""
 
         menu_items: List[DiagMenuItem] = []
@@ -352,8 +659,8 @@ class SSHMeter(sshkit.Client):
             if not line.strip():
                 continue
 
-            selected = bool(re.match(r"^\s*->\s*", line))
-            item_text = re.sub(r"^\s*->\s*", "", line).strip()
+            selected = bool(DIAG_SELECTED_PREFIX_RE.match(line))
+            item_text = DIAG_SELECTED_PREFIX_RE.sub("", line).strip()
             if not item_text:
                 continue
 
@@ -480,10 +787,24 @@ class SSHMeter(sshkit.Client):
         label_map = {
             "+": "plus",
             "-": "minus",
+            "up": "plus",
+            "down": "minus",
             "enter": "aEnter",
+            "aenter": "aEnter",
             "back": "aBack",
+            "aback": "aBack",
             "ok": "okay",
             "confirm": "okay",
+            "accept": "okay",
+            "help": "question",
+            "language": "globe",
+            "softreset": "softReset",
+            "asterisk": "nAsterisk",
+            "star": "nAsterisk",
+            "*": "nAsterisk",
+            "pound": "nPound",
+            "hash": "nPound",
+            "#": "nPound",
         }
         special_keys = {
             "plus",
@@ -491,10 +812,9 @@ class SSHMeter(sshkit.Client):
             "cancel",
             "okay",
             "question",
+            "globe",
             "max",
-            "softReset",
             "diagnostics",
-            "aBack",
         }
         b = button.strip()
         b_lower = b.lower()
@@ -510,15 +830,15 @@ class SSHMeter(sshkit.Client):
         else:
             key = b
 
+        data = {key: "" if value is None else str(value)}
         url = f"http://{self.host}:8005/web/busdev.php"
-        data = {key: value}
-        resp = requests.post(url, data=data)
-        time.sleep(delay)
 
-        if getattr(self, "verbose", False):
-            print(
-                f"{self.host} Press '{button}' → POST key '{key}' | Status: {resp.status_code}"
-            )
+        resp = self._http_request("post", url, data=data, timeout=0.75)
+        if resp is not None:
+            time.sleep(delay)
+        else:
+            resp = self._send_key_press_cli(key, delay=delay)
+
         return resp
 
 
@@ -588,12 +908,8 @@ class SSHMeter(sshkit.Client):
         Assumes we are on the IPSBus Modules page; iterates every module and
         returns { module_name: details_dict_with_all_fields }.
         """
-        base_url = f"http://{self.host}:8005/UIPage.php"
-
         def _fetch_html() -> str:
-            resp = requests.get(base_url, timeout=timeout)
-            resp.raise_for_status()
-            return resp.text
+            return self._get_uipage_html(timeout=timeout)
 
         results: Dict[str, Dict[str, str]] = {}
 
@@ -638,10 +954,7 @@ class SSHMeter(sshkit.Client):
             self.press('ok'); time.sleep(0.1)
 
             time.sleep(0.5)
-            url = f"http://{self.host}:8005/UIPage.php"
-            resp = requests.get(url, timeout=0.5)
-            resp.raise_for_status()
-            page_html = resp.text
+            page_html = self._get_uipage_html(timeout=0.5)
             match = re.search(r'<pre>(.*?)</pre>', page_html, re.DOTALL)
             text = match.group(1) if match else ''
 
@@ -757,13 +1070,10 @@ class SSHMeter(sshkit.Client):
         if self._system_versions_cache is not None and not force_refresh:
             return self._system_versions_cache
         
-        url = f"http://{self.host}:8005/web/config_main.php"
         try:
-            resp = requests.get(url, timeout=timeout)
-            resp.raise_for_status()
-            page_html = resp.text
+            page_html = self._get_config_main_html(timeout=timeout)
         except Exception as e:
-            print(f"[get_system_versions] Error fetching {url}: {e}")
+            print(f"[get_system_versions] Error fetching config_main: {e}")
             result: SystemVersions = {"system_version": "", "system_sub_version": ""}
             self._system_versions_cache = result
             return result
@@ -851,7 +1161,11 @@ class SSHMeter(sshkit.Client):
         Uses nohup if available; falls back to plain sh.
         Do NOT read stdout/stderr; just schedule and bail.
         """
-        wrapped = f"(nohup sh -c '{inner}' >/dev/null 2>&1 || sh -c '{inner}' >/dev/null 2>&1) &"
+        quoted_inner = shlex.quote(inner)
+        wrapped = (
+            f"(nohup sh -c {quoted_inner} >/dev/null 2>&1 || "
+            f"sh -c {quoted_inner} >/dev/null 2>&1) &"
+        )
         self.safe_exec_command(wrapped)
 
     def is_booting(self):
@@ -957,63 +1271,23 @@ fclose($myfile);
     
     def goto_coins(self):
         self.goto_diagnostics_path(["Utilities", "Coins"])
-
+    
     def print_msg(self, msg):
         msg  = re.sub(r'\n[ \t]+', '\n', msg)
         url = f"http://{self.host}:8005/web/control_print_direct.php"
         files = {"fileToUpload": ("hello.txt", msg, "text/plain")}
-        requests.post(url,files=files, timeout=1)
+        resp = self._http_request("post", url, files=files, timeout=1)
+        if resp is not None:
+            return
 
-        
-    def _custom_print(self):
-        # now = datetime.now()
-        now = datetime.now(ZoneInfo("America/Los_Angeles"))
-        _full = now.strftime("%m/%d/%Y %H:%M:%S")
-        _date = now.strftime("%m/%d/%Y")
-        _time = now.strftime("%H:%M:%S")
-        msg = ""
-        msg += "=====================\n"
-        msg += "= IPS BURN-IN TEST\n"
-        # msg += "=====================\n"
-        msg += f"= meterID: {self.hostname}\n"
-        msg += "=====================\n"
-        msg += f"date: {_date}\n"
-        msg += f"time: {_time}\n"
-        # msg += ".\n"
+        remote_path = f"{REMOTE_PRINT_DIR}/print_direct_{int(time.time() * 1000)}.txt"
+        self._write_remote_text(remote_path, msg)
+        try:
+            self._send_rtsc_command(f"cmd.main.printer:pr={remote_path}")
+            time.sleep(0.25)
+        finally:
+            self._cli_full(f"rm -f {shlex.quote(remote_path)}")
 
-        # firmware
-        msg += "=====================\n"
-        msg += "= firmware\n"
-        msg += "=====================\n"
-        msg += "\n".join(f"{k}: {v}" for k, v in self.firmwares.items())
-        msg += "\n"
-        # msg += ".\n"
-
-        # tests
-        msg += "=====================\n"
-        msg += "= test results\n"
-        msg += "=====================\n"
-        # msg += f"printer: {'PASS'}\n"
-        # msg += f"coin shutter: {'PASS'}\n"
-        # msg += f"screen test: {'PASS'}\n"
-        # msg += f"nfc: {'FAIL'}\n"
-        # msg += f"modem: {'PASS'}\n"
-
-        # msg += f"printer: {self.results.get('cycle_print', 'n/a')}\n"
-        # msg += f"coin shutter: {self.results.get('cycle_coin_shutter', 'n/a')}\n"
-        # msg += f"nfc: {self.results.get('cycle_nfc', 'n/a')}\n"
-        # msg += f"modem: {self.results.get('cycle_modem', 'n/a')}\n"
-        # msg += f"screen: {self.results.get('cycle_meter_ui', 'n/a')}\n"
-
-        keys = ["printer", "coin shutter", "screen test", "nfc" , "modem"]
-        msg += "\n".join(f"{k}: {self.results.get(k, 'n/a').upper()}" for k in keys)
-        msg += "\n"
-        # msg += ".\n"
-
-        line_count = len(msg.splitlines())
-        print(f'msg has {line_count} lines')
-        # print(msg)
-        # self.print_msg(msg)
 
     def custom_print(self):
         now = datetime.now(ZoneInfo("America/Los_Angeles"))
@@ -1102,26 +1376,16 @@ fclose($myfile);
         return res
 
     def insert_coin(self, value: int, delay: float = 0.1):
-        value_to_index = {
-            5: 2,  # nickel
-            10: 3,  # dime
-            25: 4,  # quarter
-            100: 5,  # dollar coin
-            1: 1,  # penny (if you have it)
-        }
-        index = value_to_index.get(value)
+        meter_region = str(self.meter_region or "").strip().lower() or "us"
+        value_to_index = COIN_VALUE_TO_INDEX_BY_REGION.get(meter_region)
+        index = None if value_to_index is None else value_to_index.get(value)
         if index is None:
-            raise ValueError(f"Coin value {value} not supported.")
-
-        url = f"http://{self.host}:8005/web/busdev.php"
-        data = {f"coin,{index},{value}": str(value)}
-        resp = requests.post(url, data=data)
-        time.sleep(delay)
-
-        if getattr(self, "verbose", False):
-            print(
-                f"{self.host} Sent coin (index={index}, value={value}) | Status: {resp.status_code}"
+            raise ValueError(
+                f"Coin value {value} not supported for meter region {meter_region}."
             )
+
+        data = {f"coin,{index},{value}": str(value)}
+        resp = self._post_busdev_form(data, delay=delay)
         return resp
 
     def clear_coin_tallies(
@@ -1223,21 +1487,16 @@ fclose($myfile);
         return resp
 
     def present_coin_collection_card(self, delay: float = 0.1) -> requests.Response:
+        # Not tested with UK
         return self.present_special_card_raw("COINCOLLECTION", delay=delay)
 
     def present_meter_diagnostics_card(self, delay: float = 0.1) -> requests.Response:
+        # Not tested with UK
         return self.present_special_card_raw("METERDIAGNOSTICS", delay=delay)
     
     def custom_busdev(self, button_name, button_value, delay=0.1):
-        url = f"http://{self.host}:8005/web/busdev.php"
-        data = {button_name: button_value}
-        resp = requests.post(url, data=data)
-        time.sleep(delay)
-
-        if getattr(self, "verbose", False):
-            print(
-                f"{self.host} Sent custom busdev: {button_name} = {button_value} | status: {resp.status_code}"
-            )
+        data = {button_name: "" if button_value is None else str(button_value)}
+        resp = self._post_busdev_form(data, delay=delay)
         return resp
 
     def set_ui_mode(self, mode: str) -> None:

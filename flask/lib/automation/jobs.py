@@ -132,6 +132,8 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     st = _state(meter_ip)
 
     if meter.status != 'ready': return False, "job already running"
+    if (not meter.connected):
+        meter.connect() # UK meters need a consistent connection for jobs. But currently no disconnect is in place later on, which may cause issues after long idle times.
 
     st.reset()
     if log:
@@ -146,9 +148,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
     st.log(f"STARTING JOB THREAD: {program_name} on {meter.hostname}", console=True)
     st.log(f"Arguments: {kwargs}")
-    st.log(f"Meter Type: {meter.meter_type}")
-    st.log(f"Meter System Info: {json.dumps(meter.system_versions)}")
-    st.log(f"Meter Module Info: {json.dumps(meter.module_info)}")
+    st.log(f"Meter Info: {json.dumps(meter.get_info(), sort_keys=True)}")
 
     meter.status = "busy"
     master.broadcast('status', {'ip':meter_ip, 'status': meter.status})
