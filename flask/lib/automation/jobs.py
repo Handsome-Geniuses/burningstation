@@ -132,8 +132,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     st = _state(meter_ip)
 
     if meter.status != 'ready': return False, "job already running"
-    if (not meter.connected):
-        meter.connect() # UK meters need a consistent connection for jobs. But currently no disconnect is in place later on, which may cause issues after long idle times.
+    meter.connect()
 
     st.reset()
     if log:
@@ -181,10 +180,10 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
             st.log(f"JOB FINISHED: {st.result.upper()}", console=verbose)
 
             meter.results[program_name] = st.result
-        
+
         except Exception as exc:
             st.log(f"JOB CRASHED: {exc}", console=True)
-            
+
             st.status = "error"
             st.result = "fail"
             st.last_error = "".join(traceback.format_exception_only(type(exc), exc)).strip()

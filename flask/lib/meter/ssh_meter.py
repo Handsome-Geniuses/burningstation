@@ -10,6 +10,7 @@ import os
 import math
 import json
 import shlex
+import threading
 from html import unescape
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -171,9 +172,18 @@ class DiagPageState(TypedDict):
 def_user = bytes(a ^ b for a, b in zip(bytes([238,149,49,210]), [156,250,94,166])).decode()
 def_pswd = bytes(a ^ b for a, b in zip(bytes([236,108,173,77,97,238,131,254,65,42,46]), [156,44,223,6,8,128,228,201,118,25,25])).decode()
 class SSHMeter(sshkit.Client):
+    DEFAULT_SSH_IDLE_TIMEOUT = 180.0
 
     def __init__(self, host, **kwargs):
         super().__init__(host, user=def_user, pswd=def_pswd, **kwargs)
+        self._lock = threading.RLock()
+        self._command_lock = threading.RLock()
+        self._ssh_state_lock = threading.RLock()
+        self._connected_hint = False
+        self._ssh_active_ops = 0
+        self.default_ssh_idle_timeout = float(kwargs.get("ssh_idle_timeout", self.DEFAULT_SSH_IDLE_TIMEOUT))
+        self.ssh_idle_timeout = self.default_ssh_idle_timeout
+        self._ssh_last_used_at = time.monotonic()
         self.status: Literal["ready", "idle", "busy"] = "ready"
         self._firmwares: Firmwares = None 
 
@@ -185,22 +195,160 @@ class SSHMeter(sshkit.Client):
         self._meter_region_cache: Optional[MeterRegion] = None
         self._http_available: Optional[bool] = None
 
+    def _transport_is_active(self) -> bool:
+        """Return True only when Paramiko has a live active transport."""
+        try:
+            transport = self.get_transport()
+            return bool(transport and transport.is_active())
+        except Exception:
+            return False
+
+    @property
+    def connected(self) -> bool:
+        """Report current SSH health from Paramiko instead of a cached flag."""
+        active = self._transport_is_active()
+        self._connected_hint = active
+        return active
+
+    @connected.setter
+    def connected(self, value: bool) -> None:
+        self._connected_hint = bool(value)
+
+    def _touch_ssh_use(self) -> None:
+        """Record recent SSH activity for idle cleanup."""
+        with self._ssh_state_lock:
+            self._ssh_last_used_at = time.monotonic()
+
+    def _begin_ssh_operation(self) -> None:
+        """Mark an SSH command as active and ensure the transport is ready."""
+        with self._ssh_state_lock:
+            self._ssh_active_ops += 1
+        try:
+            self.connect()
+        except Exception:
+            self._end_ssh_operation(touch=False)
+            raise
+
+    def _end_ssh_operation(self, *, touch: bool = True) -> None:
+        """Mark an SSH command as finished and optionally refresh idle time."""
+        with self._ssh_state_lock:
+            self._ssh_active_ops = max(0, self._ssh_active_ops - 1)
+            if touch:
+                self._ssh_last_used_at = time.monotonic()
+
     def connect(self):
+        """Open or reuse a Paramiko SSH connection for this meter."""
         # need to increase timeout for wireless
         with self._lock:
-            transport = self.get_transport()
-            self.connected = bool(transport and transport.is_active())
-            if self.connected:
+            if self._transport_is_active():
+                self.connected = True
+                self._touch_ssh_use()
                 return
-
             super(sshkit.Client, self).connect(
                 self.host,
                 username=self.user,
                 password=self.pswd,
                 timeout=1.0,
                 banner_timeout=2,
+                auth_timeout=2,
             )
+            transport = self.get_transport()
+            if transport:
+                transport.set_keepalive(30)
             self.connected = True
+            self._touch_ssh_use()
+
+    def close(self):
+        """Close the local Paramiko client and mark the cached hint disconnected."""
+        with self._lock:
+            try:
+                super(sshkit.Client, self).close()
+            except:
+                pass
+            self.connected = False
+
+    def close_if_idle(self) -> bool:
+        """Close the SSH transport if it is inactive and past the idle timeout."""
+        with self._ssh_state_lock:
+            if self._ssh_active_ops > 0:
+                return False
+            if not self.connected:
+                should_close = True
+            else:
+                timeout = float(self.ssh_idle_timeout)
+                if timeout <= 0:
+                    return False
+                should_close = time.monotonic() - self._ssh_last_used_at >= timeout
+
+            if not should_close:
+                return False
+
+        with self._command_lock:
+            with self._ssh_state_lock:
+                if self._ssh_active_ops > 0:
+                    return False
+                if self.connected:
+                    timeout = float(self.ssh_idle_timeout)
+                    if timeout <= 0:
+                        return False
+                    if time.monotonic() - self._ssh_last_used_at < timeout:
+                        return False
+            self.close()
+            return True
+
+    def _exec_command_with_retry(self, command: str, *args, **kwargs):
+        """Open an SSH command channel, reconnecting once if the transport is stale."""
+        last_exc = None
+        for attempt in range(2):
+            try:
+                self.connect()
+                return super(sshkit.Client, self).exec_command(command, *args, **kwargs)
+            except Exception as exc:
+                last_exc = exc
+                try:
+                    self.close()
+                except:
+                    pass
+                if attempt == 1:
+                    raise last_exc
+        raise last_exc
+
+    def exec_command(self, command, *args, **kwargs):
+        """Run a raw SSH command while protecting connection state."""
+        with self._command_lock:
+            self._begin_ssh_operation()
+            try:
+                return self._exec_command_with_retry(command, *args, **kwargs)
+            finally:
+                self._end_ssh_operation()
+
+    def safe_exec_command(self, command: str):
+        """Run a command and return raw Paramiko streams for legacy callers."""
+        # Raw stream callers must consume/close returned stdout/stderr promptly.
+        # Prefer cli() or exec_parse() when the caller needs command output.
+        was_connected = self.connected
+        with self._command_lock:
+            self._begin_ssh_operation()
+            try:
+                res = self._exec_command_with_retry(command)
+                if not was_connected:
+                    res[1].channel.recv_exit_status()
+                return res
+            finally:
+                self._end_ssh_operation()
+
+    def exec_parse(self, command: str) -> tuple[int, str, str]:
+        """Run a command and return exit code, stdout, and stderr as strings."""
+        with self._command_lock:
+            self._begin_ssh_operation()
+            try:
+                _, stdout, stderr = self._exec_command_with_retry(command)
+                out = stdout.read().decode(errors="replace").strip()
+                err = stderr.read().decode(errors="replace").strip()
+                code = stdout.channel.recv_exit_status()
+                return code, out, err
+            finally:
+                self._end_ssh_operation()
 
     def get_info(self, force=False)->InfoDict:
         if force:
@@ -221,13 +369,16 @@ class SSHMeter(sshkit.Client):
         }
 
     def _cli_full(self, cmd: str) -> Tuple[str, str]:
-        isConnected = self.connected
-        if (not isConnected): self.connect()
-        stdin, stdout, stderr = self.safe_exec_command(cmd)
-        out = stdout.read().decode(errors="replace").strip()
-        err = stderr.read().decode(errors="replace").strip()
-        if (not isConnected): self.close()
-        return out, err
+        with self._command_lock:
+            self._begin_ssh_operation()
+            try:
+                stdin, stdout, stderr = self._exec_command_with_retry(cmd)
+                out = stdout.read().decode(errors="replace").strip()
+                err = stderr.read().decode(errors="replace").strip()
+                stdout.channel.recv_exit_status()
+                return out, err
+            finally:
+                self._end_ssh_operation()
 
     def cli(self, cmd:str):
         out, _ = self._cli_full(cmd)

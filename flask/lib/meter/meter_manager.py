@@ -32,11 +32,19 @@ class METERMANAGER:
     
     @classmethod
     def __on_stale(cls, ip: str):
+        """Track stale detections and remove inactive meters once threshold is met. Defer romoval if meter is busy."""
         cls.__stale_counts[ip] = cls.__stale_counts.get(ip, 0) + 1
         
         if cls.__stale_counts[ip] >= cls.__STALE_THRESHOLD:
             if ip in cls.meters:
-                hn = cls.meters[ip].hostname if hasattr(cls.meters[ip], 'hostname') else "unknown"
+                meter = cls.meters[ip]
+                hn = meter.hostname if hasattr(meter, 'hostname') else "unknown"
+                if getattr(meter, "status", None) == "busy":
+                    print(
+                        f"[{cls._timestamp()}] STALE: {ip} ({hn}) removal deferred because meter is busy",
+                        fg="#888800",
+                    )
+                    return
                 print(f"[{cls._timestamp()}] STALE: {ip} ({hn}) removed from known meters", fg="#888800")
             
             cls.meters[ip].close()
@@ -145,8 +153,18 @@ class METERMANAGER:
 
         for ip in stale: cls.__on_stale(ip)
 
+        cls.close_idle_connections()
 
         return valid_fresh, stale, list(cls.__meters)
+
+    @classmethod
+    def close_idle_connections(cls):
+        """Ask each known meter to release idle pooled SSH connections."""
+        for meter in list(cls.meters.values()):
+            try:
+                meter.close_if_idle()
+            except Exception:
+                pass
     
     @classmethod
     def list_meters(cls): return list(cls.__meters)
