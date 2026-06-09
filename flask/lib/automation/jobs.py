@@ -132,6 +132,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     st = _state(meter_ip)
 
     if meter.status != 'ready': return False, "job already running"
+    meter.connect()
 
     st.reset()
     if log:
@@ -146,9 +147,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
     st.log(f"STARTING JOB THREAD: {program_name} on {meter.hostname}", console=True)
     st.log(f"Arguments: {kwargs}")
-    st.log(f"Meter Type: {meter.meter_type}")
-    st.log(f"Meter System Info: {json.dumps(meter.system_versions)}")
-    st.log(f"Meter Module Info: {json.dumps(meter.module_info)}")
+    st.log(f"Meter Info: {json.dumps(meter.get_info(), sort_keys=True)}")
 
     meter.status = "busy"
     master.broadcast('status', {'ip':meter_ip, 'status': meter.status})
@@ -181,10 +180,10 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
             st.log(f"JOB FINISHED: {st.result.upper()}", console=verbose)
 
             meter.results[program_name] = st.result
-        
+
         except Exception as exc:
             st.log(f"JOB CRASHED: {exc}", console=True)
-            
+
             st.status = "error"
             st.result = "fail"
             st.last_error = "".join(traceback.format_exception_only(type(exc), exc)).strip()

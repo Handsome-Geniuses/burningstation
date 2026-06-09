@@ -5,7 +5,6 @@ import time
 
 
 def flash_brightness(meter: SSHMeter, shared: SharedState = None, count: int = 10, delay: float = 0):
-    meter.connect()
     brightness = meter.get_brightness()
 
     for i in range(count):
@@ -19,7 +18,6 @@ def flash_brightness(meter: SSHMeter, shared: SharedState = None, count: int = 1
         check_stop_event(shared)
 
     meter.set_brightness(brightness)
-    meter.close()
     check_stop_event(shared)
         
 
