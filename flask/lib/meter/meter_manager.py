@@ -45,24 +45,16 @@ class METERMANAGER:
         cls.__stale_counts[ip] = cls.__stale_counts.get(ip, 0) + 1
 
         if cls.__stale_counts[ip] >= cls.__STALE_THRESHOLD:
-            hn = "unknown"
             if ip in cls.meters:
-                meter = (
-                    cls.meters[ip]
-                hn = meter.hostname
-                    if hasattr(meter, "hostname")
-                    else "unknown"
+                meter = cls.meters[ip]
+                hn = meter.hostname if hasattr(meter, 'hostname') else "unknown"
                 if getattr(meter, "status", None) == "busy":
                     print(
                         f"[{cls._timestamp()}] STALE: {ip} ({hn}) removal deferred because meter is busy",
                         fg="#888800",
                     )
                     return
-                )
-                print(
-                    f"[{cls._timestamp()}] STALE: {ip} ({hn}) removed from known meters",
-                    fg="#888800",
-                )
+                print(f"[{cls._timestamp()}] STALE: {ip} ({hn}) removed from known meters", fg="#888800")
                 SSEQM.broadcast(
                     "notify",
                     {
