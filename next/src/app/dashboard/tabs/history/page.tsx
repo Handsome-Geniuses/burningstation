@@ -173,7 +173,7 @@ const JobDialog = ({ job, detailed = false }: { job: any, detailed?: boolean }) 
                             {results &&
                                 Object.entries(results).map(([key, res]: [string, any]) => (
                                     <p key={key} className="flex items-center gap-1">
-                                        {`${key} -- `} {statusIcon("pass", "size-5")}
+                                        {`${key} -- `} {statusIcon(res.status, "size-5")}
                                     </p>
                                 ))
                             }
