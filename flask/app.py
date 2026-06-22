@@ -74,7 +74,8 @@ context = (args.cert_file,  args.key_file) if args.key_file and args.cert_file e
 # context = ("/home/nosnhoj/.cert/cert.pem","/home/nosnhoj/.cert/key.pem")
 
 if __name__ == "__main__": 
-    # import tools.mock # for testing with mock meters
+    from lib.utils.secrets import secrets
+    if secrets.MOCK: import tools.mock # for testing with mock meters
     import lib.system.tasks as tasks
     from lib.robot.robot_power import pulse_robot_remote_on
 
