@@ -815,6 +815,13 @@ def _uses_direct_card_from_payment_amount(meter: SSHMeter) -> bool:
     return b
 
 
+def _requires_robot_nfc_payment_amount_accept(meter: SSHMeter, context: PaySessionContext) -> bool:
+    return (
+        meter.meter_type == "ms2.5"
+        and context.effective_payment_type == PaymentType.ROBOT_CONTACTLESS
+    )
+
+
 def _switch_to_coin_fallback(context: PaySessionContext, shared: SharedState, meter: SSHMeter, reason: str) -> None:
     context.effective_payment_type = PaymentType.COINS
     context.card_sent = False
@@ -948,6 +955,17 @@ def plan_pay_ui_action(
                 context.payment_method_selected = True
                 return PayUIAction("press", "select card payment method", button="plus", delay=0.8)
             return PayUIAction("wait", "waiting for the UK card payment page", delay=1.0)
+
+        if _requires_robot_nfc_payment_amount_accept(meter, context):
+            if not context.payment_amount_accepted:
+                context.payment_amount_accepted = True
+                return PayUIAction(
+                    "press",
+                    "accept ms2.5 payment amount before NFC prompt",
+                    button="enter",
+                    delay=1.0,
+                )
+            return PayUIAction("wait", "waiting for ms2.5 NFC prompt after accepting payment amount", delay=1.0)
 
         if _uses_direct_card_from_payment_amount(meter):
             if not context.card_sent:

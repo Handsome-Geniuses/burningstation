@@ -420,6 +420,10 @@ def job_done(meter_ip):
     insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
     # if st.logs successfully inserted to db, rm log file maybe?
 
+    if current_program == "cycle_all":
+        meter.custom_print()
+        time.sleep(5)
+
     if current_program == "cycle_all" and states["mode"] == "auto":
         start_physical_job(meter.host)
 

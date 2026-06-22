@@ -1473,23 +1473,27 @@ fclose($myfile);
         # firmware
         msg += hdr("firmware") + "\n"
 
+        firmware_map = self.firmwares or {}
         for k, v in sorted((self.module_info or {}).items()):
-            fw = (v.get('fw') or '').strip()
-            mf = v.get('mod_func')
+            fw = str(v.get("fw") or v.get("ver") or firmware_map.get(k) or "").strip()
+            mf = v.get("mod_func", v.get("mod"))
 
-            line = f"{k.lower()}: {fw}, {mf}"
+            line = f"{k.lower()}: {fw}"
+            if mf not in (None, ""):
+                line += f", {mf}"
             if k.upper() == "KIOSK_NFC":
-                full_id = v.get('full_id')
-                line += f", {full_id}"
+                full_id = v.get("full_id", v.get("id"))
+                if full_id not in (None, ""):
+                    line += f", {full_id}"
         
             msg += line + "\n"
         
         # tests
-        msg += hdr("test results") + "\n"
+        # msg += hdr("test results") + "\n"
 
-        keys = ["printer", "coin shutter", "nfc" , "modem"]
-        msg += "\n".join(f"{k}: {self.results.get(k, 'n/a').lower()}" for k in keys)
-        msg += "\n"
+        # keys = ["printer", "coin shutter", "nfc" , "modem"]
+        # msg += "\n".join(f"{k}: {self.results.get(k, 'n/a').lower()}" for k in keys)
+        # msg += "\n"
 
         line_count = len(msg.splitlines())
         chars_per_line = [len(line) for line in msg.splitlines()]
