@@ -21,6 +21,7 @@ import {
 import { LucideAlertTriangle, LucideCheck, LucideCopy, LucideShieldBan, LucideShieldQuestion, LucideX } from "lucide-react";
 import { useStoreContext } from "../../store";
 import { notify } from "@/lib/notify";
+import { cn } from "@/lib/utils";
 
 const retrieve_limit = 10;
 
@@ -58,7 +59,7 @@ const retrieveJobHistory = async (limit: number, offset: number) => {
     return data
 }
 
-const statusIcon = (status: string) => {
+const statusIcon = (status: string, className?: string) => {
     // switch (status) {
     //     case 'pass':
     //         return "✅"
@@ -73,15 +74,15 @@ const statusIcon = (status: string) => {
     // }
     switch (status) {
         case 'pass':
-            return <LucideCheck className="size-6 text-green-500 inline-block" />
+            return <LucideCheck className={cn("size-6 text-green-500 inline-block", className)} />
         case 'fail':
-            return <LucideX className="size-6 text-red-500 inline-block" />
+            return <LucideX className={cn("size-6 text-red-500 inline-block", className)} />
         case 'missing':
-            return <LucideAlertTriangle className="size-6 text-yellow-500 inline-block" />
+            return <LucideAlertTriangle className={cn("size-6 text-yellow-500 inline-block", className)} />
         case 'n/a':
-            return <LucideShieldQuestion className="size-6 text-gray-500 inline-block" />
+            return <LucideShieldQuestion className={cn("size-6 text-gray-500 inline-block", className)} />
         default:
-            return <LucideShieldBan className="size-6 text-gray-500 inline-block" />
+            return <LucideShieldBan className={cn("size-6 text-gray-500 inline-block", className)} />
     }
 }
 
@@ -113,10 +114,11 @@ const copyme = (text: string) => {
     notify.info('Copied to clipboard')
 }
 
-const JobDialog = ({ job }: { job: any }) => {
+const JobDialog = ({ job, detailed = false }: { job: any, detailed?: boolean }) => {
     const { systemState, systemDispatch } = useStoreContext()
     const isHandsome = systemState.handsome
     const icon = statusIcon(job?.status)
+    const results = job?.data?.results
     return (
         <>
             <DialogContent className="min-w-[85vw]">
@@ -127,42 +129,56 @@ const JobDialog = ({ job }: { job: any }) => {
                     </DialogDescription>
                 </DialogHeader>
 
-                <ScrollArea className="mt-2 max-h-80 overflow-y-auto w-full rounded-md border border-border px-2 mr-2">
-                    <Accordion type="single" collapsible>
-                        {job?.data?.kwargs &&
-                            <AccordionItem value="kwargs">
-                                <AccordionTrigger>program parameters(kwargs)</AccordionTrigger>
-                                <AccordionContent>
-                                    {/* {isHandsome && <Copyable text={JSON.stringify(job?.data?.kwargs, null, 2)} />} */}
-                                    <pre className="bg-gray-100 rounded-md cursor-default" onClick={() => isHandsome && copyme(JSON.stringify(job?.data?.kwargs, null, 2))}>
-                                        {JSON.stringify(job?.data?.kwargs, null, 2)}
-                                    </pre>
-                                </AccordionContent>
-                            </AccordionItem>
-                        }
-                        {job?.data?.results &&
-                            <AccordionItem value="results">
-                                <AccordionTrigger>results</AccordionTrigger>
-                                <AccordionContent>
-                                    {/* {isHandsome && <Copyable text={JSON.stringify(job?.data?.results, null, 2)} />} */}
-                                    <pre className="bg-gray-100 rounded-md p-2 cursor-default" onClick={() => isHandsome && copyme(JSON.stringify(job?.data?.results, null, 2))}>
-                                        {JSON.stringify(job?.data?.results, null, 2)}
-                                    </pre>
-                                </AccordionContent>
-                            </AccordionItem>
-                        }
-                        {job?.jctl &&
-                            <AccordionItem value="journalctl">
-                                <AccordionTrigger>journalctl</AccordionTrigger>
-                                <AccordionContent>
-                                    {/* {isHandsome && <Copyable text={job?.jctl} />} */}
-                                    <div className="bg-gray-100 rounded-md p-2  cursor-default" onClick={() => isHandsome && copyme(job?.jctl)}>
-                                        {job?.jctl}
-                                    </div>
-                                </AccordionContent>
-                            </AccordionItem>
-                        }
-                    </Accordion>
+                <ScrollArea className={cn("mt-2 max-h-80 overflow-y-auto w-full rounded-md border-border px-2 mr-2", detailed ? "border" : "border-0")}>
+                    {detailed
+                        ? <Accordion type="single" collapsible>
+                            {job?.data?.kwargs &&
+                                <AccordionItem value="kwargs">
+                                    <AccordionTrigger>program parameters(kwargs)</AccordionTrigger>
+                                    <AccordionContent>
+                                        {/* {isHandsome && <Copyable text={JSON.stringify(job?.data?.kwargs, null, 2)} />} */}
+                                        <pre className="bg-gray-100 rounded-md cursor-default" onClick={() => isHandsome && copyme(JSON.stringify(job?.data?.kwargs, null, 2))}>
+                                            {JSON.stringify(job?.data?.kwargs, null, 2)}
+                                        </pre>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            }
+                            {results &&
+                                <AccordionItem value="results">
+                                    <AccordionTrigger>results</AccordionTrigger>
+                                    <AccordionContent>
+                                        {/* {isHandsome && <Copyable text={JSON.stringify(job?.data?.results, null, 2)} />} */}
+                                        <pre className="bg-gray-100 rounded-md p-2 cursor-default" onClick={() => isHandsome && copyme(JSON.stringify(job?.data?.results, null, 2))}>
+                                            {JSON.stringify(results, null, 2)}
+                                        </pre>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            }
+                            {job?.jctl &&
+                                <AccordionItem value="journalctl">
+                                    <AccordionTrigger>journalctl</AccordionTrigger>
+                                    <AccordionContent>
+                                        {/* {isHandsome && <Copyable text={job?.jctl} />} */}
+                                        <div className="bg-gray-100 rounded-md p-2  cursor-default" onClick={() => isHandsome && copyme(job?.jctl)}>
+                                            {job?.jctl}
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            }
+                        </Accordion>
+                        : <div className="text-sm space-y-0.5">
+                            <p className={cn("text-base", results && "border-b")}>
+                                OVERALL -- {icon}
+                            </p>
+                            {results &&
+                                Object.entries(results).map(([key, res]: [string, any]) => (
+                                    <p key={key} className="flex items-center gap-1">
+                                        {`${key} -- `} {statusIcon("pass", "size-5")}
+                                    </p>
+                                ))
+                            }
+                        </div>
+                    }
                 </ScrollArea>
                 <DialogFooter >
                     <DialogClose asChild >
@@ -179,6 +195,7 @@ export const HistoryTab = () => {
     const [jobs, setJobs] = React.useState<any[]>([])
     const [selected, setSelected] = React.useState<any>(null)
     const [dialogOpen, setDialogOpen] = React.useState(false)
+    const [detailed, setDetailed] = React.useState(false)
 
     const fetchJobs = async () => {
         const offset = jobs.length
@@ -192,8 +209,19 @@ export const HistoryTab = () => {
     }
 
     return (
-        <div className="p-4">
+        <div className="relative px-4 pb-4">
             {/* <div className="w-full max-w-2xl max-h-96 overflow-y-auto rounded-md bg-red-100 px-4"> */}
+            <div className={cn(" m-1 ml-auto size-fit")}>
+                <button
+                    className={cn(
+                        "rounded py-0.5 px-2 min-w-20 rounded size-fit active:translate-y-px border border-border",
+                        detailed ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+                    )}
+                    onClick={() => setDetailed(old => !old)}
+                >
+                    {detailed ? "detailed" : "simple"}
+                </button>
+            </div>
             <div className="w-full max-h-100 overflow-y-auto rounded-md border border-border">
                 <table className="w-full table-auto border-collapse">
                     <thead className="bg-gray-100 sticky top-0">
@@ -206,7 +234,7 @@ export const HistoryTab = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {jobs.map(job => <JobRow key={job.id} job={job} onClick={() => openJobDialog(job)} />)}
+                        {jobs.map((job, i) => <JobRow key={`[${i}]${job.id}`} job={job} onClick={() => openJobDialog(job)} />)}
                     </tbody>
                 </table>
                 <div className="flex justify-center my-4">
@@ -214,7 +242,7 @@ export const HistoryTab = () => {
                 </div>
             </div>
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <JobDialog job={selected} />
+                <JobDialog job={selected} detailed={detailed} />
             </Dialog>
         </div>
     )

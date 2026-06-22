@@ -3,7 +3,7 @@
 # ====================================================
 import threading
 import time
-from lib.automation.jobs import start_passive_job, start_physical_job
+from lib.automation.jobs import start_job, start_passive_job, start_physical_job
 from lib.gpio import HWGPIO, HWGPIO_MONITOR, emergency
 from asyncdec import AsyncManager, async_fire_and_forget
 from lib.meter.meter_manager import METERMANAGER as mm
@@ -25,6 +25,7 @@ def some_program():
 # ----------------------------------------------------
 @am_program.operation(timeout=30)
 def manual_action(**kwargs):
+    print("aksjdljakslkljlasjklsajkljkl")
     if states['mode'] != 'manual':
         return "System not in manual mode", 409
     program = kwargs.get('program', None)
@@ -39,6 +40,14 @@ def manual_action(**kwargs):
         if meter: start_passive_job(meter_ip)
     elif program == "start_physical_job":
         if meter: start_physical_job(meter_ip)
+    elif program == "identify":
+        if meter: start_job(
+            meter_ip=meter_ip,
+            program_name=program,
+            kwargs={"numBurnCycles":1, 'count': 1},
+        )
+    elif program == "printfw":
+        print("[filler] print meter firmwards here")
     elif program == "hello":
         print("hello from program.py")
     else: return "Unknown action", 400

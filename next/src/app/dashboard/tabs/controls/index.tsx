@@ -19,6 +19,8 @@ import { MeterSlots } from "./meter-slots"
 import { AccordionTrigger } from "@radix-ui/react-accordion"
 import { MeterState, SystemState } from "../../store/system"
 import React from "react"
+import { CircleArrowLeft, CircleArrowRight } from "lucide-react"
+import { meterRunBlink, meterRunPrintFw } from "@/lib/ep"
 
 
 const ascii_meter = [
@@ -41,15 +43,46 @@ const ascii_meter = [
  ──┴──
 `
 ]
-export const BeltVisualizer = () => {
+export const BeltVisualizer = ({ systemState }: { systemState: SystemState }) => {
+    const handlePointerUp = () => {
+        flask.handleAction("override", "motor", { value_list: [0, 0, 0] })
+        window.removeEventListener("pointerup", handlePointerUp)
+    }
+    const handlePointerDown = () => {
+        window.addEventListener('pointerup', handlePointerUp)
+    }
+    const handleLeft = () => {
+        flask.handleAction("override", "motor", { value_list: [2, 2, 2] })
+        handlePointerDown()
+    }
+    const handleRight = () => {
+        flask.handleAction("override", "motor", { value_list: [1, 1, 1] })
+        handlePointerDown()
+    }
     return (
         <AccordionItem key={"belt"} value={'belt'}>
             <AccordionTrigger className={cn(PANEL_HEADER, "w-full rounded-none")}>
                 Belt Visualizer
             </AccordionTrigger>
             <AccordionContent asChild className="p-0">
-                <div className="w-full flex justify-center">
+                <div className="relative w-full flex justify-center">
                     <MeterSlots classname="" />
+                    <Button
+                        className="absolute left-0 h-full flex items-center active:translate-y-0.5"
+                        variant="ghost"
+                        onPointerDown={handleLeft}
+                        disabled={systemState.mode !== "manual"}
+                    >
+                        <CircleArrowLeft className="size-8 text-primary" />
+                    </Button>
+                    <Button
+                        className="absolute right-0 h-full flex items-center active:translate-y-0.5"
+                        variant="ghost"
+                        onPointerDown={handleRight}
+                        disabled={systemState.mode !== "manual"}
+                    >
+                        <CircleArrowRight className="size-8 text-primary" />
+                    </Button>
                 </div>
             </AccordionContent>
         </AccordionItem>
@@ -69,25 +102,8 @@ export const MeterManager = ({ systemState }: { systemState: SystemState }) => {
         return () => window.clearInterval(id)
     }, [])
 
-    const onBlink = async () => {
-        if (!selectedMeter) return
-
-        try {
-            const search = new URLSearchParams({
-                ip: selectedMeter.ip,
-                prog: "identify",
-            })
-            const res = await flask.get(`/testing?${search.toString()}`)
-            const payload = await res.json().catch(() => ({}))
-
-            if (!res.ok) {
-                throw new Error(payload?.error ?? `Failed to start identify (${res.status})`)
-            }
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to start identify"
-            notify.error(msg)
-        }
-    }
+    const onBlink = async () => meterRunBlink(selectedMeter?.ip)
+    const onPrintFw = async() => meterRunPrintFw(selectedMeter?.ip)
 
     return (
         <>
@@ -124,17 +140,30 @@ export const MeterManager = ({ systemState }: { systemState: SystemState }) => {
             </AccordionItem>
 
             <Dialog open={selectedMeter != null} onOpenChange={(open) => !open && setSelectedMeter(null)}>
-                <DialogContent>
-                    <DialogHeader>
+                <DialogContent className="">
+                    <DialogHeader className="gap-0">
                         <DialogTitle>{selectedMeter?.hostname ?? "Meter"}</DialogTitle>
                         <DialogDescription>
                             {selectedMeter ? `${selectedMeter.ip} | ${selectedMeter.meter_type || "unknown"}` : ""}
                         </DialogDescription>
                     </DialogHeader>
 
+                    <div className="bg-red-100 size-full">
+
+                    </div>
+
                     <DialogFooter>
-                        <Button onClick={onBlink}>
+                        <Button
+                            variant="outline"
+                            onClick={onBlink}
+                        >
                             Blink
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={onPrintFw}
+                        >
+                            Print
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -143,14 +172,38 @@ export const MeterManager = ({ systemState }: { systemState: SystemState }) => {
     )
 }
 
+const STORAGE_KEY = "bs-controls-accordion-open-item"
 export const ControlsTab = () => {
     const { systemState } = useStoreContext()
+    const [openItem, setOpenItem] = React.useState("belt");
+    React.useEffect(() => {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            setOpenItem(saved);
+        }
+    }, []);
+    const handleValueChange = (value: string) => {
+        console.log(value)
+        setOpenItem(value);
+
+        if (value) {
+            localStorage.setItem(STORAGE_KEY, value);
+        } else {
+            localStorage.removeItem(STORAGE_KEY);
+        }
+    };
 
     return (
         <div className="p-2 grid grid-cols-[1fr_auto] gap-2 ">
             <div>
-                <Accordion type="single" collapsible className={cn(PANEL, "p-0 rounded-lg overflow-hidden")}>
-                    <BeltVisualizer />
+                <Accordion
+                    type="single"
+                    collapsible
+                    className={cn(PANEL, "p-0 rounded-lg overflow-hidden")}
+                    value={openItem}
+                    onValueChange={handleValueChange}
+                >
+                    <BeltVisualizer systemState={systemState} />
                     <MeterManager systemState={systemState} />
                 </Accordion>
             </div>
