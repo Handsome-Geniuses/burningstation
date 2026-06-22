@@ -58,7 +58,7 @@ class HandsomeSettings(BaseModel):
 # Settings Settings
 # ==================================================================
 class Settings(BaseModel):
-    dummy: DummySettings = Field(default_factory=DummySettings)
+    # dummy: DummySettings = Field(default_factory=DummySettings)
     passive: PassiveSettings = Field(default_factory=PassiveSettings)
     physical: PhysicalSettings = Field(default_factory=PhysicalSettings)
     # handsome: HandsomeSettings = Field(default_factory=HandsomeSettings)
