@@ -25,7 +25,6 @@ def some_program():
 # ----------------------------------------------------
 @am_program.operation(timeout=30)
 def manual_action(**kwargs):
-    print("aksjdljakslkljlasjklsajkljkl")
     if states['mode'] != 'manual':
         return "System not in manual mode", 409
     program = kwargs.get('program', None)
@@ -41,11 +40,12 @@ def manual_action(**kwargs):
     elif program == "start_physical_job":
         if meter: start_physical_job(meter_ip)
     elif program == "identify":
-        if meter: start_job(
-            meter_ip=meter_ip,
-            program_name=program,
-            kwargs={"numBurnCycles":1, 'count': 1},
-        )
+        # if meter: start_job(
+        #     meter_ip=meter_ip,
+        #     program_name=program,
+        #     kwargs={"numBurnCycles":1, 'count': 1},
+        # )
+        meter.blink()
     elif program == "printfw":
         print("[filler] print meter firmwards here")
     elif program == "hello":

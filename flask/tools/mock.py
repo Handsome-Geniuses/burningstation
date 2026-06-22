@@ -193,6 +193,12 @@ def _mock_start_physical_job(meter_up, buttons=None):
 
 
 # ================================================================
+# Optional do nothing
+# ================================================================
+def _mock_null_fn(*args, **kwarg):
+    print("mocked null fn()")
+
+# ================================================================
 # Patch installation
 # ================================================================
 def _install_patches():
@@ -201,6 +207,10 @@ def _install_patches():
     patch("ip_scanner.get_ips", _mock_get_ips).start()
     patch("lib.system.station.check_robot_clear_of_conveyor", lambda: None).start()
     patch("lib.system.sim.on_action", _mock_sim_on_action).start()
+
+    patch("lib.meter.ssh_meter.SSHMeter.set_brightness", _mock_null_fn).start()
+    patch("lib.meter.ssh_meter.SSHMeter.beep", _mock_null_fn).start()
+    patch("lib.meter.ssh_meter.SSHMeter.blink", _mock_null_fn).start()
 
 
 _install_patches()

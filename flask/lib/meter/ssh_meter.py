@@ -1749,9 +1749,17 @@ fclose($myfile);
 
         write_results_json(self, self._display_results)
         self.set_ui_mode("results")
-
-
-
+        
+    def blink(self, amnt=2) -> None:
+        v = self.get_brightness()
+        for i in range(amnt):
+            self.set_brightness(0)
+            self.beep(1)
+            time.sleep(0.2)
+            meter.set_brightness(50)
+            meter.beep(1)
+            time.sleep(0.2)
+        self.set_brightness(v)
 
 
 def generate_mock_details_for_copy_paste(meter: SSHMeter):
