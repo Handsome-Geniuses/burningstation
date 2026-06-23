@@ -247,3 +247,5 @@ export const HistoryTab = () => {
         </div>
     )
 }
+
+export default HistoryTab

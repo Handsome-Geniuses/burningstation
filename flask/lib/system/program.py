@@ -40,14 +40,13 @@ def manual_action(**kwargs):
     elif program == "start_physical_job":
         if meter: start_physical_job(meter_ip)
     elif program == "identify":
-        # if meter: start_job(
-        #     meter_ip=meter_ip,
-        #     program_name=program,
-        #     kwargs={"numBurnCycles":1, 'count': 1},
-        # )
         meter.blink()
     elif program == "printfw":
-        print("[filler] print meter firmwards here")
+        meter.custom_print()
+        # print("[filler] print meter firmwards here")
+    elif program == "dummy":
+        # dummy job
+        start_job(meter_ip, "dummy")
     elif program == "hello":
         print("hello from program.py")
     else: return "Unknown action", 400

@@ -2,6 +2,9 @@
 
 cd "$(dirname "$0")"
 
+env_file="$(pwd)/flask/.env"
+echo "$env_file" 
+
 set -euo pipefail
 
 COMPOSE_FILE="docker-compose.yml"
@@ -20,18 +23,29 @@ Examples:
 EOF
 }
 
+load_env_file() {
+    if [[ -f "$env_file" ]]; then
+        set -a
+        . "$env_file"
+        set +a
+    else
+        echo "Missing env file: $env_file" >&2
+        exit 1
+    fi
+}
+
 run_local_dev_mode() {
     local mode="$1"
     case "$mode" in
     cockpit)
         echo launching dev cockpit ... 
         cd "$(dirname "$0")"/next
-        MOCK=1 npm run dev
+        npm run dev
         ;;
     engine)
         echo launching dev engine ... 
         cd "$(dirname "$0")"/flask
-        MOCK=1 .venv/bin/python3 app.py
+        .venv/bin/python3 app.py
         ;;
     all)
         run_local_dev_mode cockpit &
@@ -58,6 +72,7 @@ run_local_dev_mode() {
 }
 
 main() {
+    load_env_file
     local command="${1:-help}"
     shift || true
 

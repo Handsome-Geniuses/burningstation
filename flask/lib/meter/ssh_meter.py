@@ -1481,7 +1481,7 @@ fclose($myfile);
             line = f"{k.lower()}: {fw}"
             if mf not in (None, ""):
                 line += f", {mf}"
-            if k.upper() == "KIOSK_NFC":
+            if k.upper() == "KIOSK_NFC" or k.upper() == "KIOSK_NEO":
                 full_id = v.get("full_id", v.get("id"))
                 if full_id not in (None, ""):
                     line += f", {full_id}"
@@ -1755,10 +1755,10 @@ fclose($myfile);
         for i in range(amnt):
             self.set_brightness(0)
             self.beep(1)
-            time.sleep(0.2)
-            meter.set_brightness(50)
-            meter.beep(1)
-            time.sleep(0.2)
+            time.sleep(0.1)
+            self.set_brightness(50)
+            self.beep(1)
+            time.sleep(0.1)
         self.set_brightness(v)
 
 

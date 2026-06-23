@@ -1,6 +1,11 @@
 // app/api/proxy/[...path]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
+
+type RequestInitWithDuplex = RequestInit & {
+  duplex?: "half";
+};
+
 export async function GET(req: NextRequest) {
   return proxyRequest(req);
 }
@@ -16,7 +21,7 @@ async function proxyRequest(req: NextRequest) {
 
   const targetUrl = `http://${clientHost}:8011/api${path}${url.search}`;
 
-  const fetchOptions: RequestInit = {
+  const fetchOptions: RequestInitWithDuplex  = {
     method: req.method,
     headers: req.headers,
   };

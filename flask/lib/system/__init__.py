@@ -11,6 +11,7 @@ states['mds'] = mdm.get_value_list()
 states['tower'] = tm.get_value_list()
 states['lamp'] = lm.get_value_list()
 states['mode'] = 'manual'
+states['dummy'] = {'fake': False}
 
 
 # initialize some values. motors of. tower off. lamps off

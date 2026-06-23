@@ -120,10 +120,8 @@ def __database(table):
 def get_meter_jobs():
     args = flask.request.args.to_dict()
 
-    try:
-        limit = int(args.get("limit", 10))
-    except ValueError:
-        return flask.jsonify({"error": "invalid limit"}), 400
+    limit = int(args.get("limit", 10))
+    offset = int(args.get("offset", 0))
 
     date_start = args.get("date_start")
     date_end = args.get("date_end")
@@ -148,6 +146,7 @@ def get_meter_jobs():
     try:
         res = database.retrieve_jobs_filtered(
             limit=limit,
+            offset=offset,
             date_start=date_start,
             date_end=date_end,
             meter_id=meter_id,

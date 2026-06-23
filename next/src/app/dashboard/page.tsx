@@ -7,8 +7,8 @@ import React from "react"
 import { ControlsTab } from "./tabs/controls"
 import { MonitorTab } from "./tabs/monitor"
 import { SecretTab } from "./tabs/secret"
-import { HistoryTab } from "./tabs/history/page"
-import { PlaygroundTab } from "./tabs/playground/page"
+import { HistoryTab } from "./tabs/history"
+import { PlaygroundTab } from "./tabs/playground"
 
 
 const Dashboard = () => {

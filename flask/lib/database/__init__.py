@@ -165,8 +165,10 @@ def retrieve_jobs(limit=10, offset=0, conn: None | psycopg.Connection = None,):
             cur.execute(sql, (limit, offset))
             return cur.fetchall()
 
+
 def retrieve_jobs_filtered(
     limit: int = 10,
+    offset: int = 0,
     date_start: Optional[date | str] = None,
     date_end: Optional[date | str] = None,
     meter_id: Optional[int] = None,
@@ -178,6 +180,7 @@ def retrieve_jobs_filtered(
 
     Args:
         limit: number of entries, sorted by latest created_at first
+        offset: number of rows to skip (for pagination)
         date_start: start date for created_at filter
         date_end: end date for created_at filter; if blank, uses date_start
         meter_id: optional meter_id filter
@@ -225,9 +228,10 @@ def retrieve_jobs_filtered(
 
     query += """
         ORDER BY mj.created_at DESC
-        LIMIT %s;
+        LIMIT %s
+        OFFSET %s;
     """
-    params.append(limit)
+    params.extend([limit, offset])
 
     if conn:
         with conn.cursor() as cur:

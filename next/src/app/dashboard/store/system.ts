@@ -45,7 +45,7 @@ export interface SystemState {
 
     // current tab
     currentTab: string | undefined
-    
+
     // running
     running: boolean
 
@@ -53,9 +53,9 @@ export interface SystemState {
     tower: [boolean, boolean, boolean, boolean]
 
     // lamp1, lamp2
-    lamp: [number,number,number,number]
+    lamp: [number, number, number, number]
 
-    mode:  'auto' | 'manual'
+    mode: 'auto' | 'manual'
 }
 export const initialSystemState: SystemState = {
     motors: [0, 0, 0],
@@ -75,6 +75,7 @@ export const initialSystemState: SystemState = {
 export type Action =
     | { type: 'set'; key: keyof SystemState; value: SystemState[keyof SystemState] }
     | { type: 'meter'; ip: string; info?: MeterInfo; alive: boolean }
+    | { type: 'meter:status'; ip: string; status: string; msg?: string }
     | { type: 'meters:clear' }
 
 export function reducer(state: SystemState, action: Action): SystemState {
@@ -99,6 +100,22 @@ export function reducer(state: SystemState, action: Action): SystemState {
         }
         case 'meters:clear':
             return { ...state, meters: {} }
+
+        case 'meter:status': {
+            const meter = state.meters[action.ip]
+            if (!meter) return state
+
+            return {
+                ...state,
+                meters: {
+                    ...state.meters,
+                    [action.ip]: {
+                        ...meter,
+                        status: action.status,
+                    },
+                },
+            }
+        }
         default:
             return state
     }

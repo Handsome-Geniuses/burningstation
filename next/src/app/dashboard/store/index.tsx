@@ -52,7 +52,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         else setQuestion(undefined)
     }
     const onNotify = (payload: any) => {
-        const {msg, ntype, description} = payload
+        const { msg, ntype, description } = payload
         notify.notice(ntype, msg, { description })
     }
     const onMeter = (payload: any) => {
@@ -64,6 +64,18 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             ip,
             alive,
             info: alive ? (info as MeterInfo | undefined) : undefined,
+        })
+    }
+    const onDevices = (payload: any) => { }
+    const onProgress = (payload: any) => { }
+    const onStatus = (payload: any) => {
+        const { ip, msg, status } = payload ?? {}
+        if (typeof ip !== "string" || typeof status !== "string") return
+        systemDispatch({
+            type: "meter:status",
+            ip,
+            status: status,
+            msg,
         })
     }
 
@@ -85,6 +97,9 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             else if (event === 'meter') onMeter(payload)
             else if (event === 'question') onQuestion(payload)
             else if (event === 'notify') onNotify(payload)
+            else if (event === 'devices') onDevices(payload)
+            else if (event === 'progress') onProgress(payload)
+            else if (event === 'status') onStatus(payload)
         }
         flasksse.current.onerror = () => {
             console.log('Connection lost. Reconnecting...')

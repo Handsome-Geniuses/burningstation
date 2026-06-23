@@ -2,9 +2,12 @@ from lib.meter.ssh_meter import SSHMeter
 from lib.automation.shared_state import SharedState
 from lib.automation.helpers import check_stop_event, StopAutomation
 import time
+from lib.system import states
+
+
 
 def test_dummy(meter: SSHMeter, shared: SharedState = None, **kwargs):
-    print(f"This is a dummy test function\n\t{kwargs}")
+    # print(f"This is a dummy test function\n\t{kwargs}")
     # burn_count = kwargs.get("numBurnCycles", 1)
     # burn_delay = kwargs.get("numBurnDelay", 1)
     # print_count = kwargs.get("numPrintCycles", 1)
@@ -20,3 +23,19 @@ def test_dummy(meter: SSHMeter, shared: SharedState = None, **kwargs):
     # print(f"NFC cycling {nfc_count} times...")
     # print(f"Modem cycling {modem_count} times...")
 
+    states['dummy']['fake'] = True
+
+    start = time.time()
+    passed = 0
+    while True:
+        passed = time.time() - start
+        fake = states['dummy']['fake']
+        if passed > 120 or not fake: break
+
+        time.sleep(0.2)
+    
+    print("[fake_dummy_playground_test]!faked")
+    print("[fake_dummy_playground_test]!passed")
+    check_stop_event(shared)
+
+    states['dummy']['fake'] = False

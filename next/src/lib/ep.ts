@@ -20,6 +20,6 @@ export const meterRunProg = async (meterIp?: string, prog?: string, kwargs?: { [
 
 export const meterRunBlink = async (meterIp?: string) => meterRunProg(meterIp, "identify")
 export const meterRunPrintFw = async (meterIp?: string) => await meterRunProg(meterIp, "printfw")
-
+export const meterRunDummy = async (meterIp?: string) => meterRunProg(meterIp, "dummy")
 
 

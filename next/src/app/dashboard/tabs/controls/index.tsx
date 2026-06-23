@@ -20,7 +20,7 @@ import { AccordionTrigger } from "@radix-ui/react-accordion"
 import { MeterState, SystemState } from "../../store/system"
 import React from "react"
 import { CircleArrowLeft, CircleArrowRight } from "lucide-react"
-import { meterRunBlink, meterRunPrintFw } from "@/lib/ep"
+import { meterRunBlink, meterRunDummy, meterRunPrintFw } from "@/lib/ep"
 
 
 const ascii_meter = [
@@ -43,6 +43,8 @@ const ascii_meter = [
  ──┴──
 `
 ]
+
+
 export const BeltVisualizer = ({ systemState }: { systemState: SystemState }) => {
     const handlePointerUp = () => {
         flask.handleAction("override", "motor", { value_list: [0, 0, 0] })
@@ -103,7 +105,9 @@ export const MeterManager = ({ systemState }: { systemState: SystemState }) => {
     }, [])
 
     const onBlink = async () => meterRunBlink(selectedMeter?.ip)
-    const onPrintFw = async() => meterRunPrintFw(selectedMeter?.ip)
+    const onPrintFw = async () => meterRunPrintFw(selectedMeter?.ip)
+    const onDummy = async () => meterRunDummy(selectedMeter?.ip)
+
 
     return (
         <>
@@ -124,12 +128,15 @@ export const MeterManager = ({ systemState }: { systemState: SystemState }) => {
                                 <button
                                     key={meter.ip}
                                     type="button"
-                                    className="rounded border bg-accent p-2 text-left"
+                                    className={cn(
+                                        "rounded border bg-accent/10 p-2 text-left",
+                                        meter.status != "ready" ? '' : 'bg-accent'
+                                    )}
                                     onClick={() => setSelectedMeter(meter)}
                                 >
                                     <div className="text-sm font-medium text-center leading-1">{meter.ip.slice(-3)}</div>
                                     <pre className="w-fit min-w-max whitespace-pre font-mono text-[10px] leading-tight tracking-normal text-[#f4a261] [font-variant-ligatures:none] [tab-size:2] md:text-sm">
-                                        <code>{ascii_meter[frame]}</code>
+                                        <code>{ascii_meter[meter.status === "busy" ? frame : 0]}</code>
                                     </pre>
                                     <div className="text-sm font-medium text-center leading-1">{meter.hostname}</div>
                                 </button>
@@ -148,11 +155,19 @@ export const MeterManager = ({ systemState }: { systemState: SystemState }) => {
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="bg-red-100 size-full">
-
+                    <div className="size-full">
+                        {JSON.stringify(selectedMeter?.status)}
                     </div>
 
                     <DialogFooter>
+                        {systemState.playground &&
+                            <Button
+                                variant="outline"
+                                onClick={onDummy}
+                            >
+                                Dummy
+                            </Button>
+                        }
                         <Button
                             variant="outline"
                             onClick={onBlink}
