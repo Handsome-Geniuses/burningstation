@@ -391,7 +391,7 @@ def job_done(meter_ip):
                     "fw": info.get("ver", -1),
                     "id": info.get("id", -1),
                 }
-	    if key == "nfc":
+            if key == "nfc":
                 info = meter.module_info.get(PROG2MODULE.get("nfc2"), default_info)
                 job_results["nfc2"] = {
                     "status": val,
