@@ -47,7 +47,7 @@ def build_physical_kwargs(modules: dict, buttons=None):
 
     has_solar = True
     has_coin_shutter = "COIN_SHUTTER" in modules
-    has_nfc = "KIOSK_NFC" in modules
+    has_nfc = "KIOSK_NFC" in modules or "KIOSK_NEO" in modules
     has_robot_keypad = (("KEY_PAD_2" in modules) or ("KBD_CONTROLLER" in modules)) and bool(buttons)
 
     s = store.settings.physical
