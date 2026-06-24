@@ -26,12 +26,12 @@ from lib.meter.display_utils import (
 
 
 DEVICE_TO_MODULE = {
-    'printer': 'PRINTER',
-    'coin shutter': 'COIN_SHUTTER',
-    'nfc': 'KIOSK_NFC',
-    'modem': 'MK7_XE910',
-    'call in': 'MK7_XE910',
-    'screen test': 'yes'
+    'printer': ('PRINTER',),
+    'coin shutter': ('COIN_SHUTTER',),
+    'nfc': ('KIOSK_NFC', 'KIOSK_NEO'),
+    'modem': ('MK7_XE910',),
+    'call in': ('MK7_XE910',),
+    'screen test': ('yes',)
 }
 
 SPECIAL_CARD_TRACK2 = {
@@ -107,6 +107,7 @@ COIN_VALUE_TO_INDEX_BY_REGION: Dict[str, Dict[int, int]] = {
 class Firmwares(TypedDict):
     MK7_XE910: str
     KIOSK_NFC: str
+    KIOSK_NEO: str
     MSPM_PWR: str
     KBD_CONTROLLER: str
     COIN_SHUTTER: str
@@ -121,6 +122,7 @@ class Firmwares(TypedDict):
 defaultFirmwares:Firmwares = {
     'MK7_XE910': '',
     'KIOSK_NFC': '',
+    'KIOSK_NEO': '',
     'MSPM_PWR': '',
     'KBD_CONTROLLER': '',
     'COIN_SHUTTER': '',
@@ -1271,8 +1273,8 @@ class SSHMeter(sshkit.Client):
         - '' (empty) means missing/unknown
         - Values like '-----' are treated as missing and normalized to ''.
         """
-        module = DEVICE_TO_MODULE.get(device.lower())
-        if not module:
+        modules = DEVICE_TO_MODULE.get(device.lower())
+        if not modules:
             return ''
 
         try:
@@ -1280,10 +1282,11 @@ class SSHMeter(sshkit.Client):
         except Exception:
             return ''
 
-        val = 'yes' if 'yes'==module else (fw_map.get(module) or '').strip()
-        if not val or set(val) <= {'-'}:
-            return ''
-        return val
+        for module in modules:
+            val = 'yes' if module == 'yes' else (fw_map.get(module) or '').strip()
+            if val and not set(val) <= {'-'}:
+                return val
+        return ''
 
 
     def beep(self, count: int = 1, interval: float = 0):

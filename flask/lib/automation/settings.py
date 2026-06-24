@@ -4,7 +4,7 @@ from lib.store.store import store
 def build_passive_kwargs(modules: dict):
     store.load()
 
-    has_nfc = "KIOSK_NFC" in modules
+    has_nfc = "KIOSK_NFC" in modules or "KIOSK_NEO" in modules
     has_modem = "MK7_XE910" in modules
     has_printer = "PRINTER" in modules
     has_coin_shutter = "COIN_SHUTTER" in modules

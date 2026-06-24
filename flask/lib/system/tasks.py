@@ -21,7 +21,7 @@ def __temporary_overnight_runner():
     meter = mm.get_meter(meterip)
 
     modules = meter.module_info
-    has_nfc = "KIOSK_NFC" in modules
+    has_nfc = "KIOSK_NFC" in modules or "KIOSK_NEO" in modules
     has_modem = "MK7_XE910" in modules
     has_printer = "PRINTER" in modules
     has_coin_shutter = "COIN_SHUTTER" in modules

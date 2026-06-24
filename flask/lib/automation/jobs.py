@@ -45,9 +45,9 @@ PROG2MODULE = {
     "cycle_coin_shutter":"COIN_SHUTTER", 
     "coin shutter":"COIN_SHUTTER",
     "coin_shutter":"COIN_SHUTTER",
-    "cycle_nfc":"KIOSK_NFC",
-    "nfc":"KIOSK_NFC",
-    "nfc2": "KIOSK_NEO",
+    "cycle_nfc": ("KIOSK_NFC", "KIOSK_NEO"),
+    "nfc": ("KIOSK_NFC", "KIOSK_NEO"),
+    "nfc_gui": ("KIOSK_NFC", "KIOSK_NEO"),
     "cycle_modem":"MK7_XE910",
     "modem":"MK7_XE910",
     "cycle_call_in":"MK7_XE910",
@@ -56,6 +56,18 @@ PROG2MODULE = {
     "robot_keypad": "KEY_PAD_2",
     "robot_keypad2": "KBD_CONTROLLER"
 }
+
+def _module_info_for_program(meter: SSHMeter, program_name: str, default_info):
+    modules = PROG2MODULE.get(program_name)
+    if not modules:
+        return default_info
+    if isinstance(modules, str):
+        modules = (modules,)
+    for module in modules:
+        info = meter.module_info.get(module)
+        if info is not None:
+            return info
+    return default_info
 
 def _wait_for_middle_bay_full(
     timeout_s: float = 20.0,
@@ -356,7 +368,7 @@ def job_done(meter_ip):
         default_info = {'ver': -1, 'mod': -1, 'id': -1}
         job_results = {}
         for key, val in st.device_results.items():
-            info = meter.module_info.get(PROG2MODULE.get(key), default_info)
+            info = _module_info_for_program(meter, key, default_info)
 
             job_results[key] = {
                 "status": val,
@@ -377,7 +389,7 @@ def job_done(meter_ip):
         default_info = {'ver': -1, 'mod': -1, 'id': -1}
         job_results = {}
         for key, val in st.device_results.items():
-            info = meter.module_info.get(PROG2MODULE.get(key), default_info)
+            info = _module_info_for_program(meter, key, default_info)
 
             job_results[key] = {
                 "status": val,
@@ -387,13 +399,6 @@ def job_done(meter_ip):
             if key == "robot_keypad":
                 info = meter.module_info.get(PROG2MODULE.get("robot_keypad2"), default_info)
                 job_results["robot_keypad2"] = {
-                    "status": val,
-                    "fw": info.get("ver", -1),
-                    "id": info.get("id", -1),
-                }
-            if key == "nfc":
-                info = meter.module_info.get(PROG2MODULE.get("nfc2"), default_info)
-                job_results["nfc2"] = {
                     "status": val,
                     "fw": info.get("ver", -1),
                     "id": info.get("id", -1),

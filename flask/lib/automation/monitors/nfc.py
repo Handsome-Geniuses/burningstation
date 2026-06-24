@@ -8,7 +8,7 @@ from lib.automation.shared_state import SharedState
 class NFCMonitor:
     id = "nfc"
     re_req_any = re.compile(
-        r'GENERIC_TERMINAL\.\S*->KIOSK_NFC\.\S*\s+(?:APPLICATION_MSG\s+)?'
+        r'GENERIC_TERMINAL\.\S*->KIOSK_(?:NFC|NEO)\.\S*\s+(?:APPLICATION_MSG\s+)?'
         r'(?P<verb>EMV_POWER|CARD_READ_INST)\b.*?\bD=(?P<payload>[0-9A-Fa-f ]+)',
         re.IGNORECASE
     )
@@ -31,7 +31,13 @@ class NFCMonitor:
 
     def interested(self, msg: str) -> bool:
         m = msg.lower()
-        return ("kiosk_nfc" in m) or ("emv_power" in m) or ("card_read_inst" in m) or ("emv_power_reply" in m)
+        return (
+            ("kiosk_nfc" in m)
+            or ("kiosk_neo" in m)
+            or ("emv_power" in m)
+            or ("card_read_inst" in m)
+            or ("emv_power_reply" in m)
+        )
 
     @staticmethod
     def _tokens(hex_blob: str) -> List[str]:
