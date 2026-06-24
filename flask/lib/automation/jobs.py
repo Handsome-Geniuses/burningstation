@@ -47,6 +47,7 @@ PROG2MODULE = {
     "coin_shutter":"COIN_SHUTTER",
     "cycle_nfc":"KIOSK_NFC",
     "nfc":"KIOSK_NFC",
+    "nfc2": "KIOSK_NEO",
     "cycle_modem":"MK7_XE910",
     "modem":"MK7_XE910",
     "cycle_call_in":"MK7_XE910",
@@ -386,6 +387,13 @@ def job_done(meter_ip):
             if key == "robot_keypad":
                 info = meter.module_info.get(PROG2MODULE.get("robot_keypad2"), default_info)
                 job_results["robot_keypad2"] = {
+                    "status": val,
+                    "fw": info.get("ver", -1),
+                    "id": info.get("id", -1),
+                }
+	    if key == "nfc":
+                info = meter.module_info.get(PROG2MODULE.get("nfc2"), default_info)
+                job_results["nfc2"] = {
                     "status": val,
                     "fw": info.get("ver", -1),
                     "id": info.get("id", -1),
