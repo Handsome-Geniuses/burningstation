@@ -15,6 +15,7 @@ import type {
     SettingsTableProps,
     SettingsValue,
 } from "./types"
+import { cn } from "@/lib/utils"
 
 export const HIDDEN_SECTIONS = new Set(["handsome"])
 export const SECTION_ORDER = ["passive", "physical"]
@@ -103,7 +104,7 @@ export const BooleanRow = ({
                 {renderBadge(getDefaultText(node))}
             </div>
 
-            <div className={TABLE_CONTROL_CELL}>
+            <div className={TABLE_CONTROL_CELL} hidden>
                 <div className="inline-flex rounded-full bg-muted p-1">
                     <button
                         type="button"
@@ -128,6 +129,27 @@ export const BooleanRow = ({
                         True
                     </button>
                 </div>
+            </div>
+            <div className={TABLE_CONTROL_CELL}>
+                <button
+                    type="button"
+                    disabled={disabled}
+                    className="inline-flex rounded-full bg-muted p-1"
+                    onClick={() => onChange(path, !boolValue)}
+                >
+                    <p className={cn(
+                        "rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
+                        !boolValue ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
+                    )}>
+                        False
+                    </p>
+                    <p className={cn(
+                        "rounded-full px-4 py-1.5 text-sm font-medium transition-colors",
+                        boolValue ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
+                    )}>
+                        True
+                    </p>
+                </button>
             </div>
         </div>
     )

@@ -1,10 +1,12 @@
 from typing import Dict, Set, TypedDict
 import ip_scanner
-from lib.sse.sse_queue_manager import SSEQM
+from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.meter.fun import send_fun_meter
 from lib.meter.ssh_meter import SSHMeter
 from lib.utils import secrets
 from lib.database import insert_sshmeter
+from lib.system.bay_guess import clear_meter, empty_bay_guess
+from lib.system.states import states
 from prettyprint import STYLE, prettyprint as print
 
 
@@ -71,6 +73,8 @@ class METERMANAGER:
             cls.__booted.pop(ip, None)
             cls.__stale_counts.pop(ip, None)
             cls.__attempts.pop(ip, None)
+            states["bayGuess"] = clear_meter(states.get("bayGuess", empty_bay_guess()), ip)
+            SSEQM.broadcast("state", key_payload("bayGuess", states["bayGuess"]))
         else:
             print(
                 f"[{cls._timestamp()}] STALE (ignored): {ip} failed ping, count={cls.__stale_counts[ip]}/{cls.__STALE_THRESHOLD}",

@@ -7,6 +7,15 @@ from lib.system import program
 import lib.system.station as station
 import lib.system.override as override
 from lib.system.states import states
+from lib.system.belt_logic import (
+    BAY_STARTS,
+    boxes_are_valid,
+    boxes_to_sensors,
+    move_box_frames,
+    move_is_clear,
+    move_many_frames,
+    sensors_to_boxes,
+)
 from lib.utils import packer, secrets
 from prettyprint import STYLE, prettyprint as print
 
@@ -66,7 +75,7 @@ def sim_operation(delay: float = 1.0):
 
     return decorator
 
-def execute_steps(steps: dict, **kwargs):
+def execute_steps(step_actions: dict, **kwargs):
     """Execute a dictionary of steps with delays between them"""
     global _sim_emergency_stop
     delay = kwargs.get('delay', 1.0)
@@ -74,9 +83,9 @@ def execute_steps(steps: dict, **kwargs):
     def run_step(i=0):
         if _sim_emergency_stop:
             return
-        if i in steps:
-            steps[i]()
-        if i < max(steps.keys()) and not _sim_emergency_stop:
+        if i in step_actions:
+            step_actions[i]()
+        if i < max(step_actions.keys()) and not _sim_emergency_stop:
             threading.Timer(delay, lambda i=i: run_step(i + 1)).start()
 
     run_step(0)
@@ -106,7 +115,7 @@ def emergency_event(p:HWGPIO):
 HWGPIO_MONITOR.add_listener(emergency, emergency_event)
 
 
-@sim_operation(delay=1.0)  # adjust delay per step if needed
+@sim_operation(delay=0.5)  # adjust delay per step if needed
 def roller_move(**kwargs):
     """
     Cycle some rollers using sim_operation decorator.
@@ -229,6 +238,15 @@ def on_meter(**kwargs):
     res = None
     if option == 0:
         res = meter_random()
+    elif option == 1:
+        bay = kwargs.get("bay", -1)
+        if bay>=0 and bay<3:
+            v = 0 if mdm.get_ch_value(bay) else 0b111
+            mdm.set_ch_value(bay, v)
+    elif option == 2:
+        mdm.set_value(0)
+    elif option == 3: 
+        mdm.set_ch_bit(0,0,1)
     elif option == 10:
         res = user_loading_meter()
     elif option == 14:
@@ -251,60 +269,121 @@ def on_action(action, **kwargs):
     
     return res if res is not None else ("", 200)
 
-@sim_operation(delay=1.0)
+@sim_operation(delay=0.5)
 def mock_station_load(**kwargs):
     option = kwargs.get("type", 0)
-    msg, code = station.on_load(**kwargs)
-    if not (code==202  or code == 200): return
-    
-    steps = None
+    boxes = sensors_to_boxes(mdm.get_value_list())
+    frames = _mock_station_load_frames(option, boxes, **kwargs)
 
+    if not frames:
+        print(f"🕯️ [sim] station load {option!r} blocked/no-op", fg="#ffaa00")
+        return
+
+    motor_values = _mock_station_load_motors(option)
+    def render_frame(frame: list[int], *, stop_motors: bool = False):
+        mdm.set_value_list(boxes_to_sensors(frame))
+        if stop_motors:
+            rm.set_value_list([rm.COAST, rm.COAST, rm.COAST])
+        if stop_motors and option == "L" and (meter_ip := kwargs.get("meter_ip")):
+            station.set_meter_bay_guess(meter_ip)
+
+    steps = {
+        0: lambda: rm.set_value_list(motor_values),
+        **{
+            index: (
+                lambda frame=frame, is_last=index == len(frames):
+                    render_frame(frame, stop_motors=is_last)
+            )
+            for index, frame in enumerate(frames, start=1)
+        },
+    }
+    return execute_steps(steps, **kwargs)
+
+
+def _find_box_for_range(boxes: list[int], lower: int, upper: int, *, prefer_right: bool) -> int | None:
+    candidates = [
+        index for index, box_left in enumerate(boxes)
+        if lower <= box_left <= upper
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda index: boxes[index]) if prefer_right else min(candidates, key=lambda index: boxes[index])
+
+
+def _single_move_frames(boxes: list[int], lower: int, upper: int, target: int, *, prefer_right: bool) -> list[list[int]]:
+    box_index = _find_box_for_range(boxes, lower, upper, prefer_right=prefer_right)
+    if box_index is None:
+        return []
+    if boxes[box_index] == target:
+        return []
+    if not move_is_clear(boxes, box_index, target):
+        return []
+    return move_box_frames(boxes, box_index, target)
+
+
+def _shift_all_frames(boxes: list[int]) -> list[list[int]]:
+    moves: dict[int, int] = {}
+
+    middle_index = next((index for index, box_left in enumerate(boxes) if box_left == BAY_STARTS[1]), None)
+    if middle_index is not None and move_is_clear(boxes, middle_index, BAY_STARTS[2]):
+        moves[middle_index] = BAY_STARTS[2]
+
+    left_index = next((index for index, box_left in enumerate(boxes) if box_left == BAY_STARTS[0]), None)
+    if left_index is not None:
+        candidate_moves = {**moves, left_index: BAY_STARTS[1]}
+        candidate_boxes = boxes[:]
+        for index, target in candidate_moves.items():
+            candidate_boxes[index] = target
+        if boxes_are_valid(candidate_boxes):
+            moves[left_index] = BAY_STARTS[1]
+
+    if not moves:
+        return []
+    return move_many_frames(boxes, moves)
+
+
+def _coerce_unload_steps(**kwargs) -> int:
+    try:
+        return max(0, min(2, int(kwargs.get("steps", 0))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _mock_station_load_frames(option: str, boxes: list[int], **kwargs) -> list[list[int]]:
     if option == 'L':
-        steps = {
-            0: lambda: mdm.set_ch_bit(0,1,True),
-            1: lambda: mdm.set_ch_bit(0,2,True),
-        }
-    elif option == 'M':
-        steps = {
-            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
-            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
-            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-        }
-    elif option == 'R':
-        if mdm.is_ch_full(2):
-            steps = {
-                1: lambda: mdm.set_ch_bit(2,0,0),
-            }
-        else:
-            steps = {
-                1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-                2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
-                3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
-                4: lambda: mdm.set_ch_bit(2,0,False),
-            }
-    elif option == 'ALL':
-        steps = {
-            # 1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-            # 2: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 0)|(0b1001 << 4))),
-            # 3: lambda: mdm.set_value(mdm.get_value() ^ ((0b1001 << 1)|(0b1001 << 5))),
-            # 4: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-            # 5: lambda: mdm.set_ch_bit(2,0,False),
-        }
-    elif option == 'ML':
-        steps = {
-            1: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 2),
-            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 1),
-            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 0),
-        }
-    elif option == 'RM':
-        steps = {
-            1: lambda: mdm.set_ch_bit(2,0,True),
-            2: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 5),
-            3: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 4),
-            4: lambda: mdm.set_value(mdm.get_value() ^ 0b1001 << 3),
-        }
-    if steps:
-        return execute_steps(steps, **kwargs)
+        return _single_move_frames(boxes, -2, 0, BAY_STARTS[0], prefer_right=False)
+    if option == 'M':
+        return _single_move_frames(boxes, BAY_STARTS[0], BAY_STARTS[1] - 1, BAY_STARTS[1], prefer_right=True)
+    if option == 'R':
+        return _single_move_frames(boxes, BAY_STARTS[1], BAY_STARTS[2] - 1, BAY_STARTS[2], prefer_right=True)
+    if option == 'RU':
+        target = BAY_STARTS[2] + _coerce_unload_steps(**kwargs)
+        return _single_move_frames(boxes, BAY_STARTS[2], target, target, prefer_right=True)
+    if option == 'ML':
+        return _single_move_frames(boxes, BAY_STARTS[0], BAY_STARTS[1], BAY_STARTS[0], prefer_right=False)
+    if option == 'RM':
+        return _single_move_frames(boxes, BAY_STARTS[1], BAY_STARTS[2], BAY_STARTS[1], prefer_right=False)
+    if option == 'ALL':
+        return _shift_all_frames(boxes)
+    return []
+
+
+def _mock_station_load_motors(option: str) -> list[int]:
+    if option == 'L':
+        return [rm.FORWARD, rm.COAST, rm.COAST]
+    if option == 'M':
+        return [rm.FORWARD, rm.FORWARD, rm.COAST]
+    if option == 'R':
+        return [rm.COAST, rm.FORWARD, rm.FORWARD]
+    if option == 'RU':
+        return [rm.COAST, rm.COAST, rm.FORWARD]
+    if option == 'ALL':
+        return [rm.FORWARD, rm.FORWARD, rm.FORWARD]
+    if option == 'ML':
+        return [rm.REVERSE, rm.REVERSE, rm.COAST]
+    if option == 'RM':
+        return [rm.COAST, rm.REVERSE, rm.REVERSE]
+    return [rm.COAST, rm.COAST, rm.COAST]
     
 def on_mock(handler, action, **kwargs):
     res = None

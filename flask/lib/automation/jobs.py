@@ -17,7 +17,6 @@ from typing import Literal
 from lib.meter.ssh_meter import ModuleInfo, SSHMeter
 from lib.robot.robot_client import RobotClient
 import json
-import requests
 import time
 
 from lib.system.states import states
@@ -163,9 +162,9 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     st.log(f"Meter Info: {json.dumps(meter.get_info(), sort_keys=True)}")
 
     meter.status = "busy"
-    master.broadcast('status', {'ip':meter_ip, 'status': meter.status})
     st.status = "running"
     st.current_program = program_name
+    master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'current_action': program_name})
 
     dev = PROG2DEVICE.get(program_name)
     if dev:
@@ -218,7 +217,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
         meter.status = "ready"
         meter.results[program_name] = st.result
-        master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': ''})
+        master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': '', 'current_action': ''})
 
         st.extras['kwargs'] = kwargs
         job_done(meter_ip)
@@ -239,7 +238,7 @@ def stop_job(meter_ip):
     st = _state(meter_ip)
     meter = mm.get_meter(meter_ip)
     if (st.status!='running' and meter.status!='busy'): 
-        master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': 'tried stopping a non busy meter'})
+        master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': 'tried stopping a non busy meter', 'current_action': ''})
 
     st.log(f"JOB CANCELLED BY USER", console=True)
     st.flush_logs()
@@ -247,6 +246,7 @@ def stop_job(meter_ip):
     st.stop_event.set()
     st.status = "cancelled"
     meter.status = "ready"
+    master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'current_action': ''})
     meter.beep(3)
 
     return True
@@ -287,9 +287,6 @@ def start_passive_job(meter_ip):
     # }
     kwargs = build_passive_kwargs(modules)
 
-    if states["mode"] == "auto":
-        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"L"})
-    
     start_job(meter_ip, "cycle_all", kwargs, verbose=True)
 
 
@@ -340,19 +337,44 @@ def start_physical_job(meter_ip, buttons=None):
 
 
 
+def _handle_auto_job_done(meter_ip, current_program):
+    auto_actions = {
+        "cycle_all": "passive",
+        "physical_cycle_all": "physical",
+    }
+    auto_action = auto_actions.get(current_program)
+    if auto_action is None:
+        return
+
+    if states.get("mode") != "auto":
+        master.broadcast(
+            "notify",
+            {
+                "ntype": "info",
+                "msg": f"Auto skipped after {auto_action}; mode is {states.get('mode')}",
+            },
+        )
+        return
+
+    from lib.system.auto import AUTO_COORDINATOR
+
+    if current_program == "cycle_all":
+        AUTO_COORDINATOR.on_passive_done(meter_ip)
+    elif current_program == "physical_cycle_all":
+        AUTO_COORDINATOR.on_physical_done(meter_ip)
+
+
 # using this to database?
 def job_done(meter_ip):
     meter = mm.get_meter(meter_ip)
     st = _state(meter_ip)
     status = job_status(meter_ip)
     current_program = status.get("current_program")
+
+    _handle_auto_job_done(meter_ip, current_program)
+
     if meter.db_id==None: return
     meter.results.pop(current_program)
-
-    if current_program == "cycle_all" and states["mode"] == "auto":
-        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"M"})
-    elif current_program == "physical_cycle_all" and states["mode"] == "auto":
-        response = requests.post("http://127.0.0.1:8011/api/system/station/load", json={"type":"R"})
 
     # initial 
     overall_status = "pass"
@@ -433,14 +455,9 @@ def job_done(meter_ip):
     insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
     # if st.logs successfully inserted to db, rm log file maybe?
 
-    if current_program == "cycle_all":
+    if current_program == "cycle_all" and store.settings.other.auto_print_fw:
         meter.custom_print()
         time.sleep(5)
-
-    if current_program == "cycle_all" and states["mode"] == "auto":
-        start_physical_job(meter.host)
-
-
 
 if __name__ == "__main__":
     # import tools.mock

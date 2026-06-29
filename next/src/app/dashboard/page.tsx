@@ -29,7 +29,27 @@ const Dashboard = () => {
     )
 }
 
+export function DisableTabKey() {
+    React.useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            if (e.key === "Tab") {
+                e.preventDefault();
+            }
+        };
+
+        window.addEventListener("keydown", handler);
+        return () => window.removeEventListener("keydown", handler);
+    }, []);
+
+    return null;
+}
+
+
+
 export default () => {
+    React.useEffect(() => {
+
+    })
 
     return (
         <div className="w-screen h-screen bg-neutral-500 overflow-hidden flex justify-center items-center">
@@ -38,6 +58,8 @@ export default () => {
                     <Dashboard />
                 </StoreProvider>
             </div>
+            
+            <DisableTabKey />
         </div>
     )
 }

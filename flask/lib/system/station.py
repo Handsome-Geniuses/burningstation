@@ -9,7 +9,10 @@ import time
 from prettyprint import STYLE, prettyprint as print
 from asyncdec import AsyncManager, async_fire_and_forget
 from lib.robot.robot_client import RobotClient
+from lib.system.bay_guess import BAY_GUESS_BAY_STARTS, empty_bay_guess, place_meter
+from lib.system.belt_logic import BAY_STARTS, BOX_LEFT_MAX, boxes_are_valid, sensors_to_boxes
 
+from lib.store import store
 
 am_station = AsyncManager("am_station")
 
@@ -37,6 +40,38 @@ def check_robot_clear_of_conveyor():
         robot.wait_for_event("program_done", job_id=job_id, timeout=10)
     except Exception as e:
         raise RuntimeError(f"Robot failed to clear conveyor zone: {e}")
+
+
+def _find_box_for_range(boxes: list[int], lower: int, upper: int, *, prefer_right: bool) -> int | None:
+    candidates = [
+        index for index, box_left in enumerate(boxes)
+        if lower <= box_left <= upper
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda index: boxes[index]) if prefer_right else min(candidates, key=lambda index: boxes[index])
+
+
+def _move_is_clear(boxes: list[int], box_index: int, target: int) -> bool:
+    next_boxes = boxes[:]
+    next_boxes[box_index] = target
+    return boxes_are_valid(next_boxes)
+
+
+def _has_boxes_at(targets: list[int]) -> bool:
+    boxes = sensors_to_boxes(mdm.get_value_list())
+    return all(target in boxes for target in targets)
+
+def _broadcast_bay_guess():
+    SSEQM.broadcast("state", key_payload("bayGuess", states["bayGuess"]))
+
+def set_meter_bay_guess(meter_ip: str, bay_index: int = 0):
+    states["bayGuess"] = place_meter(
+        states.get("bayGuess", empty_bay_guess()),
+        meter_ip,
+        BAY_GUESS_BAY_STARTS[bay_index],
+    )
+    _broadcast_bay_guess()
 
 @async_fire_and_forget
 def on_load_start():
@@ -77,10 +112,10 @@ def on_load_exception(e: Exception):
 # Align meter in loading bay
 # ----------------------------------------------------
 def load_L_precheck(**kwargs):
-    value = mdm.get_value()
-    if mdm.is_ch_full(0, value):
+    boxes = sensors_to_boxes(mdm.get_value_list())
+    if BAY_STARTS[0] in boxes:
         return "Already loaded", 204
-    elif not mdm.get_ch_bit(0, 0, value):
+    elif not any(box <= BAY_STARTS[0] for box in boxes):
         return "Nothing to load", 409
     return None     # passed pre-check
 
@@ -88,8 +123,10 @@ def load_L_precheck(**kwargs):
 def load_L(**kwargs):
     """Meter was loaded onto station1. Needs alignment"""
     rm.set_value_list([rm.FORWARD, rm.COAST, rm.COAST])
-    while not states['mds'][2]:
+    while BAY_STARTS[0] not in sensors_to_boxes(mdm.get_value_list()):
         time.sleep(0.1)
+    if meter_ip := kwargs.get("meter_ip"):
+        set_meter_bay_guess(meter_ip)
     print("✅[Station] load_L completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_L] Load completed", 200
 
@@ -97,10 +134,11 @@ def load_L(**kwargs):
 # Move meter into middle
 # ----------------------------------------------------
 def load_M_precheck(**kwargs):
-    value = mdm.get_value()
-    if not mdm.is_ch_full(0, value):
+    boxes = sensors_to_boxes(mdm.get_value_list())
+    box_index = _find_box_for_range(boxes, BAY_STARTS[0], BAY_STARTS[1] - 1, prefer_right=True)
+    if box_index is None:
         return "L not loaded", 204
-    if not mdm.is_ch_empty(1, value):
+    if not _move_is_clear(boxes, box_index, BAY_STARTS[1]):
         return "M is occupied", 409
     return None     # passed pre-check
 
@@ -108,18 +146,19 @@ def load_M_precheck(**kwargs):
 def load_M(**kwargs):
     """Moves meter from station1 to station2"""
     rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.COAST])
-    while not states['mds'][5]: time.sleep(0.1)
+    while BAY_STARTS[1] not in sensors_to_boxes(mdm.get_value_list()):
+        time.sleep(0.1)
     return "[load_M] Load completed", 200
 
 # ----------------------------------------------------
 # Move meter into unloading station
 # ----------------------------------------------------
 def load_R_precheck(**kwargs):
-    value = mdm.get_value()
-    if mdm.is_ch_full(2, value): return None
-    if not mdm.is_ch_full(1, value):
+    boxes = sensors_to_boxes(mdm.get_value_list())
+    box_index = _find_box_for_range(boxes, BAY_STARTS[1], BAY_STARTS[2] - 1, prefer_right=True)
+    if box_index is None:
         return "M not loaded", 204
-    elif not mdm.is_ch_empty(2, value):
+    elif not _move_is_clear(boxes, box_index, BAY_STARTS[2]):
         return "R is occupied", 409
     return None     # passed pre-check
 
@@ -127,35 +166,63 @@ def load_R_precheck(**kwargs):
 def load_R(**kwargs):
     """Moves meter from station2 to station3"""
     rm.set_value_list([rm.COAST, rm.FORWARD, rm.FORWARD])
-    while not states["mds"][8]: time.sleep(0.1)
-    rm.set_value_list([rm.COAST, rm.COAST, rm.FORWARD])
-    while states["mds"][6]: time.sleep(0.1)
+    while BAY_STARTS[2] not in sensors_to_boxes(mdm.get_value_list()):
+        time.sleep(0.1)
     print("✅[Station] load_R completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_R] Load completed", 200
+
+def _coerce_unload_steps(**kwargs) -> int:
+    try:
+        return int(kwargs.get("steps", 0))
+    except (TypeError, ValueError):
+        return 0
+
+def load_R_unload_precheck(**kwargs):
+    steps = _coerce_unload_steps(**kwargs)
+    target = BAY_STARTS[2] + steps
+    if steps <= 0:
+        return None
+    if target > BOX_LEFT_MAX:
+        return "Unload target out of range", 409
+
+    boxes = sensors_to_boxes(mdm.get_value_list())
+    box_index = _find_box_for_range(boxes, BAY_STARTS[2], target, prefer_right=True)
+    if box_index is None:
+        return "R not loaded", 204
+    elif not _move_is_clear(boxes, box_index, target):
+        return "Unload position occupied", 409
+    return None
+
+@am_station.operation(timeout=20.0, precheck=load_R_unload_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout, on_exception=on_load_exception)
+def load_R_unload(**kwargs):
+    """Moves the right station meter farther into the unload area."""
+    steps = _coerce_unload_steps(**kwargs)
+    target = BAY_STARTS[2] + steps
+    rm.set_value_list([rm.COAST, rm.COAST, rm.FORWARD])
+    while target not in sensors_to_boxes(mdm.get_value_list()):
+        time.sleep(0.1)
+    print("✅[Station] load_R_unload completed.", fg="#00ff00", style=STYLE.BOLD)
+    return "[load_R_unload] completed", 200
 
 # ----------------------------------------------------
 # Move middle to unloading and load new middle
 # ----------------------------------------------------
 def load_ALL_precheck(**kwargs):
-    value = mdm.get_value()
-    if not mdm.is_ch_full(0,value): 
+    boxes = sensors_to_boxes(mdm.get_value_list())
+    if BAY_STARTS[0] not in boxes:
         return "[load_ALL] L->M nothing to move", 204
-    elif not mdm.is_ch_full(1,value): 
+    elif BAY_STARTS[1] not in boxes:
         return "[load_ALL] M->R nothing to move", 204
-    elif not mdm.is_ch_empty(2,value): 
+    elif any(box >= BAY_STARTS[2] for box in boxes):
         return "[load_ALL] R occupied", 204
+    elif not boxes_are_valid([BAY_STARTS[1], BAY_STARTS[2]]):
+        return "[load_ALL] invalid move", 204
     return None     # passed pre-check
 
 @am_station.operation(timeout=3.0, precheck=load_ALL_precheck, on_start=on_load_start, on_done=on_load_done, on_timeout=on_load_timeout, on_exception=on_load_exception)
 def load_ALL(**kwargs):
-    value = mdm.get_value()
     rm.set_value_list([rm.FORWARD, rm.FORWARD, rm.FORWARD])
-    while states['mds'][5]:
-        time.sleep(0.1)
-    while not states['mds'][5]:
-        time.sleep(0.1)
-    rm.set_value_list([rm.COAST, rm.COAST, rm.FORWARD])
-    while states['mds'][6]:
+    while not _has_boxes_at([BAY_STARTS[1], BAY_STARTS[2]]):
         time.sleep(0.1)
     print("✅[Station] load_ALL completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_ALL] Load completed", 200
@@ -166,10 +233,11 @@ def load_ALL(**kwargs):
 # SECRET! HANDSOME PEOPLE ONLY
 # ---------------------------------------------------- 
 def load_M_to_L_precheck(**kwargs):
-    value = mdm.get_value()
-    if not mdm.is_ch_full(1, value):
+    boxes = sensors_to_boxes(mdm.get_value_list())
+    box_index = _find_box_for_range(boxes, BAY_STARTS[0], BAY_STARTS[1], prefer_right=False)
+    if box_index is None:
         return "M not loaded", 204
-    elif not mdm.is_ch_empty(0, value):
+    elif not _move_is_clear(boxes, box_index, BAY_STARTS[0]):
         return "L is occupied", 409
     return None  # passed pre-check
 
@@ -177,16 +245,17 @@ def load_M_to_L_precheck(**kwargs):
 def load_M_to_L(**kwargs):
     """Moves meter from middle station (M) back to left station (L)"""
     rm.set_value_list([rm.REVERSE, rm.REVERSE, rm.COAST])
-    while not states['mds'][0]: 
+    while BAY_STARTS[0] not in sensors_to_boxes(mdm.get_value_list()):
         time.sleep(0.1)
     print("✅[Station] load_M_to_L completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_M_to_L] completed", 200
 
 def load_R_to_M_precheck(**kwargs):
-    value = mdm.get_value()
-    if mdm.get_ch_value(2, value) not in (0b110, 0b111):
+    boxes = sensors_to_boxes(mdm.get_value_list())
+    box_index = _find_box_for_range(boxes, BAY_STARTS[1], BAY_STARTS[2], prefer_right=False)
+    if box_index is None:
         return "R not loaded", 204
-    elif not mdm.is_ch_empty(1, value):
+    elif not _move_is_clear(boxes, box_index, BAY_STARTS[1]):
         return "M is occupied", 409
     return None  # passed pre-check
 
@@ -194,7 +263,7 @@ def load_R_to_M_precheck(**kwargs):
 def load_R_to_M(**kwargs):
     """Moves meter from right station (R) back to middle station (M)"""
     rm.set_value_list([rm.COAST, rm.REVERSE, rm.REVERSE])
-    while not states['mds'][3]: 
+    while BAY_STARTS[1] not in sensors_to_boxes(mdm.get_value_list()):
         time.sleep(0.1)
     print("✅[Station] load_R_to_M completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_R_to_M] completed", 200
@@ -205,7 +274,7 @@ def load_R_to_M(**kwargs):
 def load_R_to_L(**kwargs):
     """Moves meter from right station (R) back to LEFT station (L)"""
     rm.set_value_list([rm.REVERSE, rm.REVERSE, rm.REVERSE])
-    while not states['mds'][0]: 
+    while BAY_STARTS[0] not in sensors_to_boxes(mdm.get_value_list()):
         time.sleep(0.1)
     print("✅[Station] load_R_to_L completed.", fg="#00ff00", style=STYLE.BOLD)
     return "[load_R_to_L] completed", 200
@@ -216,13 +285,14 @@ def load_R_to_L(**kwargs):
 def on_load(**kwargs):
     option = kwargs.get('type', None)
     
-    if option in ("M", "R", "ALL", "ML", "RM", "RL"):
+    if option in ("M", "R", "RU", "ALL", "ML", "RM", "RL"):
         check_robot_clear_of_conveyor()
     
     if option==None: return
-    elif option=='L': return load_L()
+    elif option=='L': return load_L(**kwargs)
     elif option=='M': return load_M()
     elif option=='R': return load_R()
+    elif option=='RU': return load_R_unload(**kwargs)
     elif option=='ALL': return load_ALL() 
     elif option=='ML': return load_M_to_L()
     elif option=='RM': return load_R_to_M()
@@ -276,10 +346,25 @@ def on_lamp(**kwargs):
 
 
 def on_mode(**kwargs):
-    mode = kwargs.get('mode', None)
-    if mode==None: states['mode'] = 'auto' if states['mode']=='manual' else 'manual'
-    elif mode not in ('auto','manual'): return
-    else: states['mode'] = mode
+    mode = kwargs.get('value', None)
+    if mode == None:                                # default manual
+        states['mode']='manual'
+    elif states['mode'] == mode:                    # do nothing if no change
+        return
+    elif mode == 'manual': 
+        states['mode']='manual'                    # manual mode
+    elif mode == 'auto':                            # auto mode but check if allowed
+        if store.settings.handsome.allow_auto_switch:
+            states['mode']='auto'
+        elif all(not b for b in mdm.get_value_list()[2:]):
+            states['mode']='auto'
+        else: 
+            SSEQM.broadcast("notify", {"ntype": "warn", "msg": "remove meters first"})
+            return
+
+    # if mode==None: states['mode'] = 'auto' if states['mode']=='manual' else 'manual'
+    # elif mode not in ('auto','manual'): return
+    # else: states['mode'] = mode
     SSEQM.broadcast("state", key_payload("mode", states['mode']))
 
 def on_emergency(**kwargs):

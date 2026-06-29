@@ -15,7 +15,7 @@
     *::before,
     *::after {
         /* box-sizing: border-box; */
-        @apply box-border border-border outline-ring/50 antialiased touch-pan-y;
+        @apply box-border border-border outline-ring/50 antialiased touch-pan-y select-none;
         /* touch-action: none; */
         /* touch-action: pan-y; */
         /* scrollbar-width: thin;

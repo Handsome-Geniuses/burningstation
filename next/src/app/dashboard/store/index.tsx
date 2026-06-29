@@ -67,15 +67,30 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         })
     }
     const onDevices = (payload: any) => { }
-    const onProgress = (payload: any) => { }
+    const onProgress = (payload: any) => {
+        const { ip, current_cycle, total_cycles } = payload ?? {}
+        if (
+            typeof ip !== "string" ||
+            typeof current_cycle !== "number" ||
+            typeof total_cycles !== "number"
+        ) return
+
+        systemDispatch({
+            type: "meter:progress",
+            ip,
+            current: current_cycle,
+            total: total_cycles,
+        })
+    }
     const onStatus = (payload: any) => {
-        const { ip, msg, status } = payload ?? {}
+        const { ip, msg, status, current_action } = payload ?? {}
         if (typeof ip !== "string" || typeof status !== "string") return
         systemDispatch({
             type: "meter:status",
             ip,
             status: status,
             msg,
+            current_action: typeof current_action === "string" ? current_action : undefined,
         })
     }
 

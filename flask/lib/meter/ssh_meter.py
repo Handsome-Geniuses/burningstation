@@ -196,6 +196,9 @@ class SSHMeter(sshkit.Client):
         self._system_versions_cache: Optional[SystemVersions] = None
         self._meter_region_cache: Optional[MeterRegion] = None
         self._http_available: Optional[bool] = None
+        self._blink_until_stop: Optional[threading.Event] = None
+        self._blink_until_thread: Optional[threading.Thread] = None
+        self._blink_until_status: Optional[Literal["ready", "idle", "busy"]] = None
 
     def _transport_is_active(self) -> bool:
         """Return True only when Paramiko has a live active transport."""
@@ -1763,6 +1766,59 @@ fclose($myfile);
             self.beep(1)
             time.sleep(0.1)
         self.set_brightness(v)
+
+    def blink_until_start(self, low: int = 0, high: int = 50, interval: float = 0.25, max_duration: float = 60.0, on_done=None) -> None:
+        self.blink_until_stop()
+
+        stop_event = threading.Event()
+        previous_status = self.status
+
+        with self._lock:
+            self._blink_until_stop = stop_event
+            self._blink_until_thread = None
+            self._blink_until_status = previous_status
+            self.status = "busy"
+
+        def _blink_loop():
+            brightness = high
+            try:
+                brightness = self.get_brightness()
+                deadline = time.monotonic() + max(0.0, float(max_duration))
+                while not stop_event.is_set() and time.monotonic() < deadline:
+                    self.set_brightness(low)
+                    self.beep(1)
+                    if stop_event.wait(interval):
+                        break
+                    self.set_brightness(high)
+                    self.beep(1)
+                    stop_event.wait(interval)
+            finally:
+                try:
+                    self.set_brightness(brightness)
+                finally:
+                    with self._lock:
+                        if self._blink_until_stop is stop_event:
+                            self.status = previous_status
+                            self._blink_until_stop = None
+                            self._blink_until_thread = None
+                            self._blink_until_status = None
+                            if on_done:
+                                on_done()
+
+        thread = threading.Thread(target=_blink_loop, name=f"meter-blink-{self.host}", daemon=True)
+        with self._lock:
+            self._blink_until_thread = thread
+        thread.start()
+
+    def blink_until_stop(self) -> None:
+        with self._lock:
+            stop_event = self._blink_until_stop
+            thread = self._blink_until_thread
+
+        if stop_event:
+            stop_event.set()
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=2)
 
 
 def generate_mock_details_for_copy_paste(meter: SSHMeter):

@@ -1,5 +1,6 @@
 from lib.gpio import HWGPIO, HWGPIO_MONITOR, emergency, rm, mdm
 from lib.sse.sse_queue_manager import SSEQM, key_payload
+from lib.system.bay_guess import empty_bay_guess, infer_bay_guess_from_mds
 from lib.system.states import states
 from lib.utils import secrets
 from prettyprint import STYLE, prettyprint as print
@@ -31,9 +32,14 @@ def mds_event_builder(p: HWGPIO, index: int):
         if p.state == states.get("mds", [None] * 9)[index]:
             return
         states["mds"][index] = p.state
+        states["bayGuess"] = infer_bay_guess_from_mds(
+            states.get("bayGuess", empty_bay_guess()),
+            states["mds"],
+            states.get("motors"),
+        )
         SSEQM.broadcast("state", key_payload("mds", states["mds"]))
+        SSEQM.broadcast("state", key_payload("bayGuess", states["bayGuess"]))
     return handler
 
 for i, md in enumerate(mds):
     HWGPIO_MONITOR.add_listener(md, mds_event_builder(md, i))
-

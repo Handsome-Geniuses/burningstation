@@ -40,9 +40,9 @@ export const SectionCard = ({
         >
             <AccordionTrigger className="px-4 py-4 hover:no-underline">
                 <div className="text-left">
-                    <div className="text-lg font-semibold">{resolved.title ?? formatLabel(sectionKey)}</div>
-                    <div className="pt-1 text-sm text-muted-foreground">
-                        {resolved.description ?? `Configure ${formatLabel(sectionKey).toLowerCase()} settings.`}
+                    <div className="text-lg font-semibold leading-none tracking-none">{resolved.title ?? formatLabel(sectionKey)}</div>
+                    <div className="pt-1 text-sm text-muted-foreground leading-none tracking-none">
+                        {node.description ?? `Configure ${formatLabel(sectionKey).toLowerCase()} settings.`}
                     </div>
                 </div>
             </AccordionTrigger>

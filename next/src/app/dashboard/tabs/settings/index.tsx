@@ -15,8 +15,12 @@ import {
 import type { SchemaNode, SettingsObject, SettingsPayload, SettingsValue } from "./_components/types"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
+import { useStoreContext } from "../../store"
 
 export const SettingsTab = () => {
+    const { systemState } = useStoreContext()
+    const isHandsome = systemState.handsome
+    
     const formRef = React.useRef<HTMLFormElement | null>(null)
     const [schema, setSchema] = React.useState<SchemaNode | null>(null)
     const [values, setValues] = React.useState<SettingsObject | null>(null)
@@ -30,12 +34,13 @@ export const SettingsTab = () => {
         if (showLoadingState) setLoading(true)
         setReloading(!showLoadingState)
         setError(null)
-
         try {
             const res = await flask.get("/settings")
             if (!res.ok) throw new Error(`Failed to load settings (${res.status})`)
 
             const payload = (await res.json()) as SettingsPayload
+            console.log(payload)
+            
             setSchema(payload.schema)
             setValues(payload.values)
             setDraft(payload.values)
@@ -57,7 +62,7 @@ export const SettingsTab = () => {
         if (!schema?.properties) return []
 
         return Object.entries(schema.properties)
-            .filter(([key]) => !HIDDEN_SECTIONS.has(key))
+            .filter(([key]) => isHandsome || !HIDDEN_SECTIONS.has(key))
             .sort(([a], [b]) => {
                 const ia = SECTION_ORDER.indexOf(a)
                 const ib = SECTION_ORDER.indexOf(b)
@@ -182,7 +187,7 @@ export const SettingsTab = () => {
                     </div>
                 )}
 
-                <Accordion type="multiple" className="flex flex-col gap-4 px-4">
+                <Accordion type="multiple" className="flex flex-col gap-2 px-4">
                     {topLevelEntries.map(([sectionKey, sectionNode]) => (
                         <SectionCard
                             key={sectionKey}

@@ -23,19 +23,20 @@ def test_dummy(meter: SSHMeter, shared: SharedState = None, **kwargs):
     # print(f"NFC cycling {nfc_count} times...")
     # print(f"Modem cycling {modem_count} times...")
 
-    states['dummy']['fake'] = True
+    dummy_key = meter.host
+    states['dummy'].setdefault(dummy_key, {})['dummy'] = True
 
     start = time.time()
     passed = 0
     while True:
         passed = time.time() - start
-        fake = states['dummy']['fake']
+        fake = states['dummy'].get(dummy_key, {}).get('dummy', False)
         if passed > 120 or not fake: break
 
         time.sleep(0.2)
     
-    print("[fake_dummy_playground_test]!faked")
-    print("[fake_dummy_playground_test]!passed")
+    if not fake: print("[fake_dummy_playground_test]!faked")
+    if passed > 120: print("[fake_dummy_playground_test]!passed")
     check_stop_event(shared)
 
-    states['dummy']['fake'] = False
+    states['dummy'].setdefault(dummy_key, {})['dummy'] = False

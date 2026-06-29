@@ -85,7 +85,7 @@ def task_refresh_meters(count):
             print(f"fresh ip: {ip}")
             if states['mode']=='auto':
                 mm.get_meter(ip).setup_custom_display()
-                start_passive_job(ip)
+                # start_passive_job(ip)
 
 
 
