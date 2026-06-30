@@ -18,7 +18,6 @@ PHYSICAL_DEVICES = [
     ("nfc_gui",        test_cycle_meter_ui,     {"payment_type": "robot_contactless"}),
     ("robot_keypad",   test_robot_keypad,       {
         "buttons": ["1","2","3"],
-        "inactivity_timeout_s": 40.0,
         "per_button_timeout_s": 5.0,
     }),
 ]
@@ -156,11 +155,7 @@ def physical_cycle_all(
 
             shared.current_device = device_name
             shared.device_results[device_name] = "running"
-
-            if device_name == "robot_keypad":
-                shared.set_allowed({device_name}, reason=f"Running {device_name}")
-            else:
-                shared.set_allowed(set(), reason=f"No monitor for {device_name}")
+            shared.set_allowed(set(), reason=f"No monitor for {device_name}")
 
             try:
                 final_kwargs["subtest"] = True
