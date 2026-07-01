@@ -4,6 +4,7 @@ from itertools import product
 
 BayGuess = list[Optional[str]]
 
+BAY0_PARTIAL_BOOTSTRAP_ENABLED = True
 BAY_GUESS_BAY_STARTS = [2, 6, 10]
 VIRTUAL_SENSOR_COUNT = 15
 METER_WIDTH = 3
@@ -47,7 +48,50 @@ def clear_meter(bay_guess: BayGuess, ip: str) -> BayGuess:
     return [None if value == ip else value for value in bay_guess]
 
 
-def infer_bay_guess_from_mds(bay_guess: BayGuess, mds: list[bool], motors: list[int] | None = None) -> BayGuess:
+def bay0_partial_load_active(mds: list[bool]) -> bool:
+    if not BAY0_PARTIAL_BOOTSTRAP_ENABLED or len(mds) < METER_WIDTH:
+        return False
+
+    first, second, third = mds[:METER_WIDTH]
+    return (first or second) and not third
+
+
+def bay0_partial_load_left(mds: list[bool]) -> int | None:
+    if not bay0_partial_load_active(mds):
+        return None
+
+    _, second, _ = mds[:METER_WIDTH]
+    return BAY_GUESS_BAY_STARTS[0] - 1 if second else BAY_GUESS_BAY_STARTS[0] - 2
+
+
+def bootstrap_bay0_partial_guess(
+    bay_guess: BayGuess,
+    mds: list[bool],
+    meter_ips: list[str] | set[str] | tuple[str, ...] | None,
+) -> BayGuess:
+    bay0_left = bay0_partial_load_left(mds)
+    if bay0_left is None or not meter_ips:
+        return bay_guess[:]
+
+    known = known_guess_footprints(bay_guess)
+    unguessed = [ip for ip in meter_ips if ip not in known]
+
+    if len(unguessed) != 1:
+        return bay_guess[:]
+
+    bay0_range = range(bay0_left, bay0_left + METER_WIDTH)
+    if any(bay_guess[index] for index in bay0_range):
+        return bay_guess[:]
+
+    return place_meter(bay_guess, unguessed[0], bay0_left)
+
+
+def infer_bay_guess_from_mds(
+    bay_guess: BayGuess,
+    mds: list[bool],
+    motors: list[int] | None = None,
+    meter_ips: list[str] | set[str] | tuple[str, ...] | None = None,
+) -> BayGuess:
     active = virtual_mds(mds)
     known = known_guess_footprints(bay_guess)
     next_guess = empty_bay_guess()
@@ -59,7 +103,7 @@ def infer_bay_guess_from_mds(bay_guess: BayGuess, mds: list[bool], motors: list[
         key=lambda item: item[1],
     )
     if not ordered:
-        return next_guess
+        return bootstrap_bay0_partial_guess(next_guess, mds, meter_ips)
 
     active_indexes = {index for index, value in enumerate(active) if value}
 
@@ -114,4 +158,4 @@ def infer_bay_guess_from_mds(bay_guess: BayGuess, mds: list[bool], motors: list[
         for index in range(best_left, best_left + METER_WIDTH):
             next_guess[index] = ip
 
-    return next_guess
+    return bootstrap_bay0_partial_guess(next_guess, mds, meter_ips)

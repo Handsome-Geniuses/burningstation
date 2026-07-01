@@ -87,6 +87,7 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
     const [meterIndex, setMeterIndex] = React.useState<number | null>(null)
     const middleMeterIp = meterIndex === null ? undefined : metersReady[meterIndex]
     const isManual = systemState.mode == "manual"
+    const isReadyForPhysical = isManual && systemState.mds[3] && systemState.mds[4] && systemState.mds[5]
 
     const blinkMeter = (meter_ip: string) => {
         flask.handleAction('program', 'neutral', { program: 'identify_until', meter_ip })
@@ -172,7 +173,10 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
                 onClick={handleClick1}
                 variant="outline"
                 disabled={!isManual}
-                className="text-xs"
+                className={cn(
+                    "text-xs",
+                    isReadyForPhysical && "animate-pulse border-primary bg-orange-500/40 hover:bg-orange-500/60 text-primary [animation-duration:0.5s]"
+                )}
             >
                 Physical
             </Button>
@@ -199,6 +203,7 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
     const [metersReady, setMetersReady] = React.useState<string[]>([])
     const [meterIndex, setMeterIndex] = React.useState<number | null>(null)
     const mds = systemState.mds
+    const isReadyToLoad = (mds[0] || mds[1]) && !mds[2]
     const loadingMeterIp = meterIndex === null ? undefined : metersReady[meterIndex]
 
     const blinkMeter = (meter_ip: string) => {
@@ -249,7 +254,7 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
     }
 
     const handleClick = () => {
-        if (!mds[0] || mds[2]) {
+        if (!isReadyToLoad) {
             notify.info("nothing to load")
             return
         }
@@ -269,7 +274,10 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
         <>
             <Button
                 variant="outline"
-                className="text-xs"
+                className={cn(
+                    "text-xs",
+                    isReadyToLoad && "animate-pulse border-primary bg-orange-500/40 hover:bg-orange-500/60 text-primary [animation-duration:0.5s] transition-all"
+                )}
                 onClick={handleClick}
                 disabled={false}
             >
@@ -307,7 +315,7 @@ export function ControlsPanel({ systemState, className }: { systemState: SystemS
                 {/* <JobsDivider isManual={isManual} /> */}
                 <RobotDivider isManual={isManual} />
 
-                <SectionDivider label="press me" className="pt-4" />
+                <SectionDivider label="programs" className="pt-4" />
                 <div className="grid grid-cols-2 gap-2 pt-2">
                     <MeterMiddlePhysical systemState={systemState} />
                     <LoadMeter systemState={systemState} />

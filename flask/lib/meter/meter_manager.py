@@ -5,7 +5,7 @@ from lib.meter.fun import send_fun_meter
 from lib.meter.ssh_meter import SSHMeter
 from lib.utils import secrets
 from lib.database import insert_sshmeter
-from lib.system.bay_guess import clear_meter, empty_bay_guess
+from lib.system.bay_guess import bootstrap_bay0_partial_guess, clear_meter, empty_bay_guess
 from lib.system.states import states
 from prettyprint import STYLE, prettyprint as print
 
@@ -150,6 +150,11 @@ class METERMANAGER:
                 # add to known meters
                 cls.meters[ip] = meter
                 cls.__meters.add(ip)
+                states["bayGuess"] = bootstrap_bay0_partial_guess(
+                    states.get("bayGuess", empty_bay_guess()),
+                    states.get("mds", []),
+                    cls.meters.keys(),
+                )
 
                 # send FUN data
                 # try: send_fun_meter(meter)
@@ -175,6 +180,7 @@ class METERMANAGER:
                         "info": meter.get_info(),
                     },
                 )
+                SSEQM.broadcast("state", key_payload("bayGuess", states["bayGuess"]))
                 return True
 
         except cls.__FINALLY:
