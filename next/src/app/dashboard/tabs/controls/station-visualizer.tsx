@@ -14,14 +14,14 @@ import ToothedFrame, { ToothedFrameDirection as Direction } from "./tooth-frame"
 export function WarehouseDolly({ className = "" }) {
     return (
         <svg
-            viewBox="34 14 72 96"
+            viewBox="34 -65 72 175"
             className={cn("w-24 h-24", className)}
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
             aria-label="Dolly"
         >
             <path
-                d="M55 20 V85 H100"
+                d="M55 -60 V85 H100"
                 stroke="currentColor"
                 strokeWidth="8"
                 strokeLinecap="round"
@@ -29,7 +29,7 @@ export function WarehouseDolly({ className = "" }) {
             />
 
             <path
-                d="M55 20 H40"
+                d="M55 -60 H40"
                 stroke="currentColor"
                 strokeWidth="8"
                 strokeLinecap="round"
@@ -40,6 +40,7 @@ export function WarehouseDolly({ className = "" }) {
         </svg>
     );
 }
+
 
 const motorDirectionMap: Record<0 | 1 | 2 | 3, Direction> = {
     0: "off",
@@ -124,7 +125,7 @@ function MovingBelt({
             contentClassName="text-white font-semibold"
             style={{ margin: 0 }}
         >
-            <div className="size-full flex items-center justify-center gap-[6px] pb-0.5">
+            <div className="size-full flex items-center justify-center gap-[6px]">
                 <Roller direction={direction} animationDuration={hz * 10} onPointerDown={onL} />
                 {Array.from({ length: 5 }).map((_, index) => (
                     <Roller key={index} direction={direction} animationDuration={hz * 10} />
@@ -160,7 +161,7 @@ const SideBelt = ({
             contentClassName="text-white font-semibold"
             style={{ margin: 0 }}
         >
-            <div className="size-full flex items-center justify-center gap-[2px] pb-0.5">
+            <div className="size-full flex items-center justify-center gap-[2px]">
                 <Roller onPointerDown={onL} />
                 <Roller onPointerDown={onR} />
             </div>
@@ -228,19 +229,23 @@ export function StationVisualizer({
             </AccordionTrigger>
             <AccordionContent asChild className="p-0">
                 <div className="relative w-full flex justify-center">
+
+                    {/* SIDE DOLLY'S FOR FUN */}
                     <div className={cn(
-                        "absolute bottom-10 text-[#f4a261] transition-all duration-300 ease-in-out ",
-                        canLoadFromLeft ? "-left-5 animate-pulse [animation-duration:0.5s]" : "-left-15 opacity-50"
+                        "absolute bottom-7.5 text-[#f4a261] transition-all duration-300 ease-in-out ",
+                        canLoadFromLeft ? "-left-5 animate-pulse [animation-duration:0.5s]" : "-left-14 opacity-50"
                     )}>
-                        <WarehouseDolly className="w-20 h-20" />
+                        <WarehouseDolly className="w-20 h-35" />
                     </div>
 
                     <div className={cn(
-                        "absolute bottom-10 text-[#f4a261] transition-all duration-300 ease-in-out -scale-x-100",
-                        canUnloadFromRight ? "-right-5 animate-pulse [animation-duration:0.5s]" : "-right-15 opacity-50"
+                        "absolute bottom-7.5 text-[#f4a261] transition-all duration-300 ease-in-out -scale-x-100",
+                        canUnloadFromRight ? "-right-5 animate-pulse [animation-duration:0.5s]" : "-right-14 opacity-50"
                     )}>
-                        <WarehouseDolly className="w-20 h-20" />
+                        <WarehouseDolly className="w-20 h-35" />
                     </div>
+
+
                     <div className="relative w-150 flex flex-col size-full items-center">
                         {/* VERTICAL SEPARATOR */}
                         {[1, 5, 9, 13].map((index) => (

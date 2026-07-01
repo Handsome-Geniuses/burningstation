@@ -87,7 +87,10 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
     const [meterIndex, setMeterIndex] = React.useState<number | null>(null)
     const middleMeterIp = meterIndex === null ? undefined : metersReady[meterIndex]
     const isManual = systemState.mode == "manual"
-    const isReadyForPhysical = isManual && systemState.mds[3] && systemState.mds[4] && systemState.mds[5]
+    const isPhysicalRunning = Object.values(systemState.meters).some(
+        meter => meter.current_action === "physical_cycle_all"
+    )
+    const isReadyForPhysical = isManual && systemState.mds[3] && systemState.mds[4] && systemState.mds[5] && !isPhysicalRunning
 
     const blinkMeter = (meter_ip: string) => {
         flask.handleAction('program', 'neutral', { program: 'identify_until', meter_ip })
@@ -134,6 +137,8 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
     }
 
     const handleClick1 = () => {
+        if (isPhysicalRunning) return notify.info("Physical already running")
+
         const mds = systemState.mds
 
         // check if the middle three is on
@@ -172,7 +177,7 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
             <Button
                 onClick={handleClick1}
                 variant="outline"
-                disabled={!isManual}
+                disabled={!isManual || isPhysicalRunning}
                 className={cn(
                     "text-xs",
                     isReadyForPhysical && "animate-pulse border-primary bg-orange-500/40 hover:bg-orange-500/60 text-primary [animation-duration:0.5s]"
