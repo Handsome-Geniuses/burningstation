@@ -176,7 +176,7 @@ function BayGuessStrip({
     systemState,
 }: BayGuessStripProps) {
     return (
-        <div className="grid grid-cols-15 w-full gap-px">
+        <div className="grid grid-cols-15 w-full gap-px z-1">
             {Array.from({ length: 15 }).map((_, index) => (
                 <div
                     key={index}
@@ -232,22 +232,26 @@ export function StationVisualizer({
                         "absolute bottom-10 text-[#f4a261] transition-all duration-300 ease-in-out ",
                         canLoadFromLeft ? "-left-5 animate-pulse [animation-duration:0.5s]" : "-left-15 opacity-50"
                     )}>
-                        <WarehouseDolly className="w-20 h-20"/>
+                        <WarehouseDolly className="w-20 h-20" />
                     </div>
 
-                     <div className={cn(
+                    <div className={cn(
                         "absolute bottom-10 text-[#f4a261] transition-all duration-300 ease-in-out -scale-x-100",
                         canUnloadFromRight ? "-right-5 animate-pulse [animation-duration:0.5s]" : "-right-15 opacity-50"
                     )}>
-                        <WarehouseDolly className="w-20 h-20"/>
+                        <WarehouseDolly className="w-20 h-20" />
                     </div>
                     <div className="relative w-150 flex flex-col size-full items-center">
                         {/* VERTICAL SEPARATOR */}
                         {[1, 5, 9, 13].map((index) => (
                             <div
                                 key={index}
-                                className="pointer-events-none absolute top-0 bottom-0 z-0 w-px bg-black/10"
-                                style={{ left: `${((index + 0.5) / 15) * 100}%` }}
+                                className="pointer-events-none absolute top-0 bottom-0 z-0 w-[2px] opacity-15"
+                                style={{
+                                    left: `${((index + 0.5) / 15) * 100}%`,
+                                    backgroundImage:
+                                        "repeating-linear-gradient(to bottom, rgba(0,0,0,1) 0 10px, transparent 10px 18px)",
+                                }}
                             />
                         ))}
 
@@ -262,11 +266,11 @@ export function StationVisualizer({
                             return (
                                 <div
                                     key={meter.ip}
-                                    className="absolute top-0 w-fit h-38 -translate-x-1/2 transition-[left] duration-300 ease-in-out flex justify-center items-end"
+                                    className="z-1 absolute top-0 w-fit h-38 -translate-x-1/2 transition-[left] duration-300 ease-in-out flex justify-center items-end"
                                     style={{ left: `${((centerIndex + 0.5) / 15) * 100}%` }}
                                 >
                                     <MeterCard
-                                        className="px-6"
+                                        className="px-6 z-1"
                                         meter={meter}
                                         onSelected={onMeterSelected}
                                     />
