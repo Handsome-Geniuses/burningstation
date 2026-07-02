@@ -129,6 +129,41 @@ const LoadingMeter = () => {
     )
 }
 
+const UnloadingMeter = () => {
+    const { run, running } = useAsyncAction()
+    const { systemState } = useStoreContext()
+    const bayStatus = Array.from({ length: 3 }, (_, i) =>
+        systemState.mds.slice(i * 3, i * 3 + 3).some(Boolean)
+    )
+
+    const onUnload = run(async () => {
+        try {
+            const res = await flask.handleAction("sim", "unload_mock_meter")
+            const payload = await res.json()
+
+            if (!res.ok) {
+                throw new Error(payload?.error ?? `Failed to unload mock meter (${res.status})`)
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to unload mock meter"
+            notify.error(msg)
+        }
+    })
+
+    return (
+        <PGCard label="Unloading Meter" desc="remove belt meter and disconnect mock">
+            <Button
+                variant="outline"
+                className="w-full"
+                disabled={running || !bayStatus[2]}
+                onClick={onUnload}
+            >
+                Unload Meter
+            </Button>
+        </PGCard>
+    )
+}
+
 const AddFakeMeterSim = () => {
     const { run, running } = useAsyncAction()
     const onAdd = run(async () => {
@@ -228,6 +263,7 @@ export const PlaygroundTab = () => {
             <LogMeters />
             <MeterBayToggleSim />
             <LoadingMeter/>
+            <UnloadingMeter/>
         </div>
     )
 }

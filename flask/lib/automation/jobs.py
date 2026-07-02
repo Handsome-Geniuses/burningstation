@@ -127,6 +127,7 @@ class JobState(SharedState):
         self.current_device = None
         self.device_results.clear()
         self.device_meta.clear()
+        self.extras.clear()
 
 # Registry of jobs and threads
 _states: Dict[str, JobState] = {}

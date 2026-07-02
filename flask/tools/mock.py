@@ -8,6 +8,7 @@ from lib.meter.ssh_meter import SSHMeter
 from lib.system import sim
 from lib.sse.sse_queue_manager import SSEQM as master
 from lib.system.belt_logic import boxes_to_sensors, sensors_to_boxes, step_boxes
+from lib.system.states import states
 
 from lib.gpio import rm, mdm
 
@@ -195,6 +196,53 @@ def wipe_mock_meters():
     return {"status": "wiped", "count": len(hosts), "ips": hosts}
 
 
+def _host_sort_key(host: str):
+    try:
+        return int(host.rsplit(".", 1)[-1])
+    except ValueError:
+        return -1
+
+
+def _rightmost_mock_meter_ip():
+    bay_guess = states.get("bayGuess", [])
+    for host in reversed(bay_guess):
+        if host in _mock_meter_ips and host in mm.meters:
+            return host
+
+    active_hosts = [host for host in _mock_meter_ips if host in mm.meters]
+    if not active_hosts:
+        return None
+
+    return max(active_hosts, key=_host_sort_key)
+
+
+def disconnect_mock_meter(host: str | None = None):
+    host = host or _rightmost_mock_meter_ip()
+    if not host:
+        return {"status": "not_found", "ip": None}
+
+    _mock_meter_ips.discard(host)
+    _mock_stop_passive_job(host)
+    _mock_stop_physical_job(host)
+
+    threshold = getattr(mm, "_METERMANAGER__STALE_THRESHOLD", 2)
+    if host in mm.meters:
+        for _ in range(threshold):
+            mm.stale_meter(host)
+
+    return {"status": "disconnected", "ip": host}
+
+
+def unload_mock_meter(host: str | None = None):
+    unload_result = _original_sim_on_action("meter", type=14)
+    disconnect_result = disconnect_mock_meter(host)
+    return {
+        "status": "unloaded",
+        "unload": unload_result[0] if isinstance(unload_result, tuple) else unload_result,
+        "disconnect": disconnect_result,
+    }
+
+
 # ================================================================
 # Sim / scanner hooks
 # ================================================================
@@ -207,6 +255,8 @@ def _mock_get_ips(*args, **kwargs):
 def _mock_sim_on_action(action, **kwargs):
     if action == "mock_meter":
         return add_mock_meter(kwargs.get("host")), 200
+    if action == "unload_mock_meter":
+        return unload_mock_meter(kwargs.get("host")), 200
     if action == "wipe_mock_meters":
         return wipe_mock_meters(), 200
     if action == "list_meters":

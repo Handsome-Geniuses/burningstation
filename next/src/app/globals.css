@@ -75,3 +75,49 @@
 .scrollbar-hide::-webkit-scrollbar {
     display: none;
 }
+
+/* @keyframes meter-shake {
+    0%, 100% {
+        transform: translateX(0);
+    }
+
+    15%, 45%, 75% {
+        transform: translateX(calc(4px));
+    }
+
+    30%, 60%, 90% {
+        transform: translateX(calc(-4px));
+    }
+} */
+
+
+@keyframes meter-shake {
+    0% {
+        transform: translateX(0);
+    }
+
+    25% {
+        transform: translateX(50px);
+    }
+
+    /* snap back */
+    26% {
+        transform: translateX(0);
+    }
+
+    35%, 55%, 75%, 95% {
+        transform: translateX(4px);
+    }
+
+    45%, 65%, 85% {
+        transform: translateX(-4px);
+    }
+
+    100% {
+        transform: translateX(0);
+    }
+}
+
+.animate-meter-shake {
+    animation: meter-shake 1s ease-in-out;
+}

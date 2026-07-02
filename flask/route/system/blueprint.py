@@ -15,6 +15,7 @@ from lib.system import sim,override,station,program
 from lib import database
 
 from lib.store import store
+from lib.sse.sse_queue_manager import SSEQM
 bp = flask.Blueprint("hello", __name__)
 
 # ================================================================
@@ -224,7 +225,8 @@ def set_settings():
         return {"error": "No JSON body provided"}, 400
 
     try:
-        store.set_from_dict(data)
+        settings = store.set_from_dict(data)
+        SSEQM.broadcast("settings", settings.model_dump())
         return {"status": "ok"}
     except Exception as e:
         return {"error": str(e)}, 400
@@ -238,6 +240,7 @@ def update_settings():
 
     try:
         updated = store.update_from_dict(data)
+        SSEQM.broadcast("settings", updated.model_dump())
         return flask.jsonify(updated.model_dump())
     except Exception as e:
         return {"error": str(e)}, 400
@@ -250,6 +253,7 @@ def save_settings():
 @bp.post("/settings/reload")
 def reload_settings():
     settings = store.reload()
+    SSEQM.broadcast("settings", settings.model_dump())
     return flask.jsonify(settings.model_dump())
 
 

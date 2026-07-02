@@ -15,6 +15,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { useServerSettings } from "../settings/server-store";
 
 type SectionDividerProps = {
     label: string
@@ -41,6 +42,48 @@ function getExactBay1GuessIp(bayGuess: SystemState["bayGuess"]) {
     return ip && bay1Guess.every(slot => slot === ip) ? ip : undefined
 }
 
+function getExactGuessIpAt(bayGuess: SystemState["bayGuess"], start: number) {
+    const guess = bayGuess.slice(start, start + 3)
+    const [ip] = guess
+
+    return ip && guess.every(slot => slot === ip) ? ip : undefined
+}
+
+function getExactLoadGuessIp(bayGuess: SystemState["bayGuess"]) {
+    return getExactGuessIpAt(bayGuess, 0) ?? getExactGuessIpAt(bayGuess, 1)
+}
+
+function getBooleanOption(
+    settings: Record<string, unknown> | null | undefined,
+    sectionKey: string,
+    optionKey: string,
+    fallback: boolean
+) {
+    if (!settings) return fallback
+    const section = settings[sectionKey]
+    if (!section || typeof section !== "object" || Array.isArray(section)) return fallback
+
+    const value = (section as Record<string, unknown>)[optionKey]
+    return typeof value === "boolean" ? value : fallback
+}
+
+async function loadMeter(systemState: SystemState, meterIp: string) {
+    await flask.handleAction('station', 'load', { type: 'L', meter_ip: meterIp })
+
+    if (systemState.mode === "auto") {
+        flask.handleAction('program', 'neutral', {
+            program: 'start_passive_job',
+            meter_ip: meterIp,
+        })
+    }
+}
+
+function startPhysicalJob(meterIp: string) {
+    flask.handleAction('program', 'manual', {
+        program: 'start_physical_job',
+        meter_ip: meterIp,
+    })
+}
 
 const JobsDivider = ({ isManual }: { isManual: boolean }) => {
     return (
@@ -82,11 +125,21 @@ const RobotDivider = ({ isManual }: { isManual: boolean }) => {
     )
 }
 
-const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
+const MeterMiddlePhysical = ({
+    physicalCheck,
+    systemState,
+}: {
+    physicalCheck: boolean
+    systemState: SystemState
+}) => {
     const [metersReady, setMetersReady] = React.useState<string[]>([])
     const [meterIndex, setMeterIndex] = React.useState<number | null>(null)
     const middleMeterIp = meterIndex === null ? undefined : metersReady[meterIndex]
     const isManual = systemState.mode == "manual"
+    const isPhysicalRunning = Object.values(systemState.meters).some(
+        meter => meter.current_action === "physical_cycle_all"
+    )
+    const isReadyForPhysical = isManual && systemState.mds[3] && systemState.mds[4] && systemState.mds[5] && !isPhysicalRunning
 
     const blinkMeter = (meter_ip: string) => {
         flask.handleAction('program', 'neutral', { program: 'identify_until', meter_ip })
@@ -123,16 +176,15 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
 
         notify.success("Middle found")
         await stopBlinkMeter(middleMeterIp)
-        flask.handleAction('program', 'manual', {
-            program: 'start_physical_job',
-            meter_ip: middleMeterIp,
-        })
+        startPhysicalJob(middleMeterIp)
 
         setMeterIndex(null)
         setMetersReady([])
     }
 
     const handleClick1 = () => {
+        if (isPhysicalRunning) return notify.info("Physical already running")
+
         const mds = systemState.mds
 
         // check if the middle three is on
@@ -146,6 +198,12 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
         if (!meters.length) return notify.info("No ready meters found")
 
         const bay1GuessIp = getExactBay1GuessIp(systemState.bayGuess)
+
+        if (!physicalCheck && bay1GuessIp && meters.some(meter => meter.ip === bay1GuessIp)) {
+            startPhysicalJob(bay1GuessIp)
+            return
+        }
+
         const prioritizedMeters = bay1GuessIp && meters.some(meter => meter.ip === bay1GuessIp)
             ? [
                 ...meters.filter(meter => meter.ip === bay1GuessIp),
@@ -171,8 +229,11 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
             <Button
                 onClick={handleClick1}
                 variant="outline"
-                disabled={!isManual}
-                className="text-xs"
+                disabled={!isManual || isPhysicalRunning}
+                className={cn(
+                    "text-xs",
+                    isReadyForPhysical && "animate-pulse border-primary bg-orange-500/40 hover:bg-orange-500/60 text-primary [animation-duration:0.5s]"
+                )}
             >
                 Physical
             </Button>
@@ -195,10 +256,17 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
     )
 }
 
-export function LoadMeter({ systemState }: { systemState: SystemState } & React.ComponentProps<"div">) {
+export function LoadMeter({
+    loadCheck,
+    systemState,
+}: {
+    loadCheck: boolean
+    systemState: SystemState
+} & React.ComponentProps<"div">) {
     const [metersReady, setMetersReady] = React.useState<string[]>([])
     const [meterIndex, setMeterIndex] = React.useState<number | null>(null)
     const mds = systemState.mds
+    const isReadyToLoad = (mds[0] || mds[1]) && !mds[2]
     const loadingMeterIp = meterIndex === null ? undefined : metersReady[meterIndex]
 
     const blinkMeter = (meter_ip: string) => {
@@ -235,21 +303,14 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
         if (!loadingMeterIp) return
 
         await stopBlinkMeter(loadingMeterIp)
-        await flask.handleAction('station', 'load', { type: 'L', meter_ip: loadingMeterIp })
-
-        if (systemState.mode === "auto") {
-            flask.handleAction('program', 'neutral', {
-                program: 'start_passive_job',
-                meter_ip: loadingMeterIp,
-            })
-        }
+        await loadMeter(systemState, loadingMeterIp)
 
         setMeterIndex(null)
         setMetersReady([])
     }
 
     const handleClick = () => {
-        if (!mds[0] || mds[2]) {
+        if (!isReadyToLoad) {
             notify.info("nothing to load")
             return
         }
@@ -260,6 +321,12 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
 
         if (!meters.length) return notify.info("No ready meters found")
 
+        const loadGuessIp = getExactLoadGuessIp(systemState.bayGuess)
+        if (!loadCheck && loadGuessIp && meters.some(meter => meter.ip === loadGuessIp)) {
+            void loadMeter(systemState, loadGuessIp)
+            return
+        }
+
         setMetersReady(meters.map(meter => meter.ip))
         setMeterIndex(0)
         blinkMeter(meters[0].ip)
@@ -269,7 +336,10 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
         <>
             <Button
                 variant="outline"
-                className="text-xs"
+                className={cn(
+                    "text-xs",
+                    isReadyToLoad && "animate-pulse border-primary bg-orange-500/40 hover:bg-orange-500/60 text-primary [animation-duration:0.5s] transition-all"
+                )}
                 onClick={handleClick}
                 disabled={false}
             >
@@ -294,6 +364,9 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
 
 export function ControlsPanel({ systemState, className }: { systemState: SystemState } & React.ComponentProps<"div">) {
     const isManual = systemState.mode == "manual"
+    const { values: serverSettings } = useServerSettings()
+    const loadCheck = getBooleanOption(serverSettings, "flow", "load_check", true)
+    const physicalCheck = getBooleanOption(serverSettings, "flow", "physical_check", true)
 
     return (
         <div className={cn(PANEL, className)}>
@@ -307,10 +380,10 @@ export function ControlsPanel({ systemState, className }: { systemState: SystemS
                 {/* <JobsDivider isManual={isManual} /> */}
                 <RobotDivider isManual={isManual} />
 
-                <SectionDivider label="press me" className="pt-4" />
+                <SectionDivider label="programs" className="pt-4" />
                 <div className="grid grid-cols-2 gap-2 pt-2">
-                    <MeterMiddlePhysical systemState={systemState} />
-                    <LoadMeter systemState={systemState} />
+                    <MeterMiddlePhysical physicalCheck={physicalCheck} systemState={systemState} />
+                    <LoadMeter loadCheck={loadCheck} systemState={systemState} />
                 </div>
             </div>
         </div>

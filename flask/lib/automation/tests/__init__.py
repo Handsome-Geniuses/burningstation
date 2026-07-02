@@ -74,11 +74,8 @@ _PROGRAM_MONITORS = {
     "test_keypad":       [("keypad",  {"inactivity_timeout_s": 15.0, "count": 1})],
     "test_nfc_read":     [("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
     "test_robot_nfc_read":  [("nfc",  {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
-    "test_robot_keypad":    [("robot_keypad",  {"buttons": ["0", "1", "2", "3"]})],
-    "physical_cycle_all":   [
-        # ("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
-        ("robot_keypad", {"inactivity_timeout_s": 40})
-    ]
+    "test_robot_keypad":    [],
+    "physical_cycle_all":   []
 }
 
 def _build_alias_index(registry):

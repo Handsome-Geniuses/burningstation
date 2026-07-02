@@ -15,8 +15,8 @@ from lib.utils import secrets
 
 
 RETRY_INTERVAL_S = 2.0
-NOTIFY_INTERVAL_S = 30.0
-MOVE_CONFIRM_TIMEOUT_S = 45.0
+NOTIFY_INTERVAL_S = 6.0
+MOVE_CONFIRM_TIMEOUT_S = 120.0
 
 
 class AutoCoordinator:
@@ -55,8 +55,8 @@ class AutoCoordinator:
             return False
         return meter_ip in mm.meters
 
-    def _notify(self, msg: str, ntype: str = "info"):
-        SSEQM.broadcast("notify", {"ntype": ntype, "msg": msg})
+    def _notify(self, msg: str, ntype: str = "info", **kwargs):
+        SSEQM.broadcast("notify", {"ntype": ntype, "msg": msg, **kwargs})
 
     def _wait_for_precheck(self, meter_ip: str, bay_name: str, precheck: Callable[[], object]) -> bool:
         last_notify = 0.0
@@ -68,7 +68,13 @@ class AutoCoordinator:
             now = time.time()
             if now - last_notify >= NOTIFY_INTERVAL_S:
                 reason = result[0] if isinstance(result, tuple) else result
-                self._notify(f"Auto waiting for {bay_name}: {reason}")
+                self._notify(
+                    f"Auto waiting for {bay_name}: {reason}",
+                    auto_event="waiting",
+                    bay_name=bay_name,
+                    meter_ip=meter_ip,
+                    reason=str(reason),
+                )
                 last_notify = now
 
             time.sleep(RETRY_INTERVAL_S)
@@ -100,6 +106,12 @@ class AutoCoordinator:
     def _bay_guess_at_left(self, meter_ip: str, left: int) -> bool:
         bay_guess = states.get("bayGuess", [None] * 15)
         return all(slot == meter_ip for slot in bay_guess[left:left + 3])
+
+    def _exact_bay_guess_ip(self, bay_index: int) -> str | None:
+        start = BAY_GUESS_BAY_STARTS[bay_index]
+        bay_guess = states.get("bayGuess", [None] * 15)[start:start + 3]
+        ip = bay_guess[0] if bay_guess else None
+        return ip if ip and all(slot == ip for slot in bay_guess) else None
 
     def _wait_for_bay(self, meter_ip: str, bay_index: int) -> bool:
         deadline = time.time() + MOVE_CONFIRM_TIMEOUT_S
@@ -245,6 +257,11 @@ class AutoCoordinator:
         if not candidate_ips:
             self._notify("Auto physical paused; no ready meters to confirm", "warn")
             return None
+
+        if not store.settings.flow.physical_check:
+            bay1_guess_ip = self._exact_bay_guess_ip(1)
+            if bay1_guess_ip in candidate_ips:
+                return bay1_guess_ip
 
         for index, candidate_ip in enumerate(candidate_ips):
             if not self._flow_active(meter_ip):

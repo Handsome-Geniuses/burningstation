@@ -5,6 +5,8 @@ import { notify } from "@/lib/notify"
 import { Question, QuestionProps } from "./question"
 import { LoadingGif } from "@/components/ui/loading-gif"
 import { useCountdown } from "@/hooks/useCountdown"
+import { useClientSettings } from "../tabs/settings/client/store"
+import { broadcastServerSettingsChange } from "../tabs/settings/server-store"
 
 export interface StoreContextProps {
     systemState: SystemState
@@ -16,15 +18,49 @@ export interface StoreProviderProps {
     children: React.ReactNode
 }
 
+function getClientBooleanOption(
+    settings: Record<string, unknown>,
+    sectionKey: string,
+    optionKey: string,
+    fallback: boolean
+) {
+    const section = settings[sectionKey]
+    if (!section || typeof section !== "object" || Array.isArray(section)) return fallback
+
+    const value = (section as Record<string, unknown>)[optionKey]
+    return typeof value === "boolean" ? value : fallback
+}
+
+function isRoutineAutoNotification(msg: unknown, ntype: unknown) {
+    if (typeof msg !== "string" || !msg.startsWith("Auto ")) return false
+    return ntype !== "warn" && ntype !== "error"
+}
+
+function emitAutoBayEvent(payload: unknown) {
+    if (typeof window === "undefined") return
+    if (!payload || typeof payload !== "object") return
+
+    const eventPayload = payload as Record<string, unknown>
+    if (typeof eventPayload.auto_event !== "string") return
+
+    window.dispatchEvent(new CustomEvent("bs-auto-bay-event", { detail: eventPayload }))
+}
+
 export const StoreProvider = ({ children }: StoreProviderProps) => {
     const [systemState, systemDispatch] = useReducer(reducer, initialSystemState)
     const [question, setQuestion] = useState<QuestionProps | undefined>(undefined)
+    const { values: clientSettings } = useClientSettings()
 
     // Countdown to reconnect
     const [countdown, setCountdown] = useCountdown(flaskconnect) // flaskconnect defined later
 
     // Ref to hold EventSource
     const flasksse = useRef<EventSource | null>(null)
+    const clientSettingsRef = useRef(clientSettings)
+
+    useEffect(() => {
+        clientSettingsRef.current = clientSettings
+    }, [clientSettings])
 
     // Notify on emergency
     useEffect(() => {
@@ -51,9 +87,24 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         if (response == undefined) setQuestion({ title, msg, qtype, src, id, confirm, cancel })
         else setQuestion(undefined)
     }
+
     const onNotify = (payload: any) => {
         const { msg, ntype, description } = payload
-        notify.notice(ntype, msg, { description })
+        const notifyType = ntype === "warn" || ntype === "error" || ntype === "success" ? ntype : "info"
+        emitAutoBayEvent(payload)
+
+        const autoBayVerbose = getClientBooleanOption(
+            clientSettingsRef.current,
+            "visual_options",
+            "auto_bay_verbose",
+            true
+        )
+        if (!autoBayVerbose && isRoutineAutoNotification(msg, notifyType)) {
+            // Still receives the event; skip only the toast so this can drive animation later.
+            return
+        }
+
+        notify.notice(notifyType, msg, { description })
     }
     const onMeter = (payload: any) => {
         const { ip, alive, info } = payload ?? {}
@@ -115,6 +166,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             else if (event === 'devices') onDevices(payload)
             else if (event === 'progress') onProgress(payload)
             else if (event === 'status') onStatus(payload)
+            else if (event === 'settings') broadcastServerSettingsChange(payload)
         }
         flasksse.current.onerror = () => {
             console.log('Connection lost. Reconnecting...')
