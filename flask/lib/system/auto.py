@@ -107,6 +107,12 @@ class AutoCoordinator:
         bay_guess = states.get("bayGuess", [None] * 15)
         return all(slot == meter_ip for slot in bay_guess[left:left + 3])
 
+    def _exact_bay_guess_ip(self, bay_index: int) -> str | None:
+        start = BAY_GUESS_BAY_STARTS[bay_index]
+        bay_guess = states.get("bayGuess", [None] * 15)[start:start + 3]
+        ip = bay_guess[0] if bay_guess else None
+        return ip if ip and all(slot == ip for slot in bay_guess) else None
+
     def _wait_for_bay(self, meter_ip: str, bay_index: int) -> bool:
         deadline = time.time() + MOVE_CONFIRM_TIMEOUT_S
         while self._flow_active(meter_ip):
@@ -251,6 +257,11 @@ class AutoCoordinator:
         if not candidate_ips:
             self._notify("Auto physical paused; no ready meters to confirm", "warn")
             return None
+
+        if not store.settings.flow.physical_check:
+            bay1_guess_ip = self._exact_bay_guess_ip(1)
+            if bay1_guess_ip in candidate_ips:
+                return bay1_guess_ip
 
         for index, candidate_ip in enumerate(candidate_ips):
             if not self._flow_active(meter_ip):

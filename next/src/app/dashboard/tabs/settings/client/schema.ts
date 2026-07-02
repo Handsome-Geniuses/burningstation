@@ -155,17 +155,8 @@ const visual_options = Section(
     { description: "Controls more visual related options" }
 )
 
-const flow_options = Section(
-    {
-        load_check: Factory(true, { description: "Blink to confirm correct meter for loading" }),
-        physical_check: Factory(true, { description: "Blink meters to confirm middle meter for physical test." })
-    },
-    { description: "Flow related options" }
-)
-
 const clientSettingsDefinition = {
     visual_options,
-    flow_options
     // example_options
 } satisfies SettingsShape
 

@@ -18,7 +18,7 @@ import type {
 import { cn } from "@/lib/utils"
 
 export const HIDDEN_SECTIONS = new Set(["handsome"])
-export const SECTION_ORDER = ["passive", "physical"]
+export const SECTION_ORDER = ["flow", "passive", "physical", "other"]
 export const TABLE_COLUMNS = "grid grid-cols-[1fr_2fr_1fr_2fr] gap-4"
 export const TABLE_ROW = `${TABLE_COLUMNS} items-start border-t border-border px-4 py-3`
 export const TABLE_HEADER = `${TABLE_COLUMNS} border-b border-border bg-muted/40 px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground`

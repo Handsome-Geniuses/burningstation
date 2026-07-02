@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils"
 import { useStoreContext } from "../../store"
 import { ClientSettingsSection } from "./client/ClientSettingsSection"
 import { useClientSettings } from "./client/store"
+import { broadcastServerSettingsChange } from "./server-store"
 
 export const SettingsTab = () => {
     const { systemState } = useStoreContext()
@@ -50,6 +51,7 @@ export const SettingsTab = () => {
             setSchema(payload.schema)
             setValues(payload.values)
             setDraft(payload.values)
+            broadcastServerSettingsChange(payload.values)
         } catch (err) {
             const msg = err instanceof Error ? err.message : "Failed to load settings"
             setError(msg)

@@ -15,7 +15,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { useClientSettings } from "../settings/client/store";
+import { useServerSettings } from "../settings/server-store";
 
 type SectionDividerProps = {
     label: string
@@ -53,12 +53,13 @@ function getExactLoadGuessIp(bayGuess: SystemState["bayGuess"]) {
     return getExactGuessIpAt(bayGuess, 0) ?? getExactGuessIpAt(bayGuess, 1)
 }
 
-function getClientBooleanOption(
-    settings: Record<string, unknown>,
+function getBooleanOption(
+    settings: Record<string, unknown> | null | undefined,
     sectionKey: string,
     optionKey: string,
     fallback: boolean
 ) {
+    if (!settings) return fallback
     const section = settings[sectionKey]
     if (!section || typeof section !== "object" || Array.isArray(section)) return fallback
 
@@ -363,9 +364,9 @@ export function LoadMeter({
 
 export function ControlsPanel({ systemState, className }: { systemState: SystemState } & React.ComponentProps<"div">) {
     const isManual = systemState.mode == "manual"
-    const { values: clientSettings } = useClientSettings()
-    const loadCheck = getClientBooleanOption(clientSettings, "flow_options", "load_check", true)
-    const physicalCheck = getClientBooleanOption(clientSettings, "flow_options", "physical_check", true)
+    const { values: serverSettings } = useServerSettings()
+    const loadCheck = getBooleanOption(serverSettings, "flow", "load_check", true)
+    const physicalCheck = getBooleanOption(serverSettings, "flow", "physical_check", true)
 
     return (
         <div className={cn(PANEL, className)}>

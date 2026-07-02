@@ -1,12 +1,12 @@
 'use client'
 import React, { useRef, useEffect, useState, useReducer } from "react"
-import { Action, BAY_GUESS_BAY_STARTS, initialSystemState, MeterInfo, reducer, SystemState } from "./system"
+import { Action, initialSystemState, MeterInfo, reducer, SystemState } from "./system"
 import { notify } from "@/lib/notify"
 import { Question, QuestionProps } from "./question"
 import { LoadingGif } from "@/components/ui/loading-gif"
 import { useCountdown } from "@/hooks/useCountdown"
-import { flask } from "@/lib/flask"
 import { useClientSettings } from "../tabs/settings/client/store"
+import { broadcastServerSettingsChange } from "../tabs/settings/server-store"
 
 export interface StoreContextProps {
     systemState: SystemState
@@ -16,14 +16,6 @@ export const StoreContext = React.createContext<StoreContextProps | null>(null)
 
 export interface StoreProviderProps {
     children: React.ReactNode
-}
-
-function getExactBay1GuessIp(bayGuess: SystemState["bayGuess"]) {
-    const bay1Start = BAY_GUESS_BAY_STARTS[1]
-    const bay1Guess = bayGuess.slice(bay1Start, bay1Start + 3)
-    const [ip] = bay1Guess
-
-    return ip && bay1Guess.every(slot => slot === ip) ? ip : undefined
 }
 
 function getClientBooleanOption(
@@ -37,11 +29,6 @@ function getClientBooleanOption(
 
     const value = (section as Record<string, unknown>)[optionKey]
     return typeof value === "boolean" ? value : fallback
-}
-
-async function respondToQuestion(value: boolean) {
-    const res = await flask.post('/question/response', { body: JSON.stringify({ value }) })
-    if (!res.ok) notify.warn(`Auto question response failed: ${value}`)
 }
 
 function isRoutineAutoNotification(msg: unknown, ntype: unknown) {
@@ -69,12 +56,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
 
     // Ref to hold EventSource
     const flasksse = useRef<EventSource | null>(null)
-    const systemStateRef = useRef(systemState)
     const clientSettingsRef = useRef(clientSettings)
-
-    useEffect(() => {
-        systemStateRef.current = systemState
-    }, [systemState])
 
     useEffect(() => {
         clientSettingsRef.current = clientSettings
@@ -106,30 +88,6 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         else setQuestion(undefined)
     }
 
-    const maybeAnswerAutoPhysicalQuestion = (payload: any) => {
-        const { id, response } = payload
-        if (response !== undefined || typeof id !== "string" || !id.startsWith("auto-physical-")) {
-            return false
-        }
-
-        const physicalCheck = getClientBooleanOption(
-            clientSettingsRef.current,
-            "flow_options",
-            "physical_check",
-            true
-        )
-        if (physicalCheck) return false
-
-        const candidateIp = id.slice("auto-physical-".length)
-        const state = systemStateRef.current
-        const bay1GuessIp = getExactBay1GuessIp(state.bayGuess)
-        const candidate = state.meters[candidateIp]
-
-        if (bay1GuessIp !== candidateIp || candidate?.status !== "ready") return false
-
-        void respondToQuestion(true)
-        return true
-    }
     const onNotify = (payload: any) => {
         const { msg, ntype, description } = payload
         const notifyType = ntype === "warn" || ntype === "error" || ntype === "success" ? ntype : "info"
@@ -203,13 +161,12 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             if (event === 'keep-alive') return
             else if (event === 'state') onState(payload)
             else if (event === 'meter') onMeter(payload)
-            else if (event === 'question') {
-                if (!maybeAnswerAutoPhysicalQuestion(payload)) onQuestion(payload)
-            }
+            else if (event === 'question') onQuestion(payload)
             else if (event === 'notify') onNotify(payload)
             else if (event === 'devices') onDevices(payload)
             else if (event === 'progress') onProgress(payload)
             else if (event === 'status') onStatus(payload)
+            else if (event === 'settings') broadcastServerSettingsChange(payload)
         }
         flasksse.current.onerror = () => {
             console.log('Connection lost. Reconnecting...')
