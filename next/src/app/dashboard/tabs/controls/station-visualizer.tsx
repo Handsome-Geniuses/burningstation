@@ -9,6 +9,7 @@ import { MeterState, SystemState } from "../../store/system"
 import { PANEL_HEADER } from "./shared"
 import { MeterCard } from "./meter-card"
 import ToothedFrame, { ToothedFrameDirection as Direction } from "./tooth-frame"
+import { useClientSettings } from "../settings/client/store"
 
 
 export function WarehouseDolly({ className = "" }) {
@@ -66,6 +67,19 @@ function isMysterySensorTrigger(systemState: SystemState, bayGuessIndex: number)
     if (mdsIndex === -1) return false
 
     return systemState.mds[mdsIndex] && !systemState.bayGuess[bayGuessIndex]
+}
+
+function getClientBooleanOption(
+    settings: Record<string, unknown>,
+    sectionKey: string,
+    optionKey: string,
+    fallback: boolean
+) {
+    const section = settings[sectionKey]
+    if (!section || typeof section !== "object" || Array.isArray(section)) return fallback
+
+    const value = (section as Record<string, unknown>)[optionKey]
+    return typeof value === "boolean" ? value : fallback
 }
 
 function Roller({
@@ -204,6 +218,10 @@ export function StationVisualizer({
     systemState,
     onMeterSelected = () => { },
 }: StationVisualizerProps) {
+    const { values: clientSettings } = useClientSettings()
+    const showDollies = getClientBooleanOption(clientSettings, "visual_options", "dolly_visible", true)
+    const flashDollies = getClientBooleanOption(clientSettings, "visual_options", "dolly_flash", true)
+    const showBaySeparators = getClientBooleanOption(clientSettings, "visual_options", "bay_seprator", true)
     const canLoadFromLeft = systemState.mds[0] && !systemState.mds[2]
     const canUnloadFromRight = !systemState.mds[6] && systemState.mds[8]
 
@@ -231,24 +249,30 @@ export function StationVisualizer({
                 <div className="relative w-full flex justify-center">
 
                     {/* SIDE DOLLY'S FOR FUN */}
-                    <div className={cn(
-                        "absolute bottom-7.5 text-[#f4a261] transition-all duration-300 ease-in-out ",
-                        canLoadFromLeft ? "-left-5 animate-pulse [animation-duration:0.5s]" : "-left-14 opacity-50"
-                    )}>
-                        <WarehouseDolly className="w-20 h-35" />
-                    </div>
+                    {showDollies &&
+                        <div>
+                            <div className={cn(
+                                "absolute bottom-7.5 text-[#f4a261] transition-all duration-300 ease-in-out ",
+                                canLoadFromLeft ? "-left-5" : "-left-14 opacity-50",
+                                canLoadFromLeft && flashDollies && "animate-pulse [animation-duration:0.5s]"
+                            )}>
+                                <WarehouseDolly className="w-20 h-35" />
+                            </div>
 
-                    <div className={cn(
-                        "absolute bottom-7.5 text-[#f4a261] transition-all duration-300 ease-in-out -scale-x-100",
-                        canUnloadFromRight ? "-right-5 animate-pulse [animation-duration:0.5s]" : "-right-14 opacity-50"
-                    )}>
-                        <WarehouseDolly className="w-20 h-35" />
-                    </div>
+                            <div className={cn(
+                                "absolute bottom-7.5 text-[#f4a261] transition-all duration-300 ease-in-out -scale-x-100",
+                                canUnloadFromRight ? "-right-5" : "-right-14 opacity-50",
+                                canUnloadFromRight && flashDollies && "animate-pulse [animation-duration:0.5s]"
+                            )}>
+                                <WarehouseDolly className="w-20 h-35" />
+                            </div>
+                        </div>
+                    }
 
 
                     <div className="relative w-150 flex flex-col size-full items-center">
                         {/* VERTICAL SEPARATOR */}
-                        {[1, 5, 9, 13].map((index) => (
+                        {showBaySeparators && [1, 5, 9, 13].map((index) => (
                             <div
                                 key={index}
                                 className="pointer-events-none absolute top-0 bottom-0 z-0 w-[2px] opacity-15"

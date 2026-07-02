@@ -16,12 +16,18 @@ import type { SchemaNode, SettingsObject, SettingsPayload, SettingsValue } from 
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { useStoreContext } from "../../store"
+import { ClientSettingsSection } from "./client/ClientSettingsSection"
+import { useClientSettings } from "./client/store"
 
 export const SettingsTab = () => {
     const { systemState } = useStoreContext()
     const isHandsome = systemState.handsome
+    const [settingsView, setSettingsView] = React.useState<"server" | "client">("server")
     
     const formRef = React.useRef<HTMLFormElement | null>(null)
+    const clientFormRef = React.useRef<HTMLFormElement | null>(null)
+    const clientSettings = useClientSettings()
+    const [clientDraft, setClientDraft] = React.useState<SettingsObject>(clientSettings.values)
     const [schema, setSchema] = React.useState<SchemaNode | null>(null)
     const [values, setValues] = React.useState<SettingsObject | null>(null)
     const [draft, setDraft] = React.useState<SettingsObject | null>(null)
@@ -58,6 +64,10 @@ export const SettingsTab = () => {
         fetchSettings()
     }, [fetchSettings])
 
+    React.useEffect(() => {
+        setClientDraft(clientSettings.values)
+    }, [clientSettings.values])
+
     const topLevelEntries = React.useMemo(() => {
         if (!schema?.properties) return []
 
@@ -78,8 +88,16 @@ export const SettingsTab = () => {
         return JSON.stringify(values) !== JSON.stringify(draft)
     }, [draft, values])
 
+    const isClientDirty = React.useMemo(() => {
+        return JSON.stringify(clientSettings.values) !== JSON.stringify(clientDraft)
+    }, [clientDraft, clientSettings.values])
+
     const onFieldChange = React.useCallback((path: string[], value: SettingsValue | "") => {
         setDraft((current) => (current ? setValueAtPath(current, path, value) : current))
+    }, [])
+
+    const onClientFieldChange = React.useCallback((path: string[], value: SettingsValue | "") => {
+        setClientDraft((current) => setValueAtPath(current, path, value))
     }, [])
 
     const onReset = () => {
@@ -126,6 +144,35 @@ export const SettingsTab = () => {
         }
     }
 
+    const onClientReset = () => {
+        setClientDraft(clientSettings.values)
+    }
+
+    const onClientReload = () => {
+        clientSettings.reload()
+        notify.success("Cockpit settings reloaded.")
+    }
+
+    const onClientResetDefaults = () => {
+        clientSettings.reset()
+        notify.success("Cockpit settings reset.")
+    }
+
+    const onClientSave = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        if (!clientFormRef.current?.reportValidity()) {
+            notify.warn("Please fix invalid cockpit settings values before saving.")
+            return
+        }
+
+        clientSettings.save(clientDraft)
+        notify.success("Cockpit settings saved.")
+    }
+
+    const toggleSettingsView = () => {
+        setSettingsView((current) => current === "server" ? "client" : "server")
+    }
+
     if (loading) {
         return (
             <div className="relative h-full min-h-80">
@@ -160,53 +207,96 @@ export const SettingsTab = () => {
                     "[&>div:hover]:bg-sidebar-primary"
                 )}
             />
-            <form onSubmit={onSave} ref={formRef} className=" select-none flex h-full min-h-0 flex-col gap-4  bg-background pb-4">
-                <div className="px-4 py-2 sticky top-0 inset-0 z-10 bg-background flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shadow">
-                    <div className="flex flex-col gap-0 space-y-0">
-                        <div className="text-lg font-semibold leading-6 z-20">Settings</div>
-                        <div className="pt-0 text-sm text-muted-foreground leading-4">
-                            {saving ? "Saving..." : reloading ? "Reloading..." : isDirty ? "Unsaved changes" : "Up to date"}
+            <div className="select-none flex h-full min-h-0 flex-col gap-4 bg-background pb-4">
+                <div className="flex flex-col gap-4">
+                    <div className="px-4 py-2 sticky top-0 inset-0 z-10 bg-background flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between shadow">
+                        <div className="flex flex-col gap-0 space-y-0">
+                            <button
+                                type="button"
+                                className="w-fit text-left text-lg font-semibold leading-6 z-20"
+                                onClick={toggleSettingsView}
+                            >
+                                Settings
+                            </button>
+                            <div className="pt-0 text-sm text-muted-foreground leading-4">
+                                {settingsView === "client"
+                                    ? "Client settings"
+                                    : saving ? "Saving..." : reloading ? "Reloading..." : isDirty ? "Unsaved changes" : "Up to date"}
+                            </div>
                         </div>
+
+                        {settingsView === "server" && (
+                            <div className="flex items-center gap-2">
+                                <Button type="button" variant="outline" onClick={onReset} disabled={!isDirty || saving || reloading}>
+                                    Reset
+                                </Button>
+                                <Button type="button" variant="outline" onClick={onReload} disabled={saving || reloading}>
+                                    Reload
+                                </Button>
+                                <Button type="submit" form="server-settings-form" disabled={!isDirty || saving || reloading}>
+                                    Save
+                                </Button>
+                            </div>
+                        )}
+
+                        {settingsView === "client" && (
+                            <div className="flex items-center gap-2">
+                                <Button type="button" variant="outline" onClick={onClientReset} disabled={!isClientDirty}>
+                                    Reset
+                                </Button>
+                                <Button type="button" variant="outline" onClick={onClientReload}>
+                                    Reload
+                                </Button>
+                                <Button type="button" variant="outline" onClick={onClientResetDefaults}>
+                                    Defaults
+                                </Button>
+                                <Button type="submit" form="client-settings-form" disabled={!isClientDirty}>
+                                    Save
+                                </Button>
+                            </div>
+                        )}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                        <Button type="button" variant="outline" onClick={onReset} disabled={!isDirty || saving || reloading}>
-                            Reset
-                        </Button>
-                        <Button type="button" variant="outline" onClick={onReload} disabled={saving || reloading}>
-                            Reload
-                        </Button>
-                        <Button type="submit" disabled={!isDirty || saving || reloading}>
-                            Save
-                        </Button>
-                    </div>
-                </div>
-                {error && (
-                    <div className="bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                        {error}
-                    </div>
-                )}
+                    {settingsView === "server" ? (
+                        <form id="server-settings-form" onSubmit={onSave} ref={formRef} className="flex flex-col gap-4">
+                            {error && (
+                                <div className="bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                                    {error}
+                                </div>
+                            )}
 
-                <Accordion type="multiple" className="flex flex-col gap-2 px-4">
-                    {topLevelEntries.map(([sectionKey, sectionNode]) => (
-                        <SectionCard
-                            key={sectionKey}
-                            sectionKey={sectionKey}
-                            node={sectionNode}
-                            value={draft[sectionKey]}
-                            rootSchema={schema}
-                            disabled={saving || reloading}
-                            onChange={onFieldChange}
+                            <Accordion type="multiple" className="flex flex-col gap-2 px-4">
+                                {topLevelEntries.map(([sectionKey, sectionNode]) => (
+                                    <SectionCard
+                                        key={sectionKey}
+                                        sectionKey={sectionKey}
+                                        node={sectionNode}
+                                        value={draft[sectionKey]}
+                                        rootSchema={schema}
+                                        disabled={saving || reloading}
+                                        onChange={onFieldChange}
+                                    />
+                                ))}
+                            </Accordion>
+
+                            {topLevelEntries.length === 0 && (
+                                <div className="px-4 pt-2 text-sm text-muted-foreground">
+                                    No supported settings sections were returned by the backend schema.
+                                </div>
+                            )}
+                        </form>
+                    ) : (
+                        <ClientSettingsSection
+                            draft={clientDraft}
+                            formId="client-settings-form"
+                            formRef={clientFormRef}
+                            schema={clientSettings.schema}
+                            onChange={onClientFieldChange}
+                            onSave={onClientSave}
                         />
-                    ))}
-                </Accordion>
-
-                {topLevelEntries.length === 0 && (
-                    <div className="pt-2 text-sm text-muted-foreground">
-                        No supported settings sections were returned by the backend schema.
-                    </div>
-                )}
-            </form>
+                    )}
+                </div>
+            </div>
         </ScrollArea>
     )
 }
