@@ -15,8 +15,8 @@ from lib.utils import secrets
 
 
 RETRY_INTERVAL_S = 2.0
-NOTIFY_INTERVAL_S = 30.0
-MOVE_CONFIRM_TIMEOUT_S = 45.0
+NOTIFY_INTERVAL_S = 6.0
+MOVE_CONFIRM_TIMEOUT_S = 120.0
 
 
 class AutoCoordinator:
@@ -55,8 +55,8 @@ class AutoCoordinator:
             return False
         return meter_ip in mm.meters
 
-    def _notify(self, msg: str, ntype: str = "info"):
-        SSEQM.broadcast("notify", {"ntype": ntype, "msg": msg})
+    def _notify(self, msg: str, ntype: str = "info", **kwargs):
+        SSEQM.broadcast("notify", {"ntype": ntype, "msg": msg, **kwargs})
 
     def _wait_for_precheck(self, meter_ip: str, bay_name: str, precheck: Callable[[], object]) -> bool:
         last_notify = 0.0
@@ -68,7 +68,13 @@ class AutoCoordinator:
             now = time.time()
             if now - last_notify >= NOTIFY_INTERVAL_S:
                 reason = result[0] if isinstance(result, tuple) else result
-                self._notify(f"Auto waiting for {bay_name}: {reason}")
+                self._notify(
+                    f"Auto waiting for {bay_name}: {reason}",
+                    auto_event="waiting",
+                    bay_name=bay_name,
+                    meter_ip=meter_ip,
+                    reason=str(reason),
+                )
                 last_notify = now
 
             time.sleep(RETRY_INTERVAL_S)

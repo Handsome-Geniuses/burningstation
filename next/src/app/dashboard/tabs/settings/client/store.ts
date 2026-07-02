@@ -11,6 +11,7 @@ import {
 } from "./schema"
 
 const CLIENT_SETTINGS_STORAGE_KEY = "bs-cockpit-settings"
+const CLIENT_SETTINGS_CHANGE_EVENT = "bs-cockpit-settings-change"
 
 function isObject(value: unknown): value is SettingsObject {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -73,6 +74,7 @@ function readStoredClientSettings(): ClientSettings {
 
 function writeStoredClientSettings(settings: ClientSettings) {
     window.localStorage.setItem(CLIENT_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+    window.dispatchEvent(new CustomEvent(CLIENT_SETTINGS_CHANGE_EVENT))
 }
 
 export function useClientSettings() {
@@ -88,6 +90,24 @@ export function useClientSettings() {
 
     React.useEffect(() => {
         reload()
+    }, [reload])
+
+    React.useEffect(() => {
+        const handleClientSettingsChange = () => {
+            reload()
+        }
+
+        const handleStorageChange = (event: StorageEvent) => {
+            if (event.key === CLIENT_SETTINGS_STORAGE_KEY) reload()
+        }
+
+        window.addEventListener(CLIENT_SETTINGS_CHANGE_EVENT, handleClientSettingsChange)
+        window.addEventListener("storage", handleStorageChange)
+
+        return () => {
+            window.removeEventListener(CLIENT_SETTINGS_CHANGE_EVENT, handleClientSettingsChange)
+            window.removeEventListener("storage", handleStorageChange)
+        }
     }, [reload])
 
     const save = React.useCallback((settings: ClientSettings | SettingsObject) => {

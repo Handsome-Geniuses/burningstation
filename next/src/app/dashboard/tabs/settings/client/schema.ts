@@ -149,7 +149,8 @@ const visual_options = Section(
     {
         dolly_visible: Factory(true, { description: "Show sliding dolly on controls page" }),
         dolly_flash: Factory(true, { description: "Flash dolly when meters in position" }),
-        bay_seprator: Factory(true, { description: "Show/hide visual bay lines" })
+        bay_seprator: Factory(true, { description: "Show/hide visual bay lines" }),
+        auto_bay_verbose: Factory(true, { description: "Show/hide bay related notifications" })
     },
     { description: "Controls more visual related options" }
 )

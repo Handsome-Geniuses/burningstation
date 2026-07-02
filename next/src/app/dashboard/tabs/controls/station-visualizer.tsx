@@ -1,4 +1,4 @@
-import { ComponentProps } from "react"
+import { ComponentProps, useEffect, useState } from "react"
 import { AccordionContent, AccordionItem } from "@/components/ui/accordion"
 import { AccordionTrigger } from "@radix-ui/react-accordion"
 
@@ -218,6 +218,7 @@ export function StationVisualizer({
     systemState,
     onMeterSelected = () => { },
 }: StationVisualizerProps) {
+    const [shakingMeterIp, setShakingMeterIp] = useState<string | null>(null)
     const { values: clientSettings } = useClientSettings()
     const showDollies = getClientBooleanOption(clientSettings, "visual_options", "dolly_visible", true)
     const flashDollies = getClientBooleanOption(clientSettings, "visual_options", "dolly_flash", true)
@@ -239,6 +240,21 @@ export function StationVisualizer({
         flask.handleAction("override", "motor", { value_list })
         handlePointerDown()
     }
+
+    useEffect(() => {
+        const handleAutoBayEvent = (event: Event) => {
+            const detail = (event as CustomEvent<Record<string, unknown>>).detail
+            if (detail?.auto_event !== "waiting" || typeof detail.meter_ip !== "string") return
+
+            setShakingMeterIp(detail.meter_ip)
+            window.setTimeout(() => {
+                setShakingMeterIp((current) => current === detail.meter_ip ? null : current)
+            }, 900)
+        }
+
+        window.addEventListener("bs-auto-bay-event", handleAutoBayEvent)
+        return () => window.removeEventListener("bs-auto-bay-event", handleAutoBayEvent)
+    }, [])
 
     return (
         <AccordionItem key="station" value="station">
@@ -295,7 +311,10 @@ export function StationVisualizer({
                             return (
                                 <div
                                     key={meter.ip}
-                                    className="z-1 absolute top-0 w-fit h-38 -translate-x-1/2 transition-[left] duration-300 ease-in-out flex justify-center items-end"
+                                    className={cn(
+                                        "z-1 absolute top-0 w-fit h-38 -translate-x-1/2 transition-[left] duration-300 ease-in-out flex justify-center items-end",
+                                        shakingMeterIp === meter.ip && "animate-meter-shake"
+                                    )}
                                     style={{ left: `${((centerIndex + 0.5) / 15) * 100}%` }}
                                 >
                                     <MeterCard

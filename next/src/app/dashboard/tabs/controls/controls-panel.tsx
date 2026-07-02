@@ -15,6 +15,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { useClientSettings } from "../settings/client/store";
 
 type SectionDividerProps = {
     label: string
@@ -41,6 +42,47 @@ function getExactBay1GuessIp(bayGuess: SystemState["bayGuess"]) {
     return ip && bay1Guess.every(slot => slot === ip) ? ip : undefined
 }
 
+function getExactGuessIpAt(bayGuess: SystemState["bayGuess"], start: number) {
+    const guess = bayGuess.slice(start, start + 3)
+    const [ip] = guess
+
+    return ip && guess.every(slot => slot === ip) ? ip : undefined
+}
+
+function getExactLoadGuessIp(bayGuess: SystemState["bayGuess"]) {
+    return getExactGuessIpAt(bayGuess, 0) ?? getExactGuessIpAt(bayGuess, 1)
+}
+
+function getClientBooleanOption(
+    settings: Record<string, unknown>,
+    sectionKey: string,
+    optionKey: string,
+    fallback: boolean
+) {
+    const section = settings[sectionKey]
+    if (!section || typeof section !== "object" || Array.isArray(section)) return fallback
+
+    const value = (section as Record<string, unknown>)[optionKey]
+    return typeof value === "boolean" ? value : fallback
+}
+
+async function loadMeter(systemState: SystemState, meterIp: string) {
+    await flask.handleAction('station', 'load', { type: 'L', meter_ip: meterIp })
+
+    if (systemState.mode === "auto") {
+        flask.handleAction('program', 'neutral', {
+            program: 'start_passive_job',
+            meter_ip: meterIp,
+        })
+    }
+}
+
+function startPhysicalJob(meterIp: string) {
+    flask.handleAction('program', 'manual', {
+        program: 'start_physical_job',
+        meter_ip: meterIp,
+    })
+}
 
 const JobsDivider = ({ isManual }: { isManual: boolean }) => {
     return (
@@ -82,7 +124,13 @@ const RobotDivider = ({ isManual }: { isManual: boolean }) => {
     )
 }
 
-const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
+const MeterMiddlePhysical = ({
+    physicalCheck,
+    systemState,
+}: {
+    physicalCheck: boolean
+    systemState: SystemState
+}) => {
     const [metersReady, setMetersReady] = React.useState<string[]>([])
     const [meterIndex, setMeterIndex] = React.useState<number | null>(null)
     const middleMeterIp = meterIndex === null ? undefined : metersReady[meterIndex]
@@ -127,10 +175,7 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
 
         notify.success("Middle found")
         await stopBlinkMeter(middleMeterIp)
-        flask.handleAction('program', 'manual', {
-            program: 'start_physical_job',
-            meter_ip: middleMeterIp,
-        })
+        startPhysicalJob(middleMeterIp)
 
         setMeterIndex(null)
         setMetersReady([])
@@ -152,6 +197,12 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
         if (!meters.length) return notify.info("No ready meters found")
 
         const bay1GuessIp = getExactBay1GuessIp(systemState.bayGuess)
+
+        if (!physicalCheck && bay1GuessIp && meters.some(meter => meter.ip === bay1GuessIp)) {
+            startPhysicalJob(bay1GuessIp)
+            return
+        }
+
         const prioritizedMeters = bay1GuessIp && meters.some(meter => meter.ip === bay1GuessIp)
             ? [
                 ...meters.filter(meter => meter.ip === bay1GuessIp),
@@ -204,7 +255,13 @@ const MeterMiddlePhysical = ({ systemState }: { systemState: SystemState }) => {
     )
 }
 
-export function LoadMeter({ systemState }: { systemState: SystemState } & React.ComponentProps<"div">) {
+export function LoadMeter({
+    loadCheck,
+    systemState,
+}: {
+    loadCheck: boolean
+    systemState: SystemState
+} & React.ComponentProps<"div">) {
     const [metersReady, setMetersReady] = React.useState<string[]>([])
     const [meterIndex, setMeterIndex] = React.useState<number | null>(null)
     const mds = systemState.mds
@@ -245,14 +302,7 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
         if (!loadingMeterIp) return
 
         await stopBlinkMeter(loadingMeterIp)
-        await flask.handleAction('station', 'load', { type: 'L', meter_ip: loadingMeterIp })
-
-        if (systemState.mode === "auto") {
-            flask.handleAction('program', 'neutral', {
-                program: 'start_passive_job',
-                meter_ip: loadingMeterIp,
-            })
-        }
+        await loadMeter(systemState, loadingMeterIp)
 
         setMeterIndex(null)
         setMetersReady([])
@@ -269,6 +319,12 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
             .reverse()
 
         if (!meters.length) return notify.info("No ready meters found")
+
+        const loadGuessIp = getExactLoadGuessIp(systemState.bayGuess)
+        if (!loadCheck && loadGuessIp && meters.some(meter => meter.ip === loadGuessIp)) {
+            void loadMeter(systemState, loadGuessIp)
+            return
+        }
 
         setMetersReady(meters.map(meter => meter.ip))
         setMeterIndex(0)
@@ -307,6 +363,9 @@ export function LoadMeter({ systemState }: { systemState: SystemState } & React.
 
 export function ControlsPanel({ systemState, className }: { systemState: SystemState } & React.ComponentProps<"div">) {
     const isManual = systemState.mode == "manual"
+    const { values: clientSettings } = useClientSettings()
+    const loadCheck = getClientBooleanOption(clientSettings, "flow_options", "load_check", true)
+    const physicalCheck = getClientBooleanOption(clientSettings, "flow_options", "physical_check", true)
 
     return (
         <div className={cn(PANEL, className)}>
@@ -322,8 +381,8 @@ export function ControlsPanel({ systemState, className }: { systemState: SystemS
 
                 <SectionDivider label="programs" className="pt-4" />
                 <div className="grid grid-cols-2 gap-2 pt-2">
-                    <MeterMiddlePhysical systemState={systemState} />
-                    <LoadMeter systemState={systemState} />
+                    <MeterMiddlePhysical physicalCheck={physicalCheck} systemState={systemState} />
+                    <LoadMeter loadCheck={loadCheck} systemState={systemState} />
                 </div>
             </div>
         </div>
