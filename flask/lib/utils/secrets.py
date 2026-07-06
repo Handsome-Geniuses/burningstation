@@ -9,4 +9,6 @@ class secrets:
     BASE = os.getenv("BASE", "192.168.169.")
     RANGE = list(map(int, os.getenv("RANGE", "2-254").split('-')))
     FUN = os.getenv("FUN", "0") == "1"
-    DBCS = os.getenv("DBCS",  "postgres://postgres:handsome@127.0.0.1:5432/postgres")
+    # DBCS = os.getenv("DBCS",  "postgres://postgres:handsome@127.0.0.1:5432/postgres")
+    DBCS = os.getenv("DBCS",  "postgres://postgres:handsome@192.168.9.20:5432/postgres")
+    # DBCS = os.getenv("DBCS",  "postgres://postgres:handsome@192.168.169.1:5432/postgres")

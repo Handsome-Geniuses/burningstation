@@ -172,7 +172,7 @@ def retrieve_jobs_filtered(
     date_start: Optional[date | str] = None,
     date_end: Optional[date | str] = None,
     meter_id: Optional[int] = None,
-    status: Optional[str] = None,
+    status: Optional[str | list[str]] = None,
     conn: None | psycopg.Connection = None,
 ):
     """
@@ -184,7 +184,7 @@ def retrieve_jobs_filtered(
         date_start: start date for created_at filter
         date_end: end date for created_at filter; if blank, uses date_start
         meter_id: optional meter_id filter
-        status: optional status filter ('pass' or 'fail' or others if needed)
+        status: optional status filter ('pass' or 'fail' or others if needed), or list of statuses
         conn: optional existing psycopg connection
 
     Returns:
@@ -220,8 +220,12 @@ def retrieve_jobs_filtered(
         params.append(meter_id)
 
     if status:
-        where_clauses.append("mj.status = %s")
-        params.append(status)
+        if isinstance(status, list):
+            where_clauses.append("mj.status = ANY(%s)")
+            params.append(status)
+        else:
+            where_clauses.append("mj.status = %s")
+            params.append(status)
 
     if where_clauses:
         query += " WHERE " + " AND ".join(where_clauses)
@@ -273,4 +277,3 @@ if __name__ == "__main__":
     jobs = retrieve_jobs(limit=10, offset=0)
     for row in jobs: row.pop("jctl", None)
     print(json.dumps(jobs, indent=4, default=str))
-
