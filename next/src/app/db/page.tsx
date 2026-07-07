@@ -28,7 +28,6 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { flask } from "@/lib/flask"
 import { notify } from "@/lib/notify"
@@ -63,6 +62,7 @@ type SortKey = "status" | "id" | "hostname" | "meter_id" | "name" | "created_at"
 type SortDirection = "asc" | "desc"
 type DataSectionKey = "kwargs" | "jctl"
 type ExportSectionKey = "results_json"
+type DetailTabKey = "results-simple" | "results-json" | "kwargs" | "journalctl"
 
 const coreColumns = [
     { key: "status", label: "Status" },
@@ -442,19 +442,12 @@ function copyText(text: string, label: string) {
     notify.info(`${label} copied`)
 }
 
-function JsonBlock({ label, value }: { label: string; value: unknown }) {
+function JsonBlock({ value }: { value: unknown }) {
     const text = typeof value === "string" ? value : JSON.stringify(value ?? {}, null, 2)
 
     return (
-        <section className="min-h-0">
-            <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">{label}</h3>
-                <Button variant="outline" size="sm" onClick={() => copyText(text, label)}>
-                    <ClipboardCopy />
-                    Copy
-                </Button>
-            </div>
-            <pre className="overflow-auto rounded-md border bg-muted/40 p-3 text-xs leading-relaxed">
+        <section className="flex h-full min-h-0 flex-col">
+            <pre className="min-h-0 max-w-full flex-1 overflow-auto rounded-md border bg-muted/40 p-2 text-xs leading-relaxed">
                 {text || "No data"}
             </pre>
         </section>
@@ -465,19 +458,8 @@ function ResultsSummary({ results }: { results?: MeterJob["data"]["results"] }) 
     const entries = Object.entries(results ?? {})
 
     return (
-        <section className="min-h-0">
-            <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">results</h3>
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => copyText(JSON.stringify(resultsObject(results), null, 2), "results")}
-                >
-                    <ClipboardCopy />
-                    Copy
-                </Button>
-            </div>
-            <div className="overflow-auto rounded-md border bg-muted/40 p-3 text-sm">
+        <section className="flex h-full min-h-0 flex-col">
+            <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-muted/40 p-3 text-sm">
                 {entries.length ? (
                     <div className="space-y-1">
                         {entries.map(([key, result]) => (
@@ -567,9 +549,16 @@ export default function Page() {
     const [visibleDataSections, setVisibleDataSections] = React.useState<Set<DataSectionKey>>(new Set(defaultDataSections))
     const [visibleExportSections, setVisibleExportSections] = React.useState<Set<ExportSectionKey>>(new Set(defaultExportSections))
     const [selectedJob, setSelectedJob] = React.useState<MeterJob | null>(null)
+    const [detailTab, setDetailTab] = React.useState<DetailTabKey>("results-simple")
     const [hasQueried, setHasQueried] = React.useState(false)
 
     const hasMore = jobs.length > 0 && jobs.length % activeFilters.limit === 0
+
+    React.useEffect(() => {
+        if (detailTab === "results-json" && !visibleExportSections.has("results_json")) setDetailTab("results-simple")
+        if (detailTab === "kwargs" && !visibleDataSections.has("kwargs")) setDetailTab("results-simple")
+        if (detailTab === "journalctl" && !visibleDataSections.has("jctl")) setDetailTab("results-simple")
+    }, [detailTab, visibleDataSections, visibleExportSections])
 
     const fetchJobs = React.useCallback(async (filters: QueryFilters, offset = 0) => {
         setLoading(true)
@@ -744,6 +733,24 @@ export default function Page() {
                 return job.name
             case "created_at":
                 return formatDate(job.created_at)
+        }
+    }
+
+    const copySelectedDetail = () => {
+        if (!selectedJob) return
+
+        switch (detailTab) {
+            case "results-simple":
+                copyText(JSON.stringify(simpleResultsObject(selectedJob.data?.results), null, 2), "results simple")
+                return
+            case "results-json":
+                copyText(JSON.stringify(resultsObject(selectedJob.data?.results), null, 2), "results")
+                return
+            case "kwargs":
+                copyText(JSON.stringify(selectedJob.data?.kwargs ?? {}, null, 2), "kwargs")
+                return
+            case "journalctl":
+                copyText(selectedJob.jctl ?? "", "journalctl")
         }
     }
 
@@ -972,21 +979,25 @@ export default function Page() {
             </div>
 
             <Dialog open={!!selectedJob} onOpenChange={(open) => !open && setSelectedJob(null)}>
-                <DialogContent className="grid h-[85vh] min-w-[85vw] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+                <DialogContent className="grid h-[85vh] min-w-[85vw] grid-rows-[auto_minmax(0,1fr)_auto] gap-2 overflow-hidden p-6">
                     {selectedJob && (
                         <>
-                            <DialogHeader>
-                                <DialogTitle className="flex flex-wrap items-center gap-2">
+                            <DialogHeader className="gap-1 space-y-0">
+                                <DialogTitle className="flex flex-wrap items-center gap-2 leading-tight">
                                     Job {selectedJob.id}
                                     <StatusPill status={selectedJob.status} />
                                 </DialogTitle>
-                                <DialogDescription>
+                                <DialogDescription className="text-xs">
                                     {selectedJob.hostname ?? `meter ${selectedJob.meter_id}`} - {selectedJob.name} - {formatDate(selectedJob.created_at)}
                                 </DialogDescription>
                             </DialogHeader>
-                            <ScrollArea className="min-h-0 pr-4">
-                                <Tabs defaultValue="results-simple" className="min-h-full">
-                                    <TabsList className="mb-2 flex h-auto w-full flex-wrap justify-start">
+                            <Tabs
+                                value={detailTab}
+                                onValueChange={(value) => setDetailTab(value as DetailTabKey)}
+                                className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1 overflow-hidden"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <TabsList className="flex h-8 flex-1 flex-wrap justify-start">
                                         <TabsTrigger value="results-simple">results simple</TabsTrigger>
                                         {visibleExportSections.has("results_json") && (
                                             <TabsTrigger value="results-json">results json</TabsTrigger>
@@ -998,30 +1009,32 @@ export default function Page() {
                                             <TabsTrigger value="journalctl">journalctl</TabsTrigger>
                                         )}
                                     </TabsList>
-                                    <TabsContent value="results-simple" className="min-h-0">
-                                        <ResultsSummary results={selectedJob.data?.results} />
+                                    <Button variant="outline" size="icon" onClick={copySelectedDetail} aria-label={`Copy ${detailTab}`}>
+                                        <ClipboardCopy />
+                                    </Button>
+                                </div>
+                                <TabsContent value="results-simple" className="h-full min-h-0 overflow-hidden">
+                                    <ResultsSummary results={selectedJob.data?.results} />
+                                </TabsContent>
+                                {visibleExportSections.has("results_json") && (
+                                    <TabsContent value="results-json" className="h-full min-h-0 overflow-hidden">
+                                        <JsonBlock
+                                            value={resultsObject(selectedJob.data?.results)}
+                                        />
                                     </TabsContent>
-                                    {visibleExportSections.has("results_json") && (
-                                        <TabsContent value="results-json" className="min-h-0">
-                                            <JsonBlock
-                                                label="results"
-                                                value={resultsObject(selectedJob.data?.results)}
-                                            />
-                                        </TabsContent>
-                                    )}
-                                    {visibleDataSections.has("kwargs") && (
-                                        <TabsContent value="kwargs" className="min-h-0">
-                                            <JsonBlock label="kwargs" value={selectedJob.data?.kwargs ?? {}} />
-                                        </TabsContent>
-                                    )}
-                                    {visibleDataSections.has("jctl") && (
-                                        <TabsContent value="journalctl" className="min-h-0">
-                                            <JsonBlock label="journalctl" value={selectedJob.jctl ?? ""} />
-                                        </TabsContent>
-                                    )}
-                                </Tabs>
-                            </ScrollArea>
-                            <DialogFooter>
+                                )}
+                                {visibleDataSections.has("kwargs") && (
+                                    <TabsContent value="kwargs" className="h-full min-h-0 overflow-hidden">
+                                        <JsonBlock value={selectedJob.data?.kwargs ?? {}} />
+                                    </TabsContent>
+                                )}
+                                {visibleDataSections.has("jctl") && (
+                                    <TabsContent value="journalctl" className="h-full min-h-0 overflow-hidden">
+                                        <JsonBlock value={selectedJob.jctl ?? ""} />
+                                    </TabsContent>
+                                )}
+                            </Tabs>
+                            <DialogFooter className="gap-0 pt-0">
                                 <DialogClose asChild>
                                     <Button variant="secondary">Close</Button>
                                 </DialogClose>
