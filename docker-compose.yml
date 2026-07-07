@@ -25,6 +25,7 @@ services:
         container_name: burn_station_next
         volumes:
             - ./next:/workspace
+            - /workspace/node_modules
         privileged: true
         ports:
             - "8010:8010"
