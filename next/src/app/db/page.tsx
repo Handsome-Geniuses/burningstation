@@ -327,7 +327,7 @@ async function exportToExcel(
     worksheet.eachRow((row, rowNumber) => {
         const rowFill = rowNumber > 1 && rowNumber % 2 === 0 ? "FFF3F4F6" : "FFFFFFFF"
 
-        row.eachCell((cell) => {
+        row.eachCell((cell, columnNumber) => {
             const columnKey = worksheet.getColumn(cell.col).key
             const statusStyle = columnKey === "status"
                 ? excelStatusStyle[String(cell.value) as JobStatus]
@@ -346,9 +346,9 @@ async function exportToExcel(
             }
             cell.border = {
                 top: rowNumber === 1 ? tableBorder : innerBorder,
-                right: cell.col === lastDataColumn ? tableBorder : isDetailColumn ? detailColumnBorder : innerBorder,
+                right: columnNumber === lastDataColumn ? tableBorder : isDetailColumn ? detailColumnBorder : innerBorder,
                 bottom: rowNumber === lastDataRow ? tableBorder : innerBorder,
-                left: cell.col === 1 ? tableBorder : isDetailColumn ? detailColumnBorder : innerBorder,
+                left: columnNumber === 1 ? tableBorder : isDetailColumn ? detailColumnBorder : innerBorder,
             }
 
             if (rowNumber > 1) {
@@ -623,7 +623,9 @@ export default function Page() {
         setDraftFilters((current) => ({
             ...current,
             dateStart,
-            dateEnd: current.dateEnd && dateStart && dateStart > current.dateEnd
+            dateEnd: !current.dateEnd && dateStart
+                ? dateStart
+                : current.dateEnd && dateStart && dateStart > current.dateEnd
                 ? dateStart
                 : current.dateEnd,
         }))
@@ -632,7 +634,9 @@ export default function Page() {
     const setDateEnd = (dateEnd: string) => {
         setDraftFilters((current) => ({
             ...current,
-            dateStart: current.dateStart && dateEnd && dateEnd < current.dateStart
+            dateStart: !current.dateStart && dateEnd
+                ? dateEnd
+                : current.dateStart && dateEnd && dateEnd < current.dateStart
                 ? dateEnd
                 : current.dateStart,
             dateEnd,
@@ -811,7 +815,7 @@ export default function Page() {
                                     />
                                 </label>
                                 <label className="space-y-1 md:w-[140px]">
-                                    <span className="text-xs font-medium text-muted-foreground">Page size</span>
+                                    <span className="text-xs font-medium text-muted-foreground">Fetch Size</span>
                                     <select
                                         value={draftFilters.limit}
                                         onChange={(event) => setDraftFilters((current) => ({ ...current, limit: Number(event.target.value) }))}
