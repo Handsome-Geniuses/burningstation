@@ -7,6 +7,7 @@ import { notify } from "@/lib/notify"
 import { cn } from "@/lib/utils"
 import React from "react"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { PromptNumpad } from "@/components/ui/prompt-numpad"
 
 
 
@@ -129,6 +130,41 @@ const LoadingMeter = () => {
     )
 }
 
+const UnloadingMeter = () => {
+    const { run, running } = useAsyncAction()
+    const { systemState } = useStoreContext()
+    const bayStatus = Array.from({ length: 3 }, (_, i) =>
+        systemState.mds.slice(i * 3, i * 3 + 3).some(Boolean)
+    )
+
+    const onUnload = run(async () => {
+        try {
+            const res = await flask.handleAction("sim", "unload_mock_meter")
+            const payload = await res.json()
+
+            if (!res.ok) {
+                throw new Error(payload?.error ?? `Failed to unload mock meter (${res.status})`)
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to unload mock meter"
+            notify.error(msg)
+        }
+    })
+
+    return (
+        <PGCard label="Unloading Meter" desc="remove belt meter and disconnect mock">
+            <Button
+                variant="outline"
+                className="w-full"
+                disabled={running || !bayStatus[2]}
+                onClick={onUnload}
+            >
+                Unload Meter
+            </Button>
+        </PGCard>
+    )
+}
+
 const AddFakeMeterSim = () => {
     const { run, running } = useAsyncAction()
     const onAdd = run(async () => {
@@ -211,6 +247,42 @@ const LogMeters = () => {
     )
 }
 
+const NumpadPromptPlayground = () => {
+    const [open, setOpen] = React.useState(false)
+    const [value, setValue] = React.useState<number | undefined>()
+    const [pendingValue, setPendingValue] = React.useState<number | undefined>()
+
+    return (
+        <PGCard
+            label="Numpad Prompt"
+            desc={`submitted: ${value ?? "empty"} | draft: ${pendingValue ?? "empty"}`}
+        >
+            <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setOpen(true)}
+            >
+                Open Numpad
+            </Button>
+            <PromptNumpad
+                open={open}
+                onOpenChange={setOpen}
+                value={value}
+                onChange={setPendingValue}
+                onCancel={() => {
+                    setPendingValue(undefined)
+                    notify.info("cancelled")
+                }}
+                onSubmit={(nextValue) => {
+                    setValue(nextValue)
+                    setPendingValue(undefined)
+                    notify.success(`submit: ${nextValue ?? "empty"}`)
+                }}
+            />
+        </PGCard>
+    )
+}
+
 export const PlaygroundTab = () => {
     const { systemState } = useStoreContext()
 
@@ -226,8 +298,10 @@ export const PlaygroundTab = () => {
             <RandomMeterSim />
             <AddFakeMeterSim />
             <LogMeters />
+            <NumpadPromptPlayground />
             <MeterBayToggleSim />
             <LoadingMeter/>
+            <UnloadingMeter/>
         </div>
     )
 }

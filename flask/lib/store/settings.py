@@ -50,6 +50,13 @@ class OtherSettings(BaseModel):
     auto_unload_r: int = Field(0, ge=0, le=2, description="will attempt to move the meter into unload position")
 
 # ==================================================================
+# Flow Settings
+# ==================================================================
+class FlowSettings(BaseModel):
+    load_check: bool = Field(True, description="blink to confirm correct meter for loading")
+    physical_check: bool = Field(True, description="blink meters to confirm middle meter for physical test")
+
+# ==================================================================
 # Handsome Settings - more elusive secret settings!
 # ==================================================================
 class PhysicalKeys(BaseModel):
@@ -67,10 +74,10 @@ class HandsomeSettings(BaseModel):
 class Settings(BaseModel):
     # dummy: DummySettings = Field(default_factory=DummySettings)
     handsome: HandsomeSettings = Field(default_factory=HandsomeSettings, description="secret settings")
+    flow: FlowSettings = Field(default_factory=FlowSettings, description="flow related options")
     other: OtherSettings = Field(default_factory=OtherSettings, description="miscellaneous")
     passive: PassiveSettings = Field(default_factory=PassiveSettings, description="parameters or testing locally on meter")
     physical: PhysicalSettings = Field(default_factory=PhysicalSettings, description="parameters for testing with robot and tools")
-
 
 
 

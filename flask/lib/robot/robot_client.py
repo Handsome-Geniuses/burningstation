@@ -197,6 +197,50 @@ class RobotClient:
         log.info("Program '%s' started with job_id = %s", name, job_id)
         return job_id
 
+    def request_button_retry(
+        self,
+        button_name: str,
+        *,
+        job_id: Optional[str] = None,
+        reason: str = "",
+        timeout: float = 3.0,
+    ):
+        params = {"button_name": button_name}
+        if job_id is not None:
+            params["job_id"] = job_id
+        if reason:
+            params["reason"] = reason
+        return self.send_command("request_button_retry", params=params, timeout=timeout)
+
+    def cancel_button_retry(
+        self,
+        button_name: str,
+        *,
+        job_id: Optional[str] = None,
+        reason: str = "",
+        timeout: float = 3.0,
+    ):
+        params = {"button_name": button_name}
+        if job_id is not None:
+            params["job_id"] = job_id
+        if reason:
+            params["reason"] = reason
+        return self.send_command("cancel_button_retry", params=params, timeout=timeout)
+
+    def finish_button_retries(
+        self,
+        *,
+        job_id: Optional[str] = None,
+        reason: str = "",
+        timeout: float = 3.0,
+    ):
+        params = {}
+        if job_id is not None:
+            params["job_id"] = job_id
+        if reason:
+            params["reason"] = reason
+        return self.send_command("finish_button_retries", params=params, timeout=timeout)
+
     def wait_for_event(self, event_name: str, job_id: Optional[str] = None, timeout: float = 30.0):
         """Wait up to `timeout` seconds for a specific event. Consumes the first match."""
         log.info("waiting for event '%s'%s with timeout=%s sec", event_name, f" on job {job_id}" if job_id else "", timeout)
@@ -286,7 +330,7 @@ if __name__ == "__main__":
         # #     print(f"  {ev['event']} | job_id={ev.get('job_id')} | data={ev.get('data')}")
 
         # print(client.send_command("get_system_status"))
-        print(client.send_command("get_charuco_frame"))
+        # print(client.send_command("get_charuco_frame"))
 
     except Exception as e:
         print("Error:", e)

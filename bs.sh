@@ -175,10 +175,10 @@ main() {
                 usage
                 exit 1
             fi
-            run_local_dev_mode "$1"
+            run_local_dev_mode "${1:-all}"
             ;;
         pull)
-            pull_updates
+            pull_updates "${1:-all}"
             ;;
         start)
             start_services "${1:-all}"

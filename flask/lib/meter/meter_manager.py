@@ -4,8 +4,8 @@ from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.meter.fun import send_fun_meter
 from lib.meter.ssh_meter import SSHMeter
 from lib.utils import secrets
-from lib.database import insert_sshmeter
-from lib.system.bay_guess import clear_meter, empty_bay_guess
+from lib.database import insert_sshmeter, update_meter_work_order
+from lib.system.bay_guess import bootstrap_bay0_partial_guess, clear_meter, empty_bay_guess
 from lib.system.states import states
 from prettyprint import STYLE, prettyprint as print
 
@@ -142,6 +142,24 @@ class METERMANAGER:
                         fg="#00aa00",
                     )
                     meter.db_id = meter_id
+                    work_order = states.get("workOrder")
+                    if work_order is not None:
+                        try:
+                            update_meter_work_order(meter_id, int(work_order))
+                            print(
+                                f"💾 [{hn}] work_order set to {work_order}",
+                                fg="#00aa00",
+                            )
+                        except Exception as e:
+                            print(f"⚠️ [{hn}] work_order update failed: {e}", fg="#880000")
+                            SSEQM.broadcast(
+                                "notify",
+                                {
+                                    "ntype": "error",
+                                    "msg": "Work order update failed",
+                                    "description": f"{hn} | {work_order}",
+                                },
+                            )
 
                 except Exception as e:
                     print(f"⚠️ [{hn}] database insert failed: {e}", fg="#880000")
@@ -150,6 +168,11 @@ class METERMANAGER:
                 # add to known meters
                 cls.meters[ip] = meter
                 cls.__meters.add(ip)
+                states["bayGuess"] = bootstrap_bay0_partial_guess(
+                    states.get("bayGuess", empty_bay_guess()),
+                    states.get("mds", []),
+                    cls.meters.keys(),
+                )
 
                 # send FUN data
                 # try: send_fun_meter(meter)
@@ -175,6 +198,7 @@ class METERMANAGER:
                         "info": meter.get_info(),
                     },
                 )
+                SSEQM.broadcast("state", key_payload("bayGuess", states["bayGuess"]))
                 return True
 
         except cls.__FINALLY:

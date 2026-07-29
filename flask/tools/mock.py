@@ -1,6 +1,7 @@
 from unittest.mock import patch
 import ip_scanner
 import time
+from datetime import datetime, timedelta, date
 
 from lib.automation.jobs import _handle_auto_job_done, _wait_for_middle_bay_full
 from lib.meter.meter_manager import METERMANAGER as mm
@@ -8,6 +9,8 @@ from lib.meter.ssh_meter import SSHMeter
 from lib.system import sim
 from lib.sse.sse_queue_manager import SSEQM as master
 from lib.system.belt_logic import boxes_to_sensors, sensors_to_boxes, step_boxes
+from lib.system.states import states
+from lib import database
 
 from lib.gpio import rm, mdm
 
@@ -72,6 +75,7 @@ MOCK_SYSTEM_VERSIONS = {"system_version": "48792", "system_sub_version": "31"}
 MOCK_RESOLUTION = "800x480"
 MOCK_STATUS_TEXT = "mock meter ready"
 MOCK_DB_ID = 1
+MOCK_JOB_COUNT = 30
 
 
 # ================================================================
@@ -160,6 +164,110 @@ def _mock_insert_meter_jobs(*args, **kwargs):
     return []
 
 
+def _mock_job_result_status(job_index: int, check_index: int):
+    pattern = job_index % 5
+    if pattern == 1 and check_index == 2:
+        return "fail"
+    if pattern == 2 and check_index in (1, 4):
+        return "missing"
+    if pattern == 3:
+        return "n/a"
+    if pattern == 4 and check_index in (0, 5):
+        return "n/a"
+    return "pass"
+
+
+def _mock_job_status(job_index: int):
+    statuses = ["pass", "fail", "missing", "n/a", "pass"]
+    return statuses[job_index % len(statuses)]
+
+
+def _build_mock_jobs():
+    names = ["cycle_all", "physical_cycle_all", "cycle_nfc", "cycle_modem", "test_robot_keypad"]
+    checks = ["printer", "nfc", "modem", "keypad", "coin_shutter", "call_in"]
+    now = datetime.now().replace(microsecond=0)
+    jobs = []
+
+    for index in range(MOCK_JOB_COUNT):
+        meter_id = (index % 6) + 1
+        results = {
+            check: {
+                "status": _mock_job_result_status(index, check_index),
+                "duration_s": round(0.8 + ((index + check_index) % 7) * 0.35, 2),
+                "message": f"mock {check} result",
+            }
+            for check_index, check in enumerate(checks)
+        }
+
+        status = _mock_job_status(index)
+        job_name = names[index % len(names)]
+        hostname = f"3000{meter_id:04d}"
+
+        jobs.append({
+            "id": MOCK_JOB_COUNT - index,
+            "meter_id": meter_id,
+            "hostname": hostname,
+            "name": job_name,
+            "status": status,
+            "data": {
+                "kwargs": {
+                    "meter_ip": f"192.168.9.{20 + meter_id}",
+                    "program": job_name,
+                    "mock": True,
+                },
+                "results": results,
+            },
+            "jctl": "\n".join([
+                f"[mock] starting {job_name} on {hostname}",
+                f"[mock] completed with status={status}",
+            ]),
+            "created_at": now - timedelta(hours=index * 3),
+        })
+
+    return jobs
+
+
+MOCK_JOBS = _build_mock_jobs()
+
+
+def _as_date(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def _mock_retrieve_jobs(limit=10, offset=0, conn=None):
+    return MOCK_JOBS[offset:offset + limit]
+
+
+def _mock_retrieve_jobs_filtered(
+    limit=10,
+    offset=0,
+    date_start=None,
+    date_end=None,
+    meter_id=None,
+    status=None,
+    conn=None,
+):
+    start = _as_date(date_start)
+    end = _as_date(date_end) if date_end else start
+
+    rows = MOCK_JOBS
+    if start:
+        rows = [row for row in rows if row["created_at"].date() >= start]
+    if end:
+        rows = [row for row in rows if row["created_at"].date() <= end]
+    if meter_id is not None:
+        rows = [row for row in rows if row["meter_id"] == meter_id]
+    if status:
+        statuses = status if isinstance(status, list) else [status]
+        rows = [row for row in rows if row["status"] in statuses]
+
+    return rows[offset:offset + limit]
+
+
 def add_mock_meter(host: str | None = None):
     host = host or _next_mock_meter_ip()
 
@@ -195,6 +303,53 @@ def wipe_mock_meters():
     return {"status": "wiped", "count": len(hosts), "ips": hosts}
 
 
+def _host_sort_key(host: str):
+    try:
+        return int(host.rsplit(".", 1)[-1])
+    except ValueError:
+        return -1
+
+
+def _rightmost_mock_meter_ip():
+    bay_guess = states.get("bayGuess", [])
+    for host in reversed(bay_guess):
+        if host in _mock_meter_ips and host in mm.meters:
+            return host
+
+    active_hosts = [host for host in _mock_meter_ips if host in mm.meters]
+    if not active_hosts:
+        return None
+
+    return max(active_hosts, key=_host_sort_key)
+
+
+def disconnect_mock_meter(host: str | None = None):
+    host = host or _rightmost_mock_meter_ip()
+    if not host:
+        return {"status": "not_found", "ip": None}
+
+    _mock_meter_ips.discard(host)
+    _mock_stop_passive_job(host)
+    _mock_stop_physical_job(host)
+
+    threshold = getattr(mm, "_METERMANAGER__STALE_THRESHOLD", 2)
+    if host in mm.meters:
+        for _ in range(threshold):
+            mm.stale_meter(host)
+
+    return {"status": "disconnected", "ip": host}
+
+
+def unload_mock_meter(host: str | None = None):
+    unload_result = _original_sim_on_action("meter", type=14)
+    disconnect_result = disconnect_mock_meter(host)
+    return {
+        "status": "unloaded",
+        "unload": unload_result[0] if isinstance(unload_result, tuple) else unload_result,
+        "disconnect": disconnect_result,
+    }
+
+
 # ================================================================
 # Sim / scanner hooks
 # ================================================================
@@ -207,6 +362,8 @@ def _mock_get_ips(*args, **kwargs):
 def _mock_sim_on_action(action, **kwargs):
     if action == "mock_meter":
         return add_mock_meter(kwargs.get("host")), 200
+    if action == "unload_mock_meter":
+        return unload_mock_meter(kwargs.get("host")), 200
     if action == "wipe_mock_meters":
         return wipe_mock_meters(), 200
     if action == "list_meters":
@@ -256,6 +413,31 @@ def _broadcast_mock_progress(meter_ip: str, program: str, current: int, total: i
         'total_cycles': total,
     })
 
+def _insert_mock_job(meter_ip: str, program: str):
+    meter = mm.get_meter(meter_ip)
+    if getattr(meter, "db_id", None) is None:
+        return
+
+    job_data = {
+        "name": program,
+        "status": "pass",
+        "data": {
+            "kwargs": {"mock": True},
+            "results": {
+                program: {
+                    "status": "pass",
+                    "fw": -1,
+                    "id": -1,
+                },
+            },
+        },
+    }
+    jctl = "\n".join([
+        f"[mock] starting {program} on {meter.hostname}",
+        "[mock] completed with status=pass",
+    ])
+    database.insert_meter_jobs(meter.db_id, [job_data], jctl)
+
 
 def _mock_start_physical_job(*args, **kwargs): 
     duration = 10
@@ -290,6 +472,7 @@ def _mock_start_physical_job(*args, **kwargs):
         _mock_physical_timers.pop(meter_ip, None)
         meter.status = "ready"
         master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': ''})
+        _insert_mock_job(meter_ip, "physical_cycle_all")
         _handle_auto_job_done(meter_ip, "physical_cycle_all")
 
     timer = threading.Timer(1.0, tick_physical)
@@ -337,6 +520,7 @@ def _mock_start_passive_job(*args, **kwargs):
         _mock_passive_timers.pop(meter_ip, None)
         meter.status = "ready"
         master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': ''})
+        _insert_mock_job(meter_ip, "cycle_all")
         _handle_auto_job_done(meter_ip, "cycle_all")
 
     timer = threading.Timer(1.0, tick_passive)
@@ -385,10 +569,10 @@ def _install_patches():
     print("!!!! installing mock patches")
     strictly_virtual = True
     station_connected = False
+    mock_database = False
 
     # stuff that is strictly virtual
     if strictly_virtual:
-        patch("lib.meter.meter_manager.insert_sshmeter", _mock_insert_sshmeter).start()
         patch("ip_scanner.get_ips", _mock_get_ips).start()
 
 
@@ -404,8 +588,15 @@ def _install_patches():
     if station_connected:
         pass
 
+    if mock_database:
+        patch("lib.meter.meter_manager.insert_sshmeter", _mock_insert_sshmeter).start()
+        patch("lib.database.retrieve_jobs", _mock_retrieve_jobs).start()
+        patch("lib.database.retrieve_jobs_filtered", _mock_retrieve_jobs_filtered).start()
+        patch("lib.database.insert_meter_jobs", _mock_insert_meter_jobs).start()
+        patch("lib.automation.jobs.insert_meter_jobs", _mock_insert_meter_jobs).start() # no more meter job insertion
+
+
     # mock regardless
-    patch("lib.automation.jobs.insert_meter_jobs", _mock_insert_meter_jobs).start() # no more meter job insertion
     patch("lib.meter.ssh_meter.SSHMeter.__init__", _mock_meter_init).start()        # dont need to go thru the fw grabbing?
     
 

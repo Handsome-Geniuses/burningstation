@@ -374,6 +374,22 @@ def on_emergency(**kwargs):
     emergency.state = bool(value)
     return "", 200
 
+def on_work_order(**kwargs):
+    value = kwargs.get('value', None)
+
+    if value in (None, ""):
+        states['workOrder'] = None
+    elif isinstance(value, bool):
+        return "Invalid work order", 400
+    else:
+        try:
+            states['workOrder'] = int(value)
+        except (TypeError, ValueError):
+            return "Invalid work order", 400
+
+    SSEQM.broadcast("state", key_payload("workOrder", states['workOrder']))
+    return "", 200
+
 
 
 # idk what the program name is for shut down?
@@ -404,6 +420,7 @@ def on_action(action, **kwargs):
     elif action=="lamp":  res = on_lamp(**kwargs)
     elif action=="mode":  res = on_mode(**kwargs)
     elif action=="emergency": res = on_emergency(**kwargs)
+    elif action=="work_order": res = on_work_order(**kwargs)
     elif action=="robot": res = on_robot(**kwargs)
 
     return res if res is not None else ("", 200)

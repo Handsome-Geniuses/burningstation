@@ -15,6 +15,7 @@ from lib.system import sim,override,station,program
 from lib import database
 
 from lib.store import store
+from lib.sse.sse_queue_manager import SSEQM
 bp = flask.Blueprint("hello", __name__)
 
 # ================================================================
@@ -126,20 +127,25 @@ def get_meter_jobs():
     date_start = args.get("date_start")
     date_end = args.get("date_end")
     meter_id_raw = args.get("meter_id")
-    status = args.get("status")
+    status_raw_values = flask.request.args.getlist("status")
 
     try:
         meter_id = int(meter_id_raw) if meter_id_raw not in (None, "") else None
     except ValueError:
         return flask.jsonify({"error": "invalid meter_id"}), 400
 
-    if status == "":
-        status = None
+    statuses = [
+        status
+        for raw_value in status_raw_values
+        for status in (value.strip() for value in raw_value.split(","))
+        if status
+    ] or None
 
     allowed_statuses = {"missing", "n/a", "pass", "fail"}
-    if status is not None and status not in allowed_statuses:
+    invalid_statuses = [status for status in (statuses or []) if status not in allowed_statuses]
+    if invalid_statuses:
         return flask.jsonify({
-            "error": f"invalid status '{status}'",
+            "error": f"invalid status '{invalid_statuses[0]}'",
             "allowed": sorted(allowed_statuses),
         }), 400
 
@@ -150,7 +156,7 @@ def get_meter_jobs():
             date_start=date_start,
             date_end=date_end,
             meter_id=meter_id,
-            status=status,
+            status=statuses,
         )
     except Exception as e:
         return flask.jsonify({"error": str(e)}), 500
@@ -224,7 +230,8 @@ def set_settings():
         return {"error": "No JSON body provided"}, 400
 
     try:
-        store.set_from_dict(data)
+        settings = store.set_from_dict(data)
+        SSEQM.broadcast("settings", settings.model_dump())
         return {"status": "ok"}
     except Exception as e:
         return {"error": str(e)}, 400
@@ -238,6 +245,7 @@ def update_settings():
 
     try:
         updated = store.update_from_dict(data)
+        SSEQM.broadcast("settings", updated.model_dump())
         return flask.jsonify(updated.model_dump())
     except Exception as e:
         return {"error": str(e)}, 400
@@ -250,6 +258,7 @@ def save_settings():
 @bp.post("/settings/reload")
 def reload_settings():
     settings = store.reload()
+    SSEQM.broadcast("settings", settings.model_dump())
     return flask.jsonify(settings.model_dump())
 
 

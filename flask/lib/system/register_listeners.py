@@ -32,10 +32,13 @@ def mds_event_builder(p: HWGPIO, index: int):
         if p.state == states.get("mds", [None] * 9)[index]:
             return
         states["mds"][index] = p.state
+        from lib.meter.meter_manager import METERMANAGER as mm
+
         states["bayGuess"] = infer_bay_guess_from_mds(
             states.get("bayGuess", empty_bay_guess()),
             states["mds"],
             states.get("motors"),
+            mm.meters.keys(),
         )
         SSEQM.broadcast("state", key_payload("mds", states["mds"]))
         SSEQM.broadcast("state", key_payload("bayGuess", states["bayGuess"]))

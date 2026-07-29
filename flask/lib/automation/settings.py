@@ -71,9 +71,6 @@ def build_physical_kwargs(modules: dict, buttons=None):
             "job_count": (j.robot_keypad if has_robot_keypad else 0),
             "buttons": buttons,
         },
-        "monitors": [
-            ("robot_keypad", {"buttons": buttons})
-        ] if has_robot_keypad else [],
     }
 
     return kwargs
