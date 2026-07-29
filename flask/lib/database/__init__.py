@@ -89,6 +89,33 @@ def insert_sshmeter(meter: SSHMeter):
     return res
 
 
+def update_meter_work_order(
+    meter_id: int,
+    work_order: int,
+    conn: None | psycopg.Connection = None,
+):
+    """
+    Update the work_order for an existing meter row.
+    """
+    sql = """
+        UPDATE meter
+        SET work_order = %s,
+            last_updated = LOCALTIMESTAMP
+        WHERE id = %s
+        RETURNING *;
+    """
+
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (work_order, meter_id))
+            return cur.fetchone()
+
+    with psycopg.connect(dbcs) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (work_order, meter_id))
+            return cur.fetchone()
+
+
 # ==============================================================================
 # Job Insertion
 # ==============================================================================
@@ -149,7 +176,8 @@ def retrieve_jobs(limit=10, offset=0, conn: None | psycopg.Connection = None,):
     sql = """
         SELECT
             mj.*,
-            m.hostname
+            m.hostname,
+            m.work_order
             FROM meter_job mj
             JOIN meter m ON mj.meter_id = m.id
             ORDER BY mj.created_at DESC
@@ -197,7 +225,8 @@ def retrieve_jobs_filtered(
     query = """
         SELECT
             mj.*,
-            m.hostname
+            m.hostname,
+            m.work_order
         FROM meter_job mj
         JOIN meter m ON mj.meter_id = m.id
     """

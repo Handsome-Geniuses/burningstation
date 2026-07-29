@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS meter (
     system_version INT NOT NULL DEFAULT -1 ,
     subsystem_version INT NOT NULL DEFAULT -1,
     modules JSONB NOT NULL DEFAULT '{}',
+    work_order INT,
     created_at TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP,
     last_updated TIMESTAMP NOT NULL DEFAULT LOCALTIMESTAMP
 );

@@ -86,19 +86,26 @@ const statusIcon = (status: string, className?: string) => {
     }
 }
 
+const historyGridColumns = "w-full grid grid-cols-[2rem_2rem_8rem_8rem_1fr_14rem]"
+const historyHeaderCell = "px-2 py-1 text-left font-medium"
+const historyCell = "min-w-0 px-2 py-1"
 
 const JobRow = ({ job, onClick }: { job: any, onClick?: () => void }) => {
     const icon = statusIcon(job?.status)
 
     return (
-        <tr onClick={onClick} className="border-b cursor-pointer hover:bg-gray-50">
-            <td className="text-center">{icon}</td>
-            <td className="text-left">{job.id}</td>
-            <td className="text-left">{job.hostname}</td>
-            <td className="text-left">{job.name}</td>
-            {/* <td className="text-left">{new Date(job.created_at).toLocaleString()}</td> */}
-            <td className="text-left">{job?.created_at.replace(" GMT", "")}</td>
-        </tr>
+        <div
+            role="row"
+            onClick={onClick}
+            className={cn(historyGridColumns, "border-b cursor-pointer items-center hover:bg-gray-50")}
+        >
+            <div role="cell" className={cn(historyCell, "text-center")}>{icon}</div>
+            <div role="cell" className={cn(historyCell, "text-right tabular-nums")}>{job.id}</div>
+            <div role="cell" className={cn(historyCell, "truncate tabular-nums")}>{job.hostname}</div>
+            <div role="cell" className={cn(historyCell, "text-left tabular-nums")}>{job.work_order ?? "-"}</div>
+            <div role="cell" className={cn(historyCell, "truncate")}>{job.name}</div>
+            <div role="cell" className={cn(historyCell, "whitespace-nowrap tabular-nums")}>{job?.created_at.replace(" GMT", "")}</div>
+        </div>
     )
 }
 const Copyable = ({ text }: { text: string }) => {
@@ -119,11 +126,12 @@ const JobDialog = ({ job, detailed = false }: { job: any, detailed?: boolean }) 
     const isHandsome = systemState.handsome
     const icon = statusIcon(job?.status)
     const results = job?.data?.results
+    const workOrderLabel = job?.work_order != null ? ` — WO${job.work_order}` : ""
     return (
         <>
             <DialogContent className="min-w-[85vw]">
                 <DialogHeader className="gap-0 space-y-0 m-0 p-0 border-0">
-                    <DialogTitle>Job Details — {job?.hostname} — {job?.name} — {job?.status}{icon}</DialogTitle>
+                    <DialogTitle>Job Details — {job?.hostname}{workOrderLabel} — {job?.name} — {job?.status}{icon}</DialogTitle>
                     <DialogDescription>
                         {job?.created_at}
                     </DialogDescription>
@@ -223,20 +231,21 @@ export const HistoryTab = () => {
                 </button>
             </div>
             <div className="w-full max-h-100 overflow-y-auto rounded-md border border-border">
-                <table className="w-full table-auto border-collapse">
-                    <thead className="bg-gray-100 sticky top-0">
-                        <tr>
-                            <th className="text-left"></th>
-                            <th className="text-left">ID</th>
-                            <th className="text-left">Meter</th>
-                            <th className="text-left">Job</th>
-                            <th className="text-left">Finished</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+                <div role="table" className="min-w-[44rem]">
+                    <div role="rowgroup" className="sticky top-0 z-10 bg-gray-100">
+                        <div role="row" className={historyGridColumns}>
+                            <div role="columnheader" className={historyHeaderCell}></div>
+                            <div role="columnheader" className={cn(historyHeaderCell)}>ID</div>
+                            <div role="columnheader" className={historyHeaderCell}>Meter</div>
+                            <div role="columnheader" className={cn(historyHeaderCell)}>WO</div>
+                            <div role="columnheader" className={historyHeaderCell}>Job</div>
+                            <div role="columnheader" className={historyHeaderCell}>Finished</div>
+                        </div>
+                    </div>
+                    <div role="rowgroup">
                         {jobs.map((job, i) => <JobRow key={`[${i}]${job.id}`} job={job} onClick={() => openJobDialog(job)} />)}
-                    </tbody>
-                </table>
+                    </div>
+                </div>
                 <div className="flex justify-center my-4">
                     <Button variant={"secondary"} onClick={fetchJobs} className="w-fit">load 10 more</Button>
                 </div>

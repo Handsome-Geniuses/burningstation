@@ -73,6 +73,16 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         if (typeof key !== 'string' || !(key in initialSystemState)) return
         const typedKey = key as keyof typeof initialSystemState
 
+        if (typedKey === "workOrder") {
+            if (value !== null && typeof value !== "number") {
+                notify.warn(`>[bad state] ${key} : ${value} `)
+                return
+            }
+
+            systemDispatch({ type: 'set', key: typedKey, value })
+            return
+        }
+
         if (typeof value !== typeof initialSystemState[typedKey]) {
             notify.warn(`>[bad state] ${key} : ${value} `)
             return

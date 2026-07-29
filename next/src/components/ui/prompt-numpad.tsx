@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { ChevronLeft, Eraser } from "lucide-react"
 
 type PromptNumpadProps = React.ComponentProps<typeof Dialog> & {
     title?: string
@@ -24,7 +25,29 @@ type PromptNumpadProps = React.ComponentProps<typeof Dialog> & {
     onCancel?: () => void
 }
 
-const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "c", "0", "b"]
+type NumpadKey = {
+    id: string
+    label: string
+    action: "digit" | "clear" | "back"
+    value?: string
+    content: React.ReactNode
+    destructive?: boolean
+}
+
+const keys: NumpadKey[] = [
+    { id: "1", label: "1", action: "digit", value: "1", content: "1" },
+    { id: "2", label: "2", action: "digit", value: "2", content: "2" },
+    { id: "3", label: "3", action: "digit", value: "3", content: "3" },
+    { id: "4", label: "4", action: "digit", value: "4", content: "4" },
+    { id: "5", label: "5", action: "digit", value: "5", content: "5" },
+    { id: "6", label: "6", action: "digit", value: "6", content: "6" },
+    { id: "7", label: "7", action: "digit", value: "7", content: "7" },
+    { id: "8", label: "8", action: "digit", value: "8", content: "8" },
+    { id: "9", label: "9", action: "digit", value: "9", content: "9" },
+    { id: "clear", label: "Clear", action: "clear", content: <Eraser className="size-5" />, destructive: true },
+    { id: "0", label: "0", action: "digit", value: "0", content: "0" },
+    { id: "back", label: "Back", action: "back", content: <ChevronLeft className="size-5" /> },
+]
 
 const toDraftValue = (value?: number) => value === undefined ? "" : String(value)
 
@@ -55,18 +78,18 @@ export const PromptNumpad = ({
         onChange(next ? Number(next) : undefined)
     }
 
-    const handleKey = (key: string) => {
-        if (key === "c") {
+    const handleKey = (key: NumpadKey) => {
+        if (key.action === "clear") {
             updateDraft("")
             return
         }
 
-        if (key === "b") {
+        if (key.action === "back") {
             updateDraft(draft.slice(0, -1))
             return
         }
 
-        updateDraft(`${draft}${key}`)
+        updateDraft(`${draft}${key.value}`)
     }
 
     const handleCancel = () => {
@@ -112,17 +135,17 @@ export const PromptNumpad = ({
                 <div className="grid grid-cols-3 gap-2">
                     {keys.map((key) => (
                         <Button
-                            key={key}
+                            key={key.id}
                             type="button"
                             variant="outline"
                             className={cn(
                                 "h-12 text-lg font-semibold uppercase",
-                                key === "c" && "text-destructive hover:text-destructive",
+                                key.destructive && "text-destructive hover:text-destructive",
                             )}
-                            aria-label={key === "c" ? "Clear" : key === "b" ? "Back" : key}
+                            aria-label={key.label}
                             onClick={() => handleKey(key)}
                         >
-                            {key}
+                            {key.content}
                         </Button>
                     ))}
                 </div>

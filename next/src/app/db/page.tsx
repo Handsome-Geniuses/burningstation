@@ -48,6 +48,7 @@ type MeterJob = {
     jctl: string
     created_at: string
     hostname?: string
+    work_order?: number | null
 }
 
 type QueryFilters = {
@@ -57,8 +58,8 @@ type QueryFilters = {
     statuses: JobStatus[]
 }
 
-type CoreColumnKey = "status" | "id" | "hostname" | "meter_id" | "name" | "created_at"
-type SortKey = "status" | "id" | "hostname" | "meter_id" | "name" | "created_at" | string
+type CoreColumnKey = "status" | "id" | "hostname" | "meter_id" | "work_order" | "name" | "created_at"
+type SortKey = "status" | "id" | "hostname" | "meter_id" | "work_order" | "name" | "created_at" | string
 type SortDirection = "asc" | "desc"
 type DataSectionKey = "kwargs" | "jctl"
 type ExportSectionKey = "results_json"
@@ -69,6 +70,7 @@ const coreColumns = [
     { key: "id", label: "Job ID" },
     { key: "hostname", label: "Meter" },
     { key: "meter_id", label: "Meter ID" },
+    { key: "work_order", label: "Work Order" },
     { key: "name", label: "Job" },
     { key: "created_at", label: "Finished" },
 ] as const
@@ -84,7 +86,7 @@ const exportSections = [
 
 const jobStatuses: JobStatus[] = ["pass", "fail", "missing", "n/a"]
 
-const defaultCoreColumns = new Set<CoreColumnKey>(["status", "hostname", "name", "created_at"])
+const defaultCoreColumns = new Set<CoreColumnKey>(["status", "hostname", "work_order", "name", "created_at"])
 const defaultDataSections = new Set<DataSectionKey>()
 const defaultExportSections = new Set<ExportSectionKey>()
 
@@ -428,6 +430,7 @@ function getSearchText(job: MeterJob) {
     return [
         job.id,
         job.meter_id,
+        job.work_order,
         job.hostname,
         job.name,
         job.status,
@@ -729,6 +732,8 @@ export default function Page() {
                 return job.hostname ?? ""
             case "meter_id":
                 return job.meter_id
+            case "work_order":
+                return job.work_order ?? ""
             case "name":
                 return job.name
             case "created_at":
@@ -941,7 +946,7 @@ export default function Page() {
                                                     key={`${job.id}-${column.key}`}
                                                     className={cn(
                                                         "px-3 py-2",
-                                                        column.key === "id" || column.key === "meter_id" ? "tabular-nums" : "",
+                                                        column.key === "id" || column.key === "meter_id" || column.key === "work_order" ? "tabular-nums" : "",
                                                         column.key === "created_at" ? "whitespace-nowrap" : ""
                                                     )}
                                                 >
@@ -988,7 +993,10 @@ export default function Page() {
                                     <StatusPill status={selectedJob.status} />
                                 </DialogTitle>
                                 <DialogDescription className="text-xs">
-                                    {selectedJob.hostname ?? `meter ${selectedJob.meter_id}`} - {selectedJob.name} - {formatDate(selectedJob.created_at)}
+                                    {selectedJob.hostname ?? `meter ${selectedJob.meter_id}`}
+                                    {visibleCoreColumns.has("work_order") && selectedJob.work_order != null ? ` - WO${selectedJob.work_order}` : ""}
+                                    {" - "}
+                                    {selectedJob.name} - {formatDate(selectedJob.created_at)}
                                 </DialogDescription>
                             </DialogHeader>
                             <Tabs
