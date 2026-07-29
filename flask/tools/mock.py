@@ -10,6 +10,7 @@ from lib.system import sim
 from lib.sse.sse_queue_manager import SSEQM as master
 from lib.system.belt_logic import boxes_to_sensors, sensors_to_boxes, step_boxes
 from lib.system.states import states
+from lib import database
 
 from lib.gpio import rm, mdm
 
@@ -412,6 +413,31 @@ def _broadcast_mock_progress(meter_ip: str, program: str, current: int, total: i
         'total_cycles': total,
     })
 
+def _insert_mock_job(meter_ip: str, program: str):
+    meter = mm.get_meter(meter_ip)
+    if getattr(meter, "db_id", None) is None:
+        return
+
+    job_data = {
+        "name": program,
+        "status": "pass",
+        "data": {
+            "kwargs": {"mock": True},
+            "results": {
+                program: {
+                    "status": "pass",
+                    "fw": -1,
+                    "id": -1,
+                },
+            },
+        },
+    }
+    jctl = "\n".join([
+        f"[mock] starting {program} on {meter.hostname}",
+        "[mock] completed with status=pass",
+    ])
+    database.insert_meter_jobs(meter.db_id, [job_data], jctl)
+
 
 def _mock_start_physical_job(*args, **kwargs): 
     duration = 10
@@ -446,6 +472,7 @@ def _mock_start_physical_job(*args, **kwargs):
         _mock_physical_timers.pop(meter_ip, None)
         meter.status = "ready"
         master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': ''})
+        _insert_mock_job(meter_ip, "physical_cycle_all")
         _handle_auto_job_done(meter_ip, "physical_cycle_all")
 
     timer = threading.Timer(1.0, tick_physical)
@@ -493,6 +520,7 @@ def _mock_start_passive_job(*args, **kwargs):
         _mock_passive_timers.pop(meter_ip, None)
         meter.status = "ready"
         master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': ''})
+        _insert_mock_job(meter_ip, "cycle_all")
         _handle_auto_job_done(meter_ip, "cycle_all")
 
     timer = threading.Timer(1.0, tick_passive)
@@ -541,11 +569,10 @@ def _install_patches():
     print("!!!! installing mock patches")
     strictly_virtual = True
     station_connected = False
-    mock_database = True
+    mock_database = False
 
     # stuff that is strictly virtual
     if strictly_virtual:
-        patch("lib.meter.meter_manager.insert_sshmeter", _mock_insert_sshmeter).start()
         patch("ip_scanner.get_ips", _mock_get_ips).start()
 
 
@@ -562,11 +589,14 @@ def _install_patches():
         pass
 
     if mock_database:
+        patch("lib.meter.meter_manager.insert_sshmeter", _mock_insert_sshmeter).start()
         patch("lib.database.retrieve_jobs", _mock_retrieve_jobs).start()
         patch("lib.database.retrieve_jobs_filtered", _mock_retrieve_jobs_filtered).start()
+        patch("lib.database.insert_meter_jobs", _mock_insert_meter_jobs).start()
+        patch("lib.automation.jobs.insert_meter_jobs", _mock_insert_meter_jobs).start() # no more meter job insertion
+
 
     # mock regardless
-    patch("lib.automation.jobs.insert_meter_jobs", _mock_insert_meter_jobs).start() # no more meter job insertion
     patch("lib.meter.ssh_meter.SSHMeter.__init__", _mock_meter_init).start()        # dont need to go thru the fw grabbing?
     
 

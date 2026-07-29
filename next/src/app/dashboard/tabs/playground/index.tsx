@@ -7,6 +7,7 @@ import { notify } from "@/lib/notify"
 import { cn } from "@/lib/utils"
 import React from "react"
 import { useAsyncAction } from "@/hooks/useAsyncAction"
+import { PromptNumpad } from "@/components/ui/prompt-numpad"
 
 
 
@@ -246,6 +247,42 @@ const LogMeters = () => {
     )
 }
 
+const NumpadPromptPlayground = () => {
+    const [open, setOpen] = React.useState(false)
+    const [value, setValue] = React.useState<number | undefined>()
+    const [pendingValue, setPendingValue] = React.useState<number | undefined>()
+
+    return (
+        <PGCard
+            label="Numpad Prompt"
+            desc={`submitted: ${value ?? "empty"} | draft: ${pendingValue ?? "empty"}`}
+        >
+            <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setOpen(true)}
+            >
+                Open Numpad
+            </Button>
+            <PromptNumpad
+                open={open}
+                onOpenChange={setOpen}
+                value={value}
+                onChange={setPendingValue}
+                onCancel={() => {
+                    setPendingValue(undefined)
+                    notify.info("cancelled")
+                }}
+                onSubmit={(nextValue) => {
+                    setValue(nextValue)
+                    setPendingValue(undefined)
+                    notify.success(`submit: ${nextValue ?? "empty"}`)
+                }}
+            />
+        </PGCard>
+    )
+}
+
 export const PlaygroundTab = () => {
     const { systemState } = useStoreContext()
 
@@ -261,6 +298,7 @@ export const PlaygroundTab = () => {
             <RandomMeterSim />
             <AddFakeMeterSim />
             <LogMeters />
+            <NumpadPromptPlayground />
             <MeterBayToggleSim />
             <LoadingMeter/>
             <UnloadingMeter/>

@@ -12,6 +12,7 @@ states['tower'] = tm.get_value_list()
 states['lamp'] = lm.get_value_list()
 states['mode'] = 'manual'
 states['dummy'] = {}
+states['workOrder'] = None
 
 
 # initialize some values. motors of. tower off. lamps off

@@ -16,6 +16,8 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { useServerSettings } from "../settings/server-store";
+import { Input } from "@/components/ui/input";
+import { PromptNumpad } from "@/components/ui/prompt-numpad";
 
 type SectionDividerProps = {
     label: string
@@ -362,6 +364,51 @@ export function LoadMeter({
     )
 }
 
+export function WorkOrder({
+    systemState,
+}: {
+    systemState: SystemState
+} & React.ComponentProps<"div">) {
+    const [open, setOpen] = React.useState(false)
+
+    const updateWorkOrder = async (value: number | undefined) => {
+        try {
+            const res = await flask.handleAction("station", "work_order", { value: value ?? null })
+
+            if (!res.ok) {
+                throw new Error(await res.text() || `Failed to update work order (${res.status})`)
+            }
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to update work order"
+            notify.error(msg)
+        }
+    }
+
+    return (
+        <div className="">
+            <Input
+                value={systemState.workOrder ?? ""}
+                readOnly
+                tabIndex={-1}
+                inputMode="none"
+                aria-label="Work order"
+                className="h-10 cursor-default select-none text-center !text-3xl font-semibold caret-transparent"
+                onClick={() => setOpen(true)}
+                onMouseDown={(event) => event.preventDefault()}
+                onSelect={(event) => event.currentTarget.setSelectionRange(event.currentTarget.value.length, event.currentTarget.value.length)}
+            />
+            <PromptNumpad
+                open={open}
+                onOpenChange={setOpen}
+                title="Work Order"
+                description="Use the numpad to enter work order"
+                value={systemState.workOrder ?? undefined}
+                onSubmit={updateWorkOrder}
+            />
+        </div>
+    )
+}
+
 export function ControlsPanel({ systemState, className }: { systemState: SystemState } & React.ComponentProps<"div">) {
     const isManual = systemState.mode == "manual"
     const { values: serverSettings } = useServerSettings()
@@ -373,8 +420,11 @@ export function ControlsPanel({ systemState, className }: { systemState: SystemS
             <div className={PANEL_HEADER}>
                 Control Panel
             </div>
-            <div className="flex flex-col p-4">
-                <SectionDivider label="MODE selector" />
+            <div className="flex flex-col px-4">
+                <SectionDivider label="work order" className="pt-2" />
+                <WorkOrder systemState={systemState}/>
+
+                <SectionDivider label="MODE selector"  className="pt-4" />
                 <ManualAutoBox />
 
                 {/* <JobsDivider isManual={isManual} /> */}

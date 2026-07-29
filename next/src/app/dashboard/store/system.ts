@@ -77,6 +77,9 @@ export interface SystemState {
     // current tab
     currentTab: string | undefined
 
+    // work order
+    workOrder: number | null
+
     // running
     running: boolean
 
@@ -98,6 +101,7 @@ export const initialSystemState: SystemState = {
     connected: false,
     meters: {},
     currentTab: undefined,
+    workOrder: null,
     running: false,
     tower: [false, false, false, false],
     lamp: [0, 0, 0, 0],
