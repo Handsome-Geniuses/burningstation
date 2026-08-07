@@ -38,7 +38,7 @@ export const ControlsTab = () => {
     };
 
     return (
-        <div className="p-2 grid grid-cols-[1fr_auto] gap-2 ">
+        <div className="p-2 grid grid-cols-[1fr_25%] gap-2 ">
             <div>
                 <Accordion type="multiple" className={cn(PANEL, "p-0 rounded-lg overflow-hidden")} value={openItems} onValueChange={handleValueChange}>
                     <StationVisualizer systemState={systemState} onMeterSelected={setSelectedMeter} />
