@@ -7,7 +7,7 @@ Call In `+` key, then validates the session using three sources:
 2. `journalctl -u MS3_Modem.service` for compact modem attach/detach proof.
 3. `journalctl -u MS3_Platform.service` for Session Agent and updater events.
 
-See `flask\lib\docs\meter\cycle_call_in.md` for maintenance notes and expected
+See `flask/lib/docs/meter/cycle_call_in.md` for maintenance notes and expected
 behavior.
 """
 
@@ -48,12 +48,9 @@ CS_WAITING_TO_CONNECT_STATE = "S1_WAITING_TO_CONNECT"
 CS_CONNECTING_STATE = "S2_CONNECTING"
 CS_CONNECTED_STATE = "S3_CONNECTED"
 CS_DISCONNECTING_STATE = "S4_DISCONNECTING"
-CS_BUSY_STATES = {
-    CS_WAITING_TO_CONNECT_STATE,
-    CS_CONNECTING_STATE,
-    CS_CONNECTED_STATE,
-    CS_DISCONNECTING_STATE,
-}
+CS_DISCONNECTED_STATE = "S5_DISCONNECTED"
+CS_ERROR_STATE = "S6_ERROR"
+CS_RELEASED_STATES = {CS_DISCONNECTED_STATE, CS_ERROR_STATE}
 
 MODEM_CONNECTED_STATE = "S4_CONNECTED"
 MODEM_IDLE_STATE = "S1_IDLE"
@@ -74,10 +71,8 @@ RE_CALL_IN_RESPONSE = re.compile(
     r'SAGENT RECV: .*"command"\s*:\s*"callInResponse"',
     re.IGNORECASE,
 )
-RE_CALL_IN_RESPONSE_FAIL = re.compile(
-    r'SAGENT RECV: .*"command"\s*:\s*"callInResponse".*"result"\s*:\s*-1',
-    re.IGNORECASE,
-)
+RE_SAGENT_REFERENCE = re.compile(r'"reference"\s*:\s*(?P<reference>\d+)', re.IGNORECASE)
+RE_SAGENT_RESULT_FAIL = re.compile(r'"result"\s*:\s*-1(?:\D|$)', re.IGNORECASE)
 RE_SESSION_MANAGER_STARTED = re.compile(
     r'"message"\s*:\s*"Try Session Manager"|SAgent notifyCode=SAGENT_NOTIFY_SESSION_MANAGER_STARTED',
     re.IGNORECASE,
@@ -115,6 +110,18 @@ RE_MODEM_INFO = re.compile(
     r"Sent modem info rssi=(?P<rssi>\d+)\s*,\s*(?P<ber>\d+)",
     re.IGNORECASE,
 )
+RE_CONNECTION_CLIENTS_RELEASED = re.compile(
+    r"Clients that need a connection:\s*\(none\)",
+    re.IGNORECASE,
+)
+RE_MODEM_DISCONNECT_SUCCESS = re.compile(
+    r"ModemDisconnect\(\) returned:\s*MODEM_RESULT_SUCCESS",
+    re.IGNORECASE,
+)
+RE_PLATFORM_MODEM_DISCONNECT = re.compile(
+    r"MODEM:\s*SendRemote:\s*CMD\.DISCONNECT|\bMODEM DISCONNECT\b",
+    re.IGNORECASE,
+)
 RE_CALL_IN_UI_READY = re.compile(r"press\s*\[\s*\+\s*\]\s*to\s*call\s*in", re.IGNORECASE)
 RE_CALL_IN_UI_WAIT = re.compile(
     r"wait\s+for\s+the\s+current\s+call\s+in\s+to\s+complete",
@@ -127,6 +134,21 @@ RE_JOURNAL_BOUNDS = re.compile(
 RE_PLATFORM_RUNTIME_START = re.compile(r"\bMS3:main:\s*starting,\s*version:", re.IGNORECASE)
 RE_PLATFORM_SERVICE_START = re.compile(r"systemd\[\d+\]: Starting MS3 Platform", re.IGNORECASE)
 RE_STARTUP_CALL_IN = re.compile(r"\bMS3:sRestartCallIn:\s*startup call-in\b", re.IGNORECASE)
+
+
+class CallInObservationError(TimeoutError):
+    """Timeout that preserves the last status data observed by a wait loop."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        snapshot: Optional[dict] = None,
+        lifecycle: Optional[dict] = None,
+    ) -> None:
+        super().__init__(message)
+        self.snapshot = snapshot
+        self.lifecycle = lifecycle
 
 
 def _new_lifecycle() -> dict:
@@ -259,7 +281,7 @@ def _parse_meter_status(text: str) -> dict:
 
     clients_match = RE_CLIENTS.search(text or "")
     if clients_match:
-        clients = clients_match.group("clients").strip()
+        clients = _normalize_clients_text(clients_match.group("clients"))
 
     csq_match = RE_CSQ_TEXT.search(text or "")
     if csq_match:
@@ -317,6 +339,24 @@ def _strip_html(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _normalize_clients_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    # Some meter-status responses append the next HTML section on the same
+    # logical line, for example "(none)<hr>Modem Service:".  It is not a
+    # ConnectionServer client and must not make an idle snapshot look active.
+    text = re.split(r"<hr\b", value, maxsplit=1, flags=re.IGNORECASE)[0]
+    return _strip_html(text)
+
+
+def _clients_have_active_connection_need(value: Optional[str]) -> bool:
+    text = _normalize_clients_text(value)
+    if not text:
+        return False
+    return not text.lower().startswith("(none)")
+
+
 def _get_call_in_ui_state(meter: SSHMeter) -> tuple[str, str]:
     page_text = _strip_html(meter.get_ui_page_html(timeout=2.0))
     normalized = page_text.lower()
@@ -335,8 +375,9 @@ def _snapshot_is_ready(snapshot: dict) -> bool:
 def _snapshot_is_idle(snapshot: dict) -> bool:
     return (
         _snapshot_is_ready(snapshot)
-        and snapshot.get("cs_state") not in CS_BUSY_STATES
+        and snapshot.get("cs_state") in CS_RELEASED_STATES
         and snapshot.get("modem_state") in MODEM_DISCONNECTED_STATES
+        and not _clients_have_active_connection_need(snapshot.get("clients"))
     )
 
 
@@ -360,6 +401,7 @@ def _wait_for_call_in_idle(
     started = time.time()
     deadline = started + max(0.0, timeout_s)
     idle_since: Optional[float] = None
+    last_snapshot: Optional[dict] = None
     last_summary = None
     last_ui_state = None
 
@@ -368,14 +410,16 @@ def _wait_for_call_in_idle(
 
         try:
             snapshot = _parse_meter_status(meter.get_meter_status_text())
+            last_snapshot = snapshot
         except Exception as exc:
             shared.log(
                 f"{meter.host} call-in {phase} wait {cycle_num}: unable to read meter status ({exc}); retrying",
             )
             remaining = deadline - time.time()
             if remaining <= 0:
-                raise TimeoutError(
-                    f"Call-in {phase} cycle {cycle_num} timed out while reading meter status"
+                raise CallInObservationError(
+                    f"Call-in {phase} cycle {cycle_num} timed out while reading meter status",
+                    snapshot=last_snapshot,
                 ) from exc
             _sleep_with_stop(shared, min(poll_s, remaining))
             continue
@@ -422,8 +466,9 @@ def _wait_for_call_in_idle(
 
         remaining = deadline - time.time()
         if remaining <= 0:
-            raise TimeoutError(
-                f"Call-in {phase} cycle {cycle_num} timed out waiting for ready/idle state; last={summary}"
+            raise CallInObservationError(
+                f"Call-in {phase} cycle {cycle_num} timed out waiting for ready/idle state; last={summary}",
+                snapshot=snapshot,
             )
 
         _sleep_with_stop(shared, min(poll_s, remaining))
@@ -442,6 +487,7 @@ def _wait_for_call_in_lifecycle(
     start_deadline = started + max(0.0, start_timeout_s)
     completion_deadline = start_deadline + max(0.0, completion_timeout_s)
     last_summary = None
+    last_snapshot: Optional[dict] = None
     call_in_started = False
     status_failure_since: Optional[float] = None
     lifecycle = _new_lifecycle()
@@ -451,6 +497,7 @@ def _wait_for_call_in_lifecycle(
 
         try:
             snapshot = _parse_meter_status(meter.get_meter_status_text())
+            last_snapshot = snapshot
         except Exception as exc:
             deadline = completion_deadline if call_in_started else start_deadline
             shared.log(
@@ -472,8 +519,10 @@ def _wait_for_call_in_lifecycle(
 
             remaining = deadline - time.time()
             if remaining <= 0:
-                raise TimeoutError(
-                    f"Call-in cycle {cycle_num} timed out while reading meter status"
+                raise CallInObservationError(
+                    f"Call-in cycle {cycle_num} timed out while reading meter status",
+                    snapshot=last_snapshot,
+                    lifecycle=lifecycle,
                 ) from exc
             _sleep_with_stop(shared, min(poll_s, remaining))
             continue
@@ -488,24 +537,28 @@ def _wait_for_call_in_lifecycle(
         cs_state = snapshot.get("cs_state")
         modem_state = snapshot.get("modem_state")
 
-        lifecycle["saw_cim_wait_connection"] |= cim_state == CALL_IN_WAIT_CONNECTION_STATE
-        lifecycle["saw_cim_wait_complete"] |= cim_state == CALL_IN_WAIT_COMPLETE_STATE
-        lifecycle["saw_cs_waiting_to_connect"] |= cs_state == CS_WAITING_TO_CONNECT_STATE
-        lifecycle["saw_cs_connecting"] |= cs_state == CS_CONNECTING_STATE
-        lifecycle["saw_cs_connected"] |= cs_state == CS_CONNECTED_STATE
-        lifecycle["saw_cs_disconnecting"] |= cs_state == CS_DISCONNECTING_STATE
-        lifecycle["saw_modem_connected"] |= modem_state == MODEM_CONNECTED_STATE
-        lifecycle["saw_modem_disconnected"] |= modem_state in MODEM_DISCONNECTED_STATES
-
         if not call_in_started:
             if cim_state in (CALL_IN_WAIT_CONNECTION_STATE, CALL_IN_WAIT_COMPLETE_STATE):
                 call_in_started = True
                 shared.log(f"{meter.host} call-in cycle {cycle_num}: state machine started")
             elif time.time() > start_deadline:
-                raise TimeoutError(
-                    f"Call-in cycle {cycle_num} never left a ready state; last={summary}"
+                raise CallInObservationError(
+                    f"Call-in cycle {cycle_num} never left a ready state; last={summary}",
+                    snapshot=snapshot,
+                    lifecycle=lifecycle,
                 )
-        else:
+
+        if call_in_started:
+            lifecycle["saw_cim_wait_connection"] |= cim_state == CALL_IN_WAIT_CONNECTION_STATE
+            lifecycle["saw_cim_wait_complete"] |= cim_state == CALL_IN_WAIT_COMPLETE_STATE
+            lifecycle["saw_cs_waiting_to_connect"] |= cs_state == CS_WAITING_TO_CONNECT_STATE
+            lifecycle["saw_cs_connecting"] |= cs_state == CS_CONNECTING_STATE
+            lifecycle["saw_cs_connected"] |= cs_state == CS_CONNECTED_STATE
+            lifecycle["saw_cs_disconnecting"] |= cs_state == CS_DISCONNECTING_STATE
+            lifecycle["saw_modem_connected"] |= modem_state == MODEM_CONNECTED_STATE
+            if lifecycle["saw_modem_connected"]:
+                lifecycle["saw_modem_disconnected"] |= modem_state in MODEM_DISCONNECTED_STATES
+
             if _snapshot_is_ready(snapshot):
                 elapsed_s = time.time() - started
                 lifecycle["saw_ready_return"] = True
@@ -515,8 +568,10 @@ def _wait_for_call_in_lifecycle(
                 return snapshot, lifecycle, elapsed_s
 
             if time.time() > completion_deadline:
-                raise TimeoutError(
-                    f"Call-in cycle {cycle_num} timed out waiting for return to ready state; last={summary}"
+                raise CallInObservationError(
+                    f"Call-in cycle {cycle_num} timed out waiting for return to ready state; last={summary}",
+                    snapshot=snapshot,
+                    lifecycle=lifecycle,
                 )
 
         deadline = completion_deadline if call_in_started else start_deadline
@@ -594,11 +649,23 @@ def _observe_post_recovery_guard(
     observe_deadline = started + max(0.0, observe_s)
     deadline = started + max(timeout_s, observe_s)
     last_summary = None
+    last_snapshot: Optional[dict] = None
 
     while True:
         check_stop_event(shared)
 
-        snapshot = _parse_meter_status(meter.get_meter_status_text())
+        try:
+            snapshot = _parse_meter_status(meter.get_meter_status_text())
+            last_snapshot = snapshot
+        except Exception as exc:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise CallInObservationError(
+                    f"Call-in cycle {cycle_num} timed out while reading meter status during post-recovery guard",
+                    snapshot=last_snapshot,
+                ) from exc
+            _sleep_with_stop(shared, min(poll_s, remaining))
+            continue
         summary = _status_summary(snapshot)
         if summary != last_summary:
             shared.log(f"{meter.host} call-in post-recovery guard {cycle_num}: {summary}")
@@ -613,8 +680,9 @@ def _observe_post_recovery_guard(
 
         remaining = deadline - time.time()
         if remaining <= 0:
-            raise TimeoutError(
-                f"Call-in cycle {cycle_num} timed out during post-recovery guard; last={summary}"
+            raise CallInObservationError(
+                f"Call-in cycle {cycle_num} timed out during post-recovery guard; last={summary}",
+                snapshot=snapshot,
             )
 
         _sleep_with_stop(shared, min(poll_s, remaining))
@@ -670,24 +738,68 @@ def _last_matching_line(text: str, pattern: re.Pattern) -> str:
     return ""
 
 
+def _sagent_reference(line: str) -> Optional[int]:
+    match = RE_SAGENT_REFERENCE.search(line or "")
+    if not match:
+        return None
+    return int(match.group("reference"))
+
+
 def _collect_platform_call_in_evidence(journal_text: str) -> dict:
+    lines = (journal_text or "").splitlines()
+    send_index = next((i for i, line in enumerate(lines) if RE_CALL_IN_SEND.search(line)), None)
+    send_line = lines[send_index].strip() if send_index is not None else ""
+    call_in_reference = _sagent_reference(send_line)
+    next_send_index = None
+    if send_index is not None:
+        next_send_index = next(
+            (i for i in range(send_index + 1, len(lines)) if RE_CALL_IN_SEND.search(lines[i])),
+            None,
+        )
+    transaction_limit = next_send_index if next_send_index is not None else len(lines)
+
+    response_index = None
+    if send_index is not None:
+        for i in range(send_index + 1, transaction_limit):
+            line = lines[i]
+            if not RE_CALL_IN_RESPONSE.search(line):
+                continue
+            response_reference = _sagent_reference(line)
+            if call_in_reference is None or response_reference == call_in_reference:
+                response_index = i
+                break
+
+    response_line = lines[response_index].strip() if response_index is not None else ""
+    transaction_text = (
+        "\n".join(lines[send_index:transaction_limit]) if send_index is not None else ""
+    )
+    post_send_text = transaction_text
+
     return {
-        "call_in_send": bool(RE_CALL_IN_SEND.search(journal_text)),
-        "call_in_response": bool(RE_CALL_IN_RESPONSE.search(journal_text)),
-        "call_in_response_failed": bool(RE_CALL_IN_RESPONSE_FAIL.search(journal_text)),
-        "session_manager_started": bool(RE_SESSION_MANAGER_STARTED.search(journal_text)),
-        "session_manager_completed": bool(RE_SESSION_MANAGER_COMPLETED.search(journal_text)),
-        "session_complete": bool(RE_SESSION_COMPLETE.search(journal_text)),
-        "rsync_started": bool(RE_RSYNC_STARTED.search(journal_text)),
-        "rsync_completed": bool(RE_RSYNC_COMPLETED.search(journal_text)),
-        "runscript_started": bool(RE_RUNSCRIPT_STARTED.search(journal_text)),
-        "runscript_completed": bool(RE_RUNSCRIPT_COMPLETED.search(journal_text)),
-        "update_activity": bool(RE_UPDATE_ACTIVITY.search(journal_text)),
-        "update_restart": bool(RE_UPDATE_RESTART.search(journal_text)),
-        "call_in_send_line": _last_matching_line(journal_text, RE_CALL_IN_SEND),
-        "call_in_response_line": _last_matching_line(journal_text, RE_CALL_IN_RESPONSE),
-        "session_complete_line": _last_matching_line(journal_text, RE_SESSION_COMPLETE),
-        "update_line": _last_matching_line(journal_text, RE_UPDATE_ACTIVITY),
+        "call_in_send": send_index is not None,
+        "call_in_reference": call_in_reference,
+        "call_in_response": response_index is not None,
+        "call_in_response_failed": bool(RE_SAGENT_RESULT_FAIL.search(response_line)),
+        "session_manager_started": bool(RE_SESSION_MANAGER_STARTED.search(transaction_text)),
+        "session_manager_completed": bool(RE_SESSION_MANAGER_COMPLETED.search(transaction_text)),
+        "session_complete": bool(RE_SESSION_COMPLETE.search(transaction_text)),
+        "rsync_started": bool(RE_RSYNC_STARTED.search(post_send_text)),
+        "rsync_completed": bool(RE_RSYNC_COMPLETED.search(post_send_text)),
+        "runscript_started": bool(RE_RUNSCRIPT_STARTED.search(post_send_text)),
+        "runscript_completed": bool(RE_RUNSCRIPT_COMPLETED.search(post_send_text)),
+        "update_activity": bool(RE_UPDATE_ACTIVITY.search(post_send_text)),
+        "update_restart": bool(RE_UPDATE_RESTART.search(post_send_text)),
+        "clients_released": bool(RE_CONNECTION_CLIENTS_RELEASED.search(post_send_text)),
+        "modem_disconnect_success": bool(RE_MODEM_DISCONNECT_SUCCESS.search(post_send_text)),
+        "platform_modem_disconnect": bool(RE_PLATFORM_MODEM_DISCONNECT.search(post_send_text)),
+        "call_in_send_line": send_line,
+        "call_in_response_line": response_line,
+        "session_complete_line": _last_matching_line(transaction_text, RE_SESSION_COMPLETE),
+        "clients_released_line": _last_matching_line(
+            post_send_text,
+            RE_CONNECTION_CLIENTS_RELEASED,
+        ),
+        "update_line": _last_matching_line(post_send_text, RE_UPDATE_ACTIVITY),
     }
 
 
@@ -865,6 +977,7 @@ def _validate_call_in_result(
         )
 
     failures = []
+    warnings = []
     call_in_started = (
         lifecycle["saw_cim_wait_connection"]
         or lifecycle["saw_cim_wait_complete"]
@@ -877,8 +990,10 @@ def _validate_call_in_result(
         or modem_evidence["connect_requested"]
         or modem_evidence["connected"]
     )
+    cleanup_release_proved = cleanup_snapshot is not None and _snapshot_is_idle(cleanup_snapshot)
     disconnect_proved = (
-        (disconnect_delta is not None and disconnect_delta >= 1)
+        cleanup_release_proved
+        or (disconnect_delta is not None and disconnect_delta >= 1)
         or lifecycle["saw_cs_disconnecting"]
         or lifecycle["saw_modem_disconnected"]
         or modem_evidence["disconnect_requested"]
@@ -888,6 +1003,37 @@ def _validate_call_in_result(
     session_proved = (
         platform_evidence["session_manager_completed"] or platform_evidence["session_complete"]
     )
+    release_proved = disconnect_proved or platform_evidence["update_activity"]
+
+    connect_sources = []
+    if connect_delta is not None and connect_delta >= 1:
+        connect_sources.append("ppp_connect_counter")
+    if lifecycle["saw_cs_connected"]:
+        connect_sources.append("lifecycle_cs_connected")
+    if lifecycle["saw_modem_connected"]:
+        connect_sources.append("lifecycle_modem_connected")
+    if modem_evidence["connect_requested"]:
+        connect_sources.append("modem_journal_connect_request")
+    if modem_evidence["connected"]:
+        connect_sources.append("modem_journal_connected")
+
+    release_sources = []
+    if cleanup_release_proved:
+        release_sources.append("final_status_snapshot")
+    if disconnect_delta is not None and disconnect_delta >= 1:
+        release_sources.append("ppp_disconnect_counter")
+    if lifecycle["saw_cs_disconnecting"]:
+        release_sources.append("lifecycle_cs_disconnecting")
+    if lifecycle["saw_modem_disconnected"]:
+        release_sources.append("lifecycle_modem_terminal_after_connected")
+    if modem_evidence["disconnect_requested"]:
+        release_sources.append("modem_journal_disconnect_request")
+    if modem_evidence["disconnecting"]:
+        release_sources.append("modem_journal_disconnecting")
+    if modem_evidence["idle_after_disconnect"]:
+        release_sources.append("modem_journal_idle")
+    if platform_evidence["update_activity"]:
+        release_sources.append("post_call_in_update_activity")
 
     if not call_in_started:
         failures.append("call-in never appeared to start")
@@ -906,18 +1052,60 @@ def _validate_call_in_result(
     if not session_proved:
         failures.append("missing Session Manager completion evidence")
 
-    if not (disconnect_proved or platform_evidence["update_activity"]):
+    if not release_proved:
         failures.append("missing modem disconnect / connection-release evidence")
 
+    if cleanup_release_proved and (
+        cleanup_snapshot.get("cs_state") == CS_ERROR_STATE
+        or cleanup_snapshot.get("modem_state") == MODEM_ERROR_STATE
+    ) and (
+        platform_evidence["call_in_response"]
+        and not platform_evidence["call_in_response_failed"]
+        and session_proved
+    ):
+        warnings.append("connection released through modem/ConnectionServer error terminal state")
+
+    if failed_connect_delta is not None and failed_connect_delta > 0:
+        warnings.append(f"PPP failed-connect counter increased by {failed_connect_delta}")
+
+    response_summary = "failed" if platform_evidence["call_in_response_failed"] else "no"
+    if platform_evidence["call_in_response"] and not platform_evidence["call_in_response_failed"]:
+        response_summary = "yes"
+
+    proof_summary = (
+        f"started={'yes' if call_in_started else 'no'} | "
+        f"connect={'yes' if connect_proved else 'no'}"
+        f"[{','.join(connect_sources) or 'none'}] | "
+        f"request={'yes' if platform_evidence['call_in_send'] else 'no'}"
+        f"(ref={platform_evidence.get('call_in_reference') or 'n/a'}) | "
+        f"response={response_summary} | "
+        f"session={'yes' if session_proved else 'no'} | "
+        f"release={'yes' if release_proved else 'no'}"
+        f"[{','.join(release_sources) or 'none'}]"
+    )
+    shared.log(f"{meter.host} call-in cycle {cycle_num}: validation proofs -> {proof_summary}")
+
     if failures:
-        summary = "; ".join(failures)
-        shared.log(f"{meter.host} call-in cycle {cycle_num}: validation failed -> {summary}")
-        raise RuntimeError(summary)
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: validation failed -> {'; '.join(failures)}"
+        )
+    for warning in warnings:
+        shared.log(f"{meter.host} call-in cycle {cycle_num}: validation warning -> {warning}")
 
     return {
         "connect_delta": connect_delta,
         "disconnect_delta": disconnect_delta,
         "failed_connect_delta": failed_connect_delta,
+        "call_in_started": call_in_started,
+        "connect_proved": connect_proved,
+        "session_proved": session_proved,
+        "cleanup_release_proved": cleanup_release_proved,
+        "disconnect_proved": disconnect_proved,
+        "release_proved": release_proved,
+        "connect_sources": connect_sources,
+        "release_sources": release_sources,
+        "failures": failures,
+        "warnings": warnings,
     }
 
 
@@ -925,218 +1113,47 @@ def _get_call_in_meta(shared: SharedState) -> dict:
     return shared.device_meta.setdefault("call_in", {})
 
 
-def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
-    func_name = inspect.currentframe().f_code.co_name
-    job_count = int(kwargs.get("job_count", 3))
-    ready_timeout_s = float(kwargs.get("ready_timeout_s", DEFAULT_CALL_IN_READY_TIMEOUT_S))
-    ready_stable_s = float(kwargs.get("ready_stable_s", DEFAULT_CALL_IN_READY_STABLE_S))
-    start_timeout_s = float(kwargs.get("start_timeout_s", DEFAULT_CALL_IN_START_TIMEOUT_S))
-    completion_timeout_s = float(kwargs.get("completion_timeout_s", DEFAULT_CALL_IN_COMPLETION_TIMEOUT_S))
-    disconnect_timeout_s = float(kwargs.get("disconnect_timeout_s", DEFAULT_CALL_IN_DISCONNECT_TIMEOUT_S))
-    recovery_timeout_s = float(kwargs.get("recovery_timeout_s", DEFAULT_CALL_IN_RECOVERY_TIMEOUT_S))
-    post_recovery_guard_s = float(
-        kwargs.get("post_recovery_guard_s", DEFAULT_CALL_IN_POST_RECOVERY_GUARD_S)
+def _snapshot_metadata(snapshot: Optional[dict]) -> Optional[dict]:
+    if snapshot is None:
+        return None
+    return {
+        "cim_state": snapshot.get("cim_state"),
+        "cs_state": snapshot.get("cs_state"),
+        "modem_state": snapshot.get("modem_state"),
+        "clients": snapshot.get("clients"),
+        "ppp_connect_count": snapshot.get("ppp_connect_count"),
+        "ppp_disconnect_count": snapshot.get("ppp_disconnect_count"),
+        "ppp_failed_connect_count": snapshot.get("ppp_failed_connect_count"),
+        "csq_text": snapshot.get("csq_text"),
+    }
+
+
+def _snapshot_summary(snapshot: Optional[dict]) -> str:
+    return _status_summary(snapshot) if snapshot is not None else "unavailable"
+
+
+def _run_call_in_cycle(
+    meter: SSHMeter,
+    shared: SharedState,
+    cycle_num: int,
+    cycle_meta: dict,
+    settings: dict,
+    cycle_started: float,
+) -> None:
+    cycle_meta["phase"] = "navigate_to_call_in"
+    meter.goto_callin()
+
+    cycle_meta["phase"] = "startup_guard"
+    startup_guard = _wait_for_startup_call_in_guard(
+        meter,
+        shared,
+        cycle_num=cycle_num,
+        guard_s=settings["startup_guard_s"],
+        platform_journal_max_lines=settings["startup_platform_journal_max_lines"],
+        poll_s=settings["poll_s"],
     )
-    post_recovery_timeout_s = float(
-        kwargs.get("post_recovery_timeout_s", DEFAULT_CALL_IN_POST_RECOVERY_TIMEOUT_S)
-    )
-    status_loss_grace_s = float(
-        kwargs.get("status_loss_grace_s", DEFAULT_CALL_IN_STATUS_LOSS_GRACE_S)
-    )
-    startup_guard_s = float(kwargs.get("startup_guard_s", DEFAULT_CALL_IN_STARTUP_GUARD_S))
-    poll_s = float(kwargs.get("state_poll_s", DEFAULT_CALL_IN_POLL_S))
-    platform_journal_max_lines = int(
-        kwargs.get("platform_journal_max_lines", DEFAULT_CALL_IN_PLATFORM_JOURNAL_LINES)
-    )
-    modem_journal_max_lines = int(
-        kwargs.get("modem_journal_max_lines", DEFAULT_CALL_IN_MODEM_JOURNAL_LINES)
-    )
-    startup_platform_journal_max_lines = int(
-        kwargs.get(
-            "startup_platform_journal_max_lines",
-            DEFAULT_CALL_IN_STARTUP_PLATFORM_JOURNAL_LINES,
-        )
-    )
-    post_completion_grace_s = float(
-        kwargs.get("post_completion_grace_s", DEFAULT_CALL_IN_POST_GRACE_S)
-    )
-    subtest = bool(kwargs.get("subtest", False))
-
-    for i in range(job_count):
-        cycle_num = i + 1
-        shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")
-        if not subtest:
-            shared.broadcast_progress(meter.host, "call in", cycle_num, job_count)
-
-        meter.goto_callin()
-        startup_guard = _wait_for_startup_call_in_guard(
-            meter,
-            shared,
-            cycle_num=cycle_num,
-            guard_s=startup_guard_s,
-            platform_journal_max_lines=startup_platform_journal_max_lines,
-            poll_s=poll_s,
-        )
-        baseline_snapshot, ready_elapsed_s = _wait_for_call_in_idle(
-            meter,
-            shared,
-            cycle_num=cycle_num,
-            timeout_s=ready_timeout_s,
-            poll_s=poll_s,
-            phase="pre-check",
-            stable_s=ready_stable_s,
-            require_ui_ready=True,
-        )
-        shared.log(
-            f"{meter.host} call-in pre-check {cycle_num}: ready after {ready_elapsed_s:.1f}s | "
-            f"{_status_summary(baseline_snapshot)}"
-        )
-
-        journal_since = _journal_since_now(meter)
-        shared.log(f"{meter.host} call-in cycle {cycle_num}: press '+' on Service:Call In")
-        meter.press("plus")
-
-        lifecycle = _new_lifecycle()
-        lifecycle_snapshot: Optional[dict] = None
-        lifecycle_elapsed_s = 0.0
-        cleanup_snapshot: Optional[dict] = None
-        cleanup_elapsed_s: Optional[float] = None
-        recovery_snapshot: Optional[dict] = None
-        recovery_elapsed_s: Optional[float] = None
-        post_recovery_elapsed_s: Optional[float] = None
-        lifecycle_error = ""
-        cleanup_error = ""
-        recovery = {
-            "attempted": False,
-            "recovered": False,
-            "saw_splash": False,
-            "saw_status_unavailable": False,
-        }
-
-        try:
-            lifecycle_snapshot, lifecycle, lifecycle_elapsed_s = _wait_for_call_in_lifecycle(
-                meter,
-                shared,
-                cycle_num=cycle_num,
-                start_timeout_s=start_timeout_s,
-                completion_timeout_s=completion_timeout_s,
-                poll_s=poll_s,
-                status_loss_grace_s=status_loss_grace_s,
-            )
-        except Exception as exc:
-            lifecycle_error = str(exc)
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: lifecycle observation ended with "
-                f"{type(exc).__name__}: {exc}",
-            )
-
-        if not lifecycle_error and not lifecycle["runtime_loss_after_start"]:
-            if post_completion_grace_s > 0:
-                _sleep_with_stop(shared, post_completion_grace_s)
-
-            try:
-                cleanup_snapshot, cleanup_elapsed_s = _wait_for_call_in_idle(
-                    meter,
-                    shared,
-                    cycle_num=cycle_num,
-                    timeout_s=disconnect_timeout_s,
-                    poll_s=poll_s,
-                    phase="cleanup",
-                )
-            except Exception as exc:
-                cleanup_error = str(exc)
-                shared.log(
-                    f"{meter.host} call-in cycle {cycle_num}: cleanup observation ended with "
-                    f"{type(exc).__name__}: {exc}",
-                )
-
-        need_recovery = lifecycle["runtime_loss_after_start"] or bool(lifecycle_error) or bool(cleanup_error)
-        if need_recovery:
-            recovery_snapshot, recovery, recovery_elapsed_s = _wait_for_meter_status_recovery(
-                meter,
-                shared,
-                cycle_num=cycle_num,
-                timeout_s=recovery_timeout_s,
-                poll_s=poll_s,
-            )
-            if recovery_snapshot is not None:
-                try:
-                    recovery_snapshot, post_recovery_elapsed_s = _observe_post_recovery_guard(
-                        meter,
-                        shared,
-                        cycle_num=cycle_num,
-                        observe_s=post_recovery_guard_s,
-                        timeout_s=post_recovery_timeout_s,
-                        poll_s=poll_s,
-                    )
-                except Exception as exc:
-                    shared.log(
-                        f"{meter.host} call-in cycle {cycle_num}: post-recovery guard ended with "
-                        f"{type(exc).__name__}: {exc}",
-                    )
-
-        include_previous_boot = bool(need_recovery)
-        platform_journal = _get_service_journal(
-            meter,
-            service="MS3_Platform.service",
-            since=journal_since,
-            max_lines=platform_journal_max_lines,
-            include_previous_boot=include_previous_boot,
-        )
-        modem_journal = _get_service_journal(
-            meter,
-            service="MS3_Modem.service",
-            since=journal_since,
-            max_lines=modem_journal_max_lines,
-            include_previous_boot=include_previous_boot,
-        )
-
-        platform_evidence = _collect_platform_call_in_evidence(platform_journal)
-        modem_evidence = _collect_modem_call_in_evidence(modem_journal)
-
-        effective_cleanup_snapshot = cleanup_snapshot
-        if effective_cleanup_snapshot is None and recovery_snapshot is not None and not recovery.get("saw_splash"):
-            effective_cleanup_snapshot = recovery_snapshot
-        if effective_cleanup_snapshot is None and lifecycle_snapshot is not None and lifecycle["saw_ready_return"]:
-            effective_cleanup_snapshot = lifecycle_snapshot
-
-        deltas = _validate_call_in_result(
-            meter,
-            shared,
-            cycle_num=cycle_num,
-            baseline_snapshot=baseline_snapshot,
-            cleanup_snapshot=effective_cleanup_snapshot,
-            lifecycle=lifecycle,
-            platform_evidence=platform_evidence,
-            modem_evidence=modem_evidence,
-        )
-
-        call_in_meta = _get_call_in_meta(shared)
-        call_in_meta[cycle_num] = {
-            "ready_elapsed_s": round(ready_elapsed_s, 1),
-            "lifecycle_elapsed_s": round(lifecycle_elapsed_s, 1),
-            "cleanup_elapsed_s": round(cleanup_elapsed_s, 1) if cleanup_elapsed_s is not None else None,
-            "recovery_elapsed_s": round(recovery_elapsed_s, 1) if recovery_elapsed_s is not None else None,
-            "post_recovery_elapsed_s": (
-                round(post_recovery_elapsed_s, 1) if post_recovery_elapsed_s is not None else None
-            ),
-            "connect_delta": deltas["connect_delta"],
-            "disconnect_delta": deltas["disconnect_delta"],
-            "failed_connect_delta": deltas["failed_connect_delta"],
-            "rssi": modem_evidence["rssi"],
-            "ber": modem_evidence["ber"],
-            "session_manager_started": platform_evidence["session_manager_started"],
-            "session_manager_completed": platform_evidence["session_manager_completed"],
-            "session_complete": platform_evidence["session_complete"],
-            "rsync_started": platform_evidence["rsync_started"],
-            "rsync_completed": platform_evidence["rsync_completed"],
-            "runscript_started": platform_evidence["runscript_started"],
-            "runscript_completed": platform_evidence["runscript_completed"],
-            "update_activity": platform_evidence["update_activity"],
-            "update_restart": platform_evidence["update_restart"],
-            "runtime_loss_after_start": lifecycle["runtime_loss_after_start"],
-            "saw_runtime_splash": lifecycle["saw_splash_after_start"] or recovery.get("saw_splash"),
-            "used_previous_boot_journal": include_previous_boot,
+    cycle_meta.update(
+        {
             "startup_guard_checked": startup_guard["checked"],
             "startup_guard_runtime_age_s": (
                 round(startup_guard["runtime_age_s"], 1)
@@ -1155,62 +1172,417 @@ def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
                 else None
             ),
         }
+    )
 
-        signal_summary = ""
-        if modem_evidence["rssi"] is not None and modem_evidence["ber"] is not None:
-            signal_summary = f" | rssi={modem_evidence['rssi']} ber={modem_evidence['ber']}"
-        elif effective_cleanup_snapshot and effective_cleanup_snapshot.get("csq_text"):
-            signal_summary = f" | csq={effective_cleanup_snapshot['csq_text']}"
+    cycle_meta["phase"] = "pre_check"
+    baseline_snapshot, ready_elapsed_s = _wait_for_call_in_idle(
+        meter,
+        shared,
+        cycle_num=cycle_num,
+        timeout_s=settings["ready_timeout_s"],
+        poll_s=settings["poll_s"],
+        phase="pre-check",
+        stable_s=settings["ready_stable_s"],
+        require_ui_ready=True,
+    )
+    cycle_meta["ready_elapsed_s"] = round(ready_elapsed_s, 1)
+    cycle_meta["baseline_snapshot"] = _snapshot_metadata(baseline_snapshot)
+    shared.log(
+        f"{meter.host} call-in pre-check {cycle_num}: ready after {ready_elapsed_s:.1f}s | "
+        f"{_status_summary(baseline_snapshot)}"
+    )
 
-        pass_elapsed_s = max(
-            ready_elapsed_s,
-            lifecycle_elapsed_s,
-            cleanup_elapsed_s or 0.0,
-            recovery_elapsed_s or 0.0,
-            post_recovery_elapsed_s or 0.0,
+    cycle_meta["phase"] = "start_call_in"
+    journal_since = _journal_since_now(meter)
+    cycle_meta["journal_since"] = journal_since
+    shared.log(f"{meter.host} call-in cycle {cycle_num}: press '+' on Service:Call In")
+    meter.press("plus")
+
+    lifecycle = _new_lifecycle()
+    lifecycle_snapshot: Optional[dict] = None
+    lifecycle_elapsed_s = 0.0
+    cleanup_snapshot: Optional[dict] = None
+    cleanup_observed_snapshot: Optional[dict] = None
+    cleanup_elapsed_s: Optional[float] = None
+    recovery_snapshot: Optional[dict] = None
+    recovery_elapsed_s: Optional[float] = None
+    post_recovery_snapshot: Optional[dict] = None
+    post_recovery_observed_snapshot: Optional[dict] = None
+    post_recovery_elapsed_s: Optional[float] = None
+    lifecycle_error = ""
+    cleanup_error = ""
+    post_recovery_error = ""
+    recovery = {
+        "attempted": False,
+        "recovered": False,
+        "saw_splash": False,
+        "saw_status_unavailable": False,
+    }
+
+    cycle_meta["phase"] = "lifecycle"
+    try:
+        lifecycle_snapshot, lifecycle, lifecycle_elapsed_s = _wait_for_call_in_lifecycle(
+            meter,
+            shared,
+            cycle_num=cycle_num,
+            start_timeout_s=settings["start_timeout_s"],
+            completion_timeout_s=settings["completion_timeout_s"],
+            poll_s=settings["poll_s"],
+            status_loss_grace_s=settings["status_loss_grace_s"],
         )
+    except Exception as exc:
+        lifecycle_error = str(exc)
+        if isinstance(exc, CallInObservationError):
+            lifecycle_snapshot = exc.snapshot
+            if exc.lifecycle is not None:
+                lifecycle = exc.lifecycle
         shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: pass in {pass_elapsed_s:.1f}s "
-            f"({_format_delta('ppp_connect', deltas['connect_delta'])}, "
-            f"{_format_delta('ppp_disconnect', deltas['disconnect_delta'])})"
-            f"{signal_summary}"
+            f"{meter.host} call-in cycle {cycle_num}: lifecycle observation ended with "
+            f"{type(exc).__name__}: {exc}",
         )
 
-        if lifecycle_error:
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: validated despite lifecycle observer error -> "
-                f"{lifecycle_error}",
+    cycle_meta["lifecycle_elapsed_s"] = round(lifecycle_elapsed_s, 1)
+    cycle_meta["lifecycle_snapshot"] = _snapshot_metadata(lifecycle_snapshot)
+    cycle_meta["lifecycle"] = dict(lifecycle)
+    cycle_meta["lifecycle_error"] = lifecycle_error or None
+
+    if not lifecycle_error and not lifecycle["runtime_loss_after_start"]:
+        cycle_meta["phase"] = "cleanup"
+        if settings["post_completion_grace_s"] > 0:
+            _sleep_with_stop(shared, settings["post_completion_grace_s"])
+
+        try:
+            cleanup_snapshot, cleanup_elapsed_s = _wait_for_call_in_idle(
+                meter,
+                shared,
+                cycle_num=cycle_num,
+                timeout_s=settings["disconnect_timeout_s"],
+                poll_s=settings["poll_s"],
+                phase="cleanup",
             )
-        if cleanup_error:
+            cleanup_observed_snapshot = cleanup_snapshot
+        except Exception as exc:
+            cleanup_error = str(exc)
+            if isinstance(exc, CallInObservationError):
+                cleanup_observed_snapshot = exc.snapshot
             shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: validated despite cleanup observer error -> "
-                f"{cleanup_error}",
-            )
-        if recovery.get("recovered"):
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: recovery path succeeded "
-                f"(splash={recovery.get('saw_splash')})",
+                f"{meter.host} call-in cycle {cycle_num}: cleanup observation ended with "
+                f"{type(exc).__name__}: {exc}",
             )
 
-        if modem_evidence["signal_line"]:
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: modem marker -> {modem_evidence['signal_line']}"
-            )
-        if platform_evidence["session_complete_line"]:
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: session marker -> "
-                f"{platform_evidence['session_complete_line']}"
-            )
-        elif platform_evidence["call_in_response_line"]:
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: response marker -> "
-                f"{platform_evidence['call_in_response_line']}"
-            )
+    need_recovery = lifecycle["runtime_loss_after_start"] or bool(lifecycle_error) or bool(cleanup_error)
+    if need_recovery:
+        cycle_meta["phase"] = "recovery"
+        recovery_snapshot, recovery, recovery_elapsed_s = _wait_for_meter_status_recovery(
+            meter,
+            shared,
+            cycle_num=cycle_num,
+            timeout_s=settings["recovery_timeout_s"],
+            poll_s=settings["poll_s"],
+        )
+        if recovery_snapshot is not None:
+            cycle_meta["phase"] = "post_recovery_guard"
+            try:
+                post_recovery_snapshot, post_recovery_elapsed_s = _observe_post_recovery_guard(
+                    meter,
+                    shared,
+                    cycle_num=cycle_num,
+                    observe_s=settings["post_recovery_guard_s"],
+                    timeout_s=settings["post_recovery_timeout_s"],
+                    poll_s=settings["poll_s"],
+                )
+                post_recovery_observed_snapshot = post_recovery_snapshot
+            except Exception as exc:
+                post_recovery_error = str(exc)
+                if isinstance(exc, CallInObservationError):
+                    post_recovery_observed_snapshot = exc.snapshot
+                shared.log(
+                    f"{meter.host} call-in cycle {cycle_num}: post-recovery guard ended with "
+                    f"{type(exc).__name__}: {exc}",
+                )
 
-        if platform_evidence["update_activity"]:
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: update activity observed -> "
-                f"{platform_evidence['update_line'] or 'see platform journal'}",
-            )
+    cycle_meta.update(
+        {
+            "cleanup_elapsed_s": (
+                round(cleanup_elapsed_s, 1) if cleanup_elapsed_s is not None else None
+            ),
+            "recovery_elapsed_s": (
+                round(recovery_elapsed_s, 1) if recovery_elapsed_s is not None else None
+            ),
+            "post_recovery_elapsed_s": (
+                round(post_recovery_elapsed_s, 1)
+                if post_recovery_elapsed_s is not None
+                else None
+            ),
+            "cleanup_snapshot": _snapshot_metadata(cleanup_observed_snapshot),
+            "recovery_snapshot": _snapshot_metadata(recovery_snapshot),
+            "post_recovery_snapshot": _snapshot_metadata(post_recovery_observed_snapshot),
+            "cleanup_error": cleanup_error or None,
+            "post_recovery_error": post_recovery_error or None,
+            "recovery": dict(recovery),
+        }
+    )
 
-        check_stop_event(shared)
+    cycle_meta["phase"] = "collect_journals"
+    include_previous_boot = bool(need_recovery)
+    platform_journal = _get_service_journal(
+        meter,
+        service="MS3_Platform.service",
+        since=journal_since,
+        max_lines=settings["platform_journal_max_lines"],
+        include_previous_boot=include_previous_boot,
+    )
+    modem_journal = _get_service_journal(
+        meter,
+        service="MS3_Modem.service",
+        since=journal_since,
+        max_lines=settings["modem_journal_max_lines"],
+        include_previous_boot=include_previous_boot,
+    )
+    platform_evidence = _collect_platform_call_in_evidence(platform_journal)
+    modem_evidence = _collect_modem_call_in_evidence(modem_journal)
+
+    effective_cleanup_snapshot = cleanup_snapshot
+    effective_cleanup_source = "cleanup" if cleanup_snapshot is not None else None
+    if (
+        effective_cleanup_snapshot is None
+        and post_recovery_snapshot is not None
+        and not recovery.get("saw_splash")
+    ):
+        effective_cleanup_snapshot = post_recovery_snapshot
+        effective_cleanup_source = "post_recovery"
+    if (
+        effective_cleanup_snapshot is None
+        and recovery_snapshot is not None
+        and not recovery.get("saw_splash")
+        and _snapshot_is_idle(recovery_snapshot)
+    ):
+        effective_cleanup_snapshot = recovery_snapshot
+        effective_cleanup_source = "recovery"
+    if (
+        effective_cleanup_snapshot is None
+        and lifecycle_snapshot is not None
+        and lifecycle["saw_ready_return"]
+    ):
+        effective_cleanup_snapshot = lifecycle_snapshot
+        effective_cleanup_source = "lifecycle_ready_return"
+
+    cycle_meta["phase"] = "validate"
+    validation = _validate_call_in_result(
+        meter,
+        shared,
+        cycle_num=cycle_num,
+        baseline_snapshot=baseline_snapshot,
+        cleanup_snapshot=effective_cleanup_snapshot,
+        lifecycle=lifecycle,
+        platform_evidence=platform_evidence,
+        modem_evidence=modem_evidence,
+    )
+
+    cycle_meta.update(
+        {
+            "connect_delta": validation["connect_delta"],
+            "disconnect_delta": validation["disconnect_delta"],
+            "failed_connect_delta": validation["failed_connect_delta"],
+            "rssi": modem_evidence["rssi"],
+            "ber": modem_evidence["ber"],
+            "session_manager_started": platform_evidence["session_manager_started"],
+            "session_manager_completed": platform_evidence["session_manager_completed"],
+            "session_complete": platform_evidence["session_complete"],
+            "rsync_started": platform_evidence["rsync_started"],
+            "rsync_completed": platform_evidence["rsync_completed"],
+            "runscript_started": platform_evidence["runscript_started"],
+            "runscript_completed": platform_evidence["runscript_completed"],
+            "update_activity": platform_evidence["update_activity"],
+            "update_restart": platform_evidence["update_restart"],
+            "runtime_loss_after_start": lifecycle["runtime_loss_after_start"],
+            "saw_runtime_splash": (
+                lifecycle["saw_splash_after_start"] or recovery.get("saw_splash")
+            ),
+            "used_previous_boot_journal": include_previous_boot,
+            "effective_cleanup_source": effective_cleanup_source,
+            "effective_cleanup_snapshot": _snapshot_metadata(effective_cleanup_snapshot),
+            "platform_evidence": platform_evidence,
+            "modem_evidence": modem_evidence,
+            "validation": validation,
+        }
+    )
+
+    shared.log(
+        f"{meter.host} call-in cycle {cycle_num}: status evidence -> "
+        f"baseline=[{_snapshot_summary(baseline_snapshot)}] | "
+        f"lifecycle=[{_snapshot_summary(lifecycle_snapshot)}] | "
+        f"cleanup=[{_snapshot_summary(cleanup_observed_snapshot)}] | "
+        f"recovery=[{_snapshot_summary(post_recovery_observed_snapshot or recovery_snapshot)}] | "
+        f"effective={effective_cleanup_source or 'none'}"
+        f"[{_snapshot_summary(effective_cleanup_snapshot)}]"
+    )
+
+    if platform_evidence["call_in_send_line"]:
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: request marker -> "
+            f"{platform_evidence['call_in_send_line']}"
+        )
+    if platform_evidence["call_in_response_line"]:
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: response marker -> "
+            f"{platform_evidence['call_in_response_line']}"
+        )
+    if platform_evidence["session_complete_line"]:
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: session marker -> "
+            f"{platform_evidence['session_complete_line']}"
+        )
+    if platform_evidence["clients_released_line"]:
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: client-release marker -> "
+            f"{platform_evidence['clients_released_line']}"
+        )
+    if modem_evidence["signal_line"]:
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: modem marker -> "
+            f"{modem_evidence['signal_line']}"
+        )
+    if platform_evidence["update_activity"]:
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: update activity observed -> "
+            f"{platform_evidence['update_line'] or 'see platform journal'}",
+        )
+
+    if validation["failures"]:
+        failure_summary = "; ".join(validation["failures"])
+        cycle_meta["status"] = "fail"
+        cycle_meta["error"] = failure_summary
+        raise RuntimeError(failure_summary)
+
+    check_stop_event(shared)
+
+    signal_summary = ""
+    if modem_evidence["rssi"] is not None and modem_evidence["ber"] is not None:
+        signal_summary = f" | rssi={modem_evidence['rssi']} ber={modem_evidence['ber']}"
+    elif effective_cleanup_snapshot and effective_cleanup_snapshot.get("csq_text"):
+        signal_summary = f" | csq={effective_cleanup_snapshot['csq_text']}"
+
+    total_elapsed_s = time.time() - cycle_started
+    cycle_meta.update(
+        {
+            "status": "pass",
+            "phase": "complete",
+            "error": None,
+            "total_elapsed_s": round(total_elapsed_s, 1),
+        }
+    )
+    shared.log(
+        f"{meter.host} call-in cycle {cycle_num}: pass in {total_elapsed_s:.1f}s "
+        f"({_format_delta('ppp_connect', validation['connect_delta'])}, "
+        f"{_format_delta('ppp_disconnect', validation['disconnect_delta'])})"
+        f"{signal_summary}"
+    )
+
+    if lifecycle_error:
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: validated despite lifecycle observer error -> "
+            f"{lifecycle_error}",
+        )
+    if cleanup_error:
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: validated despite cleanup observer error -> "
+            f"{cleanup_error}",
+        )
+    if recovery.get("recovered"):
+        shared.log(
+            f"{meter.host} call-in cycle {cycle_num}: recovery path succeeded "
+            f"(splash={recovery.get('saw_splash')})",
+        )
+
+
+def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
+    func_name = inspect.currentframe().f_code.co_name
+    job_count = int(kwargs.get("job_count", 3))
+    subtest = bool(kwargs.get("subtest", False))
+    settings = {
+        "ready_timeout_s": float(
+            kwargs.get("ready_timeout_s", DEFAULT_CALL_IN_READY_TIMEOUT_S)
+        ),
+        "ready_stable_s": float(kwargs.get("ready_stable_s", DEFAULT_CALL_IN_READY_STABLE_S)),
+        "start_timeout_s": float(kwargs.get("start_timeout_s", DEFAULT_CALL_IN_START_TIMEOUT_S)),
+        "completion_timeout_s": float(
+            kwargs.get("completion_timeout_s", DEFAULT_CALL_IN_COMPLETION_TIMEOUT_S)
+        ),
+        "disconnect_timeout_s": float(
+            kwargs.get("disconnect_timeout_s", DEFAULT_CALL_IN_DISCONNECT_TIMEOUT_S)
+        ),
+        "recovery_timeout_s": float(
+            kwargs.get("recovery_timeout_s", DEFAULT_CALL_IN_RECOVERY_TIMEOUT_S)
+        ),
+        "post_recovery_guard_s": float(
+            kwargs.get("post_recovery_guard_s", DEFAULT_CALL_IN_POST_RECOVERY_GUARD_S)
+        ),
+        "post_recovery_timeout_s": float(
+            kwargs.get("post_recovery_timeout_s", DEFAULT_CALL_IN_POST_RECOVERY_TIMEOUT_S)
+        ),
+        "status_loss_grace_s": float(
+            kwargs.get("status_loss_grace_s", DEFAULT_CALL_IN_STATUS_LOSS_GRACE_S)
+        ),
+        "startup_guard_s": float(
+            kwargs.get("startup_guard_s", DEFAULT_CALL_IN_STARTUP_GUARD_S)
+        ),
+        "poll_s": float(kwargs.get("state_poll_s", DEFAULT_CALL_IN_POLL_S)),
+        "platform_journal_max_lines": int(
+            kwargs.get("platform_journal_max_lines", DEFAULT_CALL_IN_PLATFORM_JOURNAL_LINES)
+        ),
+        "modem_journal_max_lines": int(
+            kwargs.get("modem_journal_max_lines", DEFAULT_CALL_IN_MODEM_JOURNAL_LINES)
+        ),
+        "startup_platform_journal_max_lines": int(
+            kwargs.get(
+                "startup_platform_journal_max_lines",
+                DEFAULT_CALL_IN_STARTUP_PLATFORM_JOURNAL_LINES,
+            )
+        ),
+        "post_completion_grace_s": float(
+            kwargs.get("post_completion_grace_s", DEFAULT_CALL_IN_POST_GRACE_S)
+        ),
+    }
+
+    call_in_meta = _get_call_in_meta(shared)
+    for i in range(job_count):
+        cycle_num = i + 1
+        cycle_started = time.time()
+        cycle_meta = {
+            "status": "running",
+            "phase": "initialize",
+            "error": None,
+            "cycle": cycle_num,
+            "job_count": job_count,
+        }
+        call_in_meta[cycle_num] = cycle_meta
+
+        shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")
+        try:
+            if not subtest:
+                shared.broadcast_progress(meter.host, "call in", cycle_num, job_count)
+
+            _run_call_in_cycle(
+                meter,
+                shared,
+                cycle_num=cycle_num,
+                cycle_meta=cycle_meta,
+                settings=settings,
+                cycle_started=cycle_started,
+            )
+        except Exception as exc:
+            cycle_meta.update(
+                {
+                    "status": "fail",
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "total_elapsed_s": round(time.time() - cycle_started, 1),
+                }
+            )
+            if isinstance(exc, CallInObservationError) and exc.snapshot is not None:
+                cycle_meta["last_observed_snapshot"] = _snapshot_metadata(exc.snapshot)
+            shared.log(
+                f"{meter.host} call-in cycle {cycle_num}: failure metadata -> {cycle_meta}"
+            )
+            raise

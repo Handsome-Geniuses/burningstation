@@ -49,6 +49,12 @@ The test uses three sources on purpose:
    - rsync / runscript activity
    - updater / restart markers
 
+The platform-journal parser associates the first `callIn` sent after the test's
+journal watermark with the `callInResponse` carrying the same `reference`.
+This prevents an older response or a later startup/scheduled call-in from being
+used to validate the manual request. Session completion is allowed to appear
+just after the response because that ordering occurs on real meters.
+
 ## Pass Criteria
 
 The test passes when it can prove all of these:
@@ -61,8 +67,38 @@ The test passes when it can prove all of these:
 6. The modem was released afterward, or updater activity proves the connection
    had already been released before restart logic ran.
 
+The preferred release proof is the final live status snapshot returned by the
+cleanup wait. It must show:
+
+- CIM ready (`S1_WAITING_FOR_CALL_TIME` or `S4_SUSPENDED`)
+- ConnectionServer terminal (`S5_DISCONNECTED` or `S6_ERROR`)
+- modem `S1_IDLE` or `S7_ERROR`
+- no named ConnectionServer client still requesting the connection
+
+The clients parser deliberately treats values such as
+`(none)<hr>Modem Service:` as `(none)`. Some status responses place the next
+HTML section on the same logical line.
+
+PPP counter changes, ordered lifecycle transitions, and modem-journal markers
+remain alternate evidence. The cleanup snapshot is important because CIM can
+return to ready while `RSYNC` or `RUNSCRIPT` still legitimately owns the
+connection. The lifecycle observer returns at that CIM transition, while the
+cleanup observer continues until the follow-on client releases and the meter is
+actually idle.
+
+The old MS3 source treats both `CS_S5_DISCONNECTED` and `CS_S6_ERROR` as
+terminal release states: both clear all connection-needed flags and release
+connection power. Therefore a successful call-in that ends at
+`CS_S6_ERROR`/modem `S7_ERROR` with no clients is a pass under this test's
+end-to-end contract, but it is logged and stored as a teardown warning rather
+than presented as a clean shutdown.
+
 Signal data is logged when available, but missing RSSI/BER alone does not fail
 an otherwise successful end-to-end call-in.
+
+The old Meter source treats a missing `result` in `callInResponse` as `0`; only
+`result=-1` means Session Agent could not connect. The automation follows that
+rule and checks `result=-1` on the response matched to the request reference.
 
 ## Important Edge Cases
 
@@ -74,6 +110,26 @@ or fault-driven call-ins finish first instead of racing them.
 It also waits for the Call In diagnostics page text to change from
 `Wait for the current Call In to complete.` to `Press [+] to Call In.` so we do
 not press `+` while the UI is still blocking manual call-in.
+
+### Session Agent follow-on clients
+
+`SESSION_MANAGER`, `RSYNC`, and `RUNSCRIPT` are independent ConnectionServer
+clients in the old source. A successful `callInResponse` only returns CIM to
+ready; it does not imply those clients have finished. The test therefore does
+not fail merely because its lifecycle snapshot still says
+`cs=S3_CONNECTED | modem=S4_CONNECTED | clients=RSYNC`. It proceeds to cleanup
+and waits for a terminal snapshot.
+
+A run still fails when cleanup/recovery ends with a named client such as
+`RSYNC` active and the connection busy. This preserves the real failure seen in
+`07-56-22_30004641_cycle_all.log`: that active snapshot is not release proof,
+and no independent post-call release source exists in that run. The initial
+pre-connection idle state is never allowed to stand in for a later release.
+
+Lifecycle modem-disconnect evidence is ordered: the observer must first see
+the modem connected before a later disconnected/error state can set that
+proof. This prevents the idle polls immediately after pressing `+` from being
+misclassified as post-call-in disconnect evidence.
 
 ### Fresh boot or fresh MS3 runtime restart
 
@@ -179,6 +235,30 @@ So for this scenario, the practical takeaway is:
 - `assets/ms3/main/MS3.c`
   MS3 schedules a startup call-in after runtime startup.
 
+## Result and Metadata Behavior
+
+Each attempt creates `shared.device_meta["call_in"][cycle_number]` before meter
+navigation starts and updates it as the attempt advances. Metadata is therefore
+available in the job summary on both pass and fail. It includes:
+
+- current status (`running`, `pass`, or `fail`), phase, exception type, and
+  elapsed time
+- baseline, lifecycle, cleanup, recovery, and effective final snapshots (raw
+  status payloads are omitted)
+- lifecycle flags and observer errors
+- matched Session Agent request/reference/response and session/follow-on
+  evidence
+- modem journal evidence and signal data
+- each validation boolean, the exact proof sources, warnings, and all failure
+  reasons
+
+On failure the test emits a compact proof evaluation followed by the complete
+per-cycle metadata record before re-raising the exception. In `cycle_all.py`
+that exception still marks only the `call in` device result as `fail` and then
+propagates through the existing job behavior, so the overall passive result is
+unchanged for genuine failures. A pass with a teardown warning remains a
+call-in pass and does not change another subtest's result.
+
 ## Useful Knobs
 
 The most important kwargs in `cycle_call_in.py` are:
@@ -191,7 +271,10 @@ The most important kwargs in `cycle_call_in.py` are:
 - `recovery_timeout_s`
 - `post_recovery_guard_s`
 - `post_recovery_timeout_s`
+- `status_loss_grace_s`
 - `startup_guard_s`
+- `state_poll_s`
+- `post_completion_grace_s`
 - `platform_journal_max_lines`
 - `modem_journal_max_lines`
 - `startup_platform_journal_max_lines`
