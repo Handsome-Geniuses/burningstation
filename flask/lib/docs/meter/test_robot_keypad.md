@@ -52,8 +52,8 @@ The high-level flow in `test_robot_keypad.py` is:
 
 1. Normalize the button list and read timing kwargs.
 2. Navigate to `Service > Utilities > Peripherals > Keyboard`.
-3. Capture an initial **meter journal cursor** from the meter clock with a
-   small overlap.
+3. Capture the latest opaque journald `__CURSOR` for
+   `MS3_Platform.service`, and preflight `--after-cursor` support.
 4. Start `run_button_press` on the robot.
 5. Start a small collector thread that continuously consumes robot
    `button_press` events and timestamps them when the station receives them.
@@ -74,25 +74,31 @@ The high-level flow in `test_robot_keypad.py` is:
 
 ## Timing Model
 
-### Meter journal cursor / watermark
+### Meter journal cursor
 
-The journal watermark is **meter-side only**.
+The journal cursor is **meter-side only**.
 
 It is not based on robot timestamps, and it is not trying to convert robot
 times into meter times.
 
-Instead, it is only a scan cursor used to avoid re-reading the entire platform
-journal every loop:
+It is journald's opaque position identifier, not a date/time watermark. It is
+used to read each new platform entry once:
 
-1. Right after keypad navigation, the test asks the meter for its current clock
-   and subtracts a small overlap.
-2. Each journal poll reads from `--since "<current cursor>"`.
-3. After the poll, the cursor advances to the newest parsed journal timestamp,
-   again with a small overlap.
-4. Deduplication prevents the overlap from double-counting the same log line.
+1. Right after keypad navigation and before robot motion, the test reads the
+   latest JSON entry for `MS3_Platform.service` and saves its `__CURSOR`.
+2. It runs a no-output `--after-cursor` preflight. Unsupported or unavailable
+   journal acquisition fails before the robot job starts.
+3. Each journal poll reads `--after-cursor=<current cursor>` using JSON output.
+4. The complete output batch is parsed before matcher state is changed.
+5. After a valid batch, the cursor advances to the final returned entry even if
+   that entry is not a keypad message.
+6. Keypad candidates retain their own cursor, which is also their deduplication
+   identity.
 
-So the watermark is just an incremental journal cursor.
-It does not try to synchronize robot and meter clocks.
+The backlog remains in journal traversal order. Realtime timestamps are kept
+only for human diagnostics and are never used to advance, sort, or match
+entries. A Session Agent `Set Date Time` notification can therefore move the
+meter clock forward or backward without placing new records behind the reader.
 
 ### How robot events and journal lines are related
 
@@ -104,24 +110,29 @@ Robot events and meter logs are related by:
 
 They are **not** related by assuming the robot and meter clocks are in sync.
 
-### Why `short-precise` is used
+### Why JSON output is used
 
-The current test uses:
+The test uses:
 
-`journalctl -u MS3_Platform.service --no-pager -o short-precise`
+`journalctl -u MS3_Platform.service --after-cursor=<cursor> --no-pager -o json`
 
-This is preferred over plain default output because:
+JSON supplies the fields needed to make acquisition clock-independent:
 
-1. it is human-readable during debugging
-2. it includes sub-second timestamps
-3. it is stable enough to parse and dedupe
+1. `__CURSOR` identifies the exact journal position and entry
+2. `MESSAGE` supplies the existing `KEY_PRESSED` matcher input
+3. `__REALTIME_TIMESTAMP` is retained as display-only context
+4. hostname, identifier, and PID fields can be reconstructed into a readable
+   diagnostic line
 
-The earlier JSON approach was useful because it exposed exact structured
-timestamps like `__REALTIME_TIMESTAMP`, but it was much harder to read while
-watching the test live.
+The old newest-400-line tail has been removed. With a forward opaque cursor,
+every returned service entry is new, so limiting a poll to the newest 400 could
+only create a loss window after a busy or delayed poll. It is safer to consume
+the complete incremental result.
 
-`short-precise` keeps the readability benefit while still giving enough timing
-precision for overlap scanning and duplicate suppression.
+Filtering remains station-side. Adding a meter-side grep for `KEY_PRESSED`
+would make it harder to advance safely across nonmatching entries and would add
+version-dependent behavior to resource-limited meters. Cursor polling already
+avoids repeatedly transferring the same non-key traffic.
 
 ### After-buffer before matching
 
@@ -179,6 +190,21 @@ request at most one retry for button `1` across the whole run.
 The test currently just logs this in all caps once the timeout is exceeded.
 It does **not** try to recover this case automatically yet.
 
+### Journal acquisition failure
+
+A nonzero journal command, SSH exception, malformed JSON batch, or missing
+cursor is not treated as proof that a key failed to register.
+
+The test leaves the last good cursor unchanged and retries acquisition on a
+later loop. Any pending decision to retry a button or fail an exhausted retry
+is deferred until a fresh journal recheck succeeds. If acquisition does not
+recover before `max_duration_s`, the terminal error reports journal acquisition
+failure rather than a missing electrical press.
+
+Parsing is atomic: a malformed batch changes neither the cursor, deduplication
+set, processed-entry count, nor backlog. A later successful poll can request the
+same range again without losing its valid entries.
+
 ### Page drift
 
 If the meter is no longer on the keypad page, the test logs that fact and calls
@@ -191,7 +217,10 @@ confirmed in the meter journal, the test does not fail immediately. It starts a
 `robot_program_done_grace_s` window, currently 6.0 seconds by default, and keeps
 polling the meter journal during that window. If the remaining required meter
 confirmations arrive before the grace expires, the test can still pass. If the
-grace expires and the meter confirmations are still incomplete, the test fails.
+grace expires and the meter confirmations are still incomplete after a
+successful journal read, the test fails. A current acquisition failure defers
+that absence decision until the journal recovers or overall max duration is
+reached.
 
 This grace window is meant to absorb late journal visibility after the robot has
 already completed its planned queue. It is not a replacement for retry handling.
@@ -262,12 +291,17 @@ When enabled, the test logs:
 
 - startup config
 - meter journal cursor updates
+- journal entry and acquisition-error counts
 - raw robot event handling
 - after-buffer waiting decisions
 - journal poll summaries
 - retry request / cancel responses
 - timeout and retry decisions
 - final summary state
+
+The compact `shared.device_meta["keypad"]` result also includes a `journal`
+object containing the initial/current cursor, poll and processed-entry counts,
+read-error counts, and the most recent acquisition error.
 
 If you need to tune behavior, start with:
 

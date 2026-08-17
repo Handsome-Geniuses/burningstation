@@ -1,11 +1,13 @@
 import inspect
+import json
 import queue
 import re
+import shlex
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Deque, Dict, List, Optional
 
 import requests
@@ -21,13 +23,8 @@ KEY_PRESSED_RE = re.compile(
     r"KEY_PRESSED:\s*(?P<key>[^,]+),\s*isAutoRepeat=(?P<ar>true|false),\s*from\s+(?P<src>\S+)",
     re.IGNORECASE,
 )
-SHORT_PRECISE_RE = re.compile(
-    r"^(?P<stamp>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\.\d{6})\s+\S+\s+\S+:\s+(?P<msg>.*)$"
-)
-ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 ALLOWED_KEYPAD_SRCS = {"KEY_PAD_2", "KBD_CONTROLLER"}
-JOURNAL_OVERLAP_S = 2.0
-JOURNAL_MAX_LINES = 400
+JOURNAL_UNIT = "MS3_Platform.service"
 DEFAULT_JOURNAL_AFTER_BUFFER_S = 3.5
 DEFAULT_MAX_DURATION_BASE_S = 50.0
 DEFAULT_PER_PLANNED_PRESS_TIMEOUT_S = 6.0
@@ -48,6 +45,7 @@ class KeypadAttempt:
     meter_log_timestamp_text: str = ""
     meter_log_message: str = ""
     meter_log_raw_line: str = ""
+    meter_log_cursor: str = ""
     retry_requested: bool = False
     retry_replaced: bool = False
     retry_cancelled: bool = False
@@ -63,8 +61,7 @@ class KeypadRunState:
     required_per_button: int
     start_epoch_s: float
     start_monotonic_s: float
-    initial_journal_cursor_since: str
-    meter_year: int
+    initial_journal_cursor: str
     debug_keypad: bool = False
     journal_after_buffer_s: float = DEFAULT_JOURNAL_AFTER_BUFFER_S
     confirmed_counts: Dict[str, int] = field(default_factory=dict)
@@ -83,16 +80,28 @@ class KeypadRunState:
     final_error: str = ""
     success: bool = False
     journal_poll_count: int = 0
-    last_journal_cursor_since: str = ""
-    last_journal_timestamp_text: str = ""
-    last_journal_timestamp_dt: Optional[datetime] = None
+    current_journal_cursor: str = ""
+    journal_entries_processed: int = 0
+    journal_read_error_count: int = 0
+    journal_consecutive_read_errors: int = 0
+    journal_last_error: str = ""
+    journal_last_fetch_ok: bool = True
+    journal_last_success_monotonic_s: Optional[float] = None
 
     def __post_init__(self) -> None:
         self.confirmed_counts = {button: 0 for button in self.expected_buttons}
         self.robot_attempt_counts = {button: 0 for button in self.expected_buttons}
         self.retry_counts = {button: 0 for button in self.expected_buttons}
         self.pending_attempts = {button: deque() for button in self.expected_buttons}
-        self.last_journal_cursor_since = self.initial_journal_cursor_since
+        self.current_journal_cursor = self.initial_journal_cursor
+
+
+@dataclass(frozen=True)
+class JournalFetchResult:
+    ok: bool
+    new_candidates: int = 0
+    entries_processed: int = 0
+    error: str = ""
 
 
 def _norm(value: str) -> str:
@@ -109,27 +118,106 @@ def _keypad_debug(shared: SharedState, state: KeypadRunState, message: str, *, s
     _keypad_log(shared, message, section=section)
 
 
-def _get_initial_meter_journal_cursor(
-    meter: SSHMeter,
-    overlap_s: float = JOURNAL_OVERLAP_S,
-) -> tuple[str, int]:
-    raw = (meter.cli("date '+%s %Y'") or "").strip()
-    parts = raw.split()
-    if len(parts) >= 2:
-        meter_epoch_s = max(0, int(parts[0]))
-        meter_year = int(parts[1])
-        return f"@{max(0, int(meter_epoch_s - max(0.0, overlap_s)))}", meter_year
-
-    fallback_dt = datetime.now()
-    return f"@{max(0, int(time.time() - max(0.0, overlap_s)))}", fallback_dt.year
+def _journal_after_cursor_command(cursor: str, *, lines: Optional[int] = None) -> str:
+    line_arg = f" -n {lines}" if lines is not None else ""
+    return (
+        f"journalctl -u {JOURNAL_UNIT} --after-cursor={shlex.quote(cursor)}"
+        f"{line_arg} --no-pager -o json"
+    )
 
 
-def _cursor_from_datetime(value: datetime, overlap_s: float = JOURNAL_OVERLAP_S) -> str:
-    return (value - timedelta(seconds=max(0.0, overlap_s))).strftime("%Y-%m-%d %H:%M:%S.%f")
+def _journal_message(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        try:
+            return bytes(value).decode(errors="replace")
+        except (TypeError, ValueError):
+            pass
+    if value is None:
+        return ""
+    return str(value)
 
 
-def _journal_entry_id(timestamp_text: str, raw_line: str) -> str:
-    return f"{timestamp_text}|{raw_line}"
+def _journal_timestamp_text(value: Any) -> str:
+    try:
+        epoch_us = int(value)
+    except (TypeError, ValueError):
+        return str(value or "")
+    try:
+        return datetime.fromtimestamp(epoch_us / 1_000_000).strftime("%Y-%m-%d %H:%M:%S.%f")
+    except (OSError, OverflowError, ValueError):
+        return str(value or "")
+
+
+def _journal_display_line(payload: Dict[str, Any], timestamp_text: str, message: str) -> str:
+    hostname = str(payload.get("_HOSTNAME") or "").strip()
+    identifier = str(payload.get("SYSLOG_IDENTIFIER") or payload.get("_COMM") or "").strip()
+    pid = str(payload.get("_PID") or "").strip()
+    source = identifier
+    if pid:
+        source = f"{source}[{pid}]" if source else f"[{pid}]"
+    prefix = " ".join(part for part in (timestamp_text, hostname, source) if part)
+    return f"{prefix}: {message}" if prefix else message
+
+
+def _parse_journal_json_batch(text: str) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    for line_number, raw_line in enumerate((text or "").splitlines(), start=1):
+        if not raw_line.strip():
+            continue
+        try:
+            payload = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid journal JSON on output line {line_number}: {exc.msg}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"journal JSON on output line {line_number} is not an object")
+
+        cursor = payload.get("__CURSOR")
+        if not isinstance(cursor, str) or not cursor:
+            raise ValueError(f"journal JSON on output line {line_number} has no __CURSOR")
+
+        message = _journal_message(payload.get("MESSAGE"))
+        timestamp_text = _journal_timestamp_text(payload.get("__REALTIME_TIMESTAMP"))
+        entries.append(
+            {
+                "entry_id": cursor,
+                "journal_cursor": cursor,
+                "timestamp_text": timestamp_text,
+                "message": message,
+                "raw_line": _journal_display_line(payload, timestamp_text, message),
+            }
+        )
+    return entries
+
+
+def _get_initial_meter_journal_cursor(meter: SSHMeter) -> tuple[str, str]:
+    cmd = f"journalctl -u {JOURNAL_UNIT} -n 1 --no-pager -o json"
+    try:
+        code, output, error = meter.exec_parse(cmd)
+    except Exception as exc:
+        return "", f"initial journal cursor command failed: {exc}"
+    if code != 0:
+        detail = error or output or f"exit code {code}"
+        return "", f"initial journal cursor command failed: {detail}"
+
+    try:
+        entries = _parse_journal_json_batch(output)
+    except ValueError as exc:
+        return "", f"unable to parse initial journal cursor: {exc}"
+    if not entries:
+        return "", f"no entries found for {JOURNAL_UNIT}; cannot establish a safe journal cursor"
+
+    cursor = entries[-1]["journal_cursor"]
+    probe_cmd = _journal_after_cursor_command(cursor, lines=0)
+    try:
+        probe_code, probe_output, probe_error = meter.exec_parse(probe_cmd)
+    except Exception as exc:
+        return "", f"journal --after-cursor preflight failed: {exc}"
+    if probe_code != 0:
+        detail = probe_error or probe_output or f"exit code {probe_code}"
+        return "", f"journal --after-cursor preflight failed: {detail}"
+    return cursor, ""
 
 
 def _iso_from_epoch(epoch_s: Optional[float]) -> Optional[str]:
@@ -150,6 +238,7 @@ def _attempt_to_meta(attempt: KeypadAttempt) -> Dict[str, Any]:
         "meter_log_timestamp_text": attempt.meter_log_timestamp_text,
         "meter_log_message": attempt.meter_log_message,
         "meter_log_raw_line": attempt.meter_log_raw_line,
+        "meter_log_cursor": attempt.meter_log_cursor,
         "retry_requested": attempt.retry_requested,
         "retry_replaced": attempt.retry_replaced,
         "retry_cancelled": attempt.retry_cancelled,
@@ -571,86 +660,84 @@ def _handle_robot_events(
             )
 
 
-def _parse_short_precise_line(raw_line: str, meter_year: int) -> Optional[Dict[str, Any]]:
-    clean_line = ANSI_RE.sub("", raw_line or "").strip()
-    if not clean_line or clean_line.startswith("-- Logs begin at "):
-        return None
-
-    match = SHORT_PRECISE_RE.match(clean_line)
-    if not match:
-        return None
-
-    timestamp_dt = datetime.strptime(
-        f"{meter_year} {match.group('stamp')}",
-        "%Y %b %d %H:%M:%S.%f",
-    )
-    timestamp_text = timestamp_dt.strftime("%Y-%m-%d %H:%M:%S.%f")
-    return {
-        "timestamp_dt": timestamp_dt,
-        "timestamp_text": timestamp_text,
-        "message": match.group("msg"),
-        "raw_line": clean_line,
-    }
+def _record_journal_read_error(
+    shared: SharedState,
+    state: KeypadRunState,
+    message: str,
+) -> JournalFetchResult:
+    previous_error = state.journal_last_error
+    state.journal_read_error_count += 1
+    state.journal_consecutive_read_errors += 1
+    state.journal_last_error = message
+    state.journal_last_fetch_ok = False
+    if state.journal_consecutive_read_errors == 1 or message != previous_error:
+        _keypad_log(shared, f"meter journal acquisition failed: {message}", section="journal")
+    else:
+        _keypad_debug(shared, state, f"meter journal acquisition still failing: {message}", section="journal")
+    return JournalFetchResult(ok=False, error=message)
 
 
 def _fetch_new_keypad_logs(
     meter: SSHMeter,
     shared: SharedState,
     state: KeypadRunState,
-) -> int:
-    cmd = (
-        f'journalctl -u MS3_Platform.service --since "{state.last_journal_cursor_since}" '
-        f"-n {JOURNAL_MAX_LINES} --no-pager -o short-precise"
-    )
-    text = meter.cli(cmd)
+) -> JournalFetchResult:
+    cmd = _journal_after_cursor_command(state.current_journal_cursor)
     state.journal_poll_count += 1
-    if not text:
-        _keypad_debug(shared, state, "journal poll returned no output", section="journal")
-        return 0
+    try:
+        code, output, error = meter.exec_parse(cmd)
+    except Exception as exc:
+        return _record_journal_read_error(shared, state, f"journal command failed: {exc}")
+    if code != 0:
+        detail = error or output or f"exit code {code}"
+        return _record_journal_read_error(shared, state, f"journal command failed: {detail}")
 
-    max_dt = state.last_journal_timestamp_dt
-    max_text = state.last_journal_timestamp_text
+    try:
+        entries = _parse_journal_json_batch(output)
+    except ValueError as exc:
+        return _record_journal_read_error(shared, state, str(exc))
+
+    recovered_after_errors = state.journal_consecutive_read_errors > 0
+    state.journal_consecutive_read_errors = 0
+    state.journal_last_fetch_ok = True
+    state.journal_last_success_monotonic_s = time.monotonic()
+    if recovered_after_errors:
+        _keypad_log(shared, "meter journal acquisition recovered", section="journal")
+
+    if not entries:
+        _keypad_debug(shared, state, "journal poll returned no new entries", section="journal")
+        return JournalFetchResult(ok=True)
+
     new_candidates = 0
-    parsed_lines = 0
-
-    for raw_line in text.splitlines():
-        parsed_line = _parse_short_precise_line(raw_line, state.meter_year)
-        if parsed_line is None:
-            continue
-
-        parsed_lines += 1
-        timestamp_dt = parsed_line["timestamp_dt"]
-        timestamp_text = parsed_line["timestamp_text"]
-        message = parsed_line["message"]
-        raw_clean = parsed_line["raw_line"]
-
-        if max_dt is None or timestamp_dt > max_dt:
-            max_dt = timestamp_dt
-            max_text = timestamp_text
-
+    for entry in entries:
+        message = entry["message"]
         parsed = KEY_PRESSED_RE.search(message)
         if not parsed:
             continue
 
-        entry_id = _journal_entry_id(timestamp_text, raw_clean)
+        entry_id = entry["entry_id"]
         if entry_id in state.used_journal_ids:
             continue
 
+        common_meta = {
+            "journal_cursor": entry["journal_cursor"],
+            "timestamp_text": entry["timestamp_text"],
+            "message": message,
+            "raw_line": entry["raw_line"],
+        }
         if parsed.group("ar").lower() == "true":
             state.used_journal_ids.add(entry_id)
             state.ignored_journal_entries.append(
                 {
                     "button_name": _norm(parsed.group("key")),
-                    "timestamp_text": timestamp_text,
-                    "message": message,
-                    "raw_line": raw_clean,
+                    **common_meta,
                     "reason": "auto-repeat=true",
                 }
             )
             _keypad_debug(
                 shared,
                 state,
-                f"ignoring auto-repeat keypad log: {raw_clean}",
+                f"ignoring auto-repeat keypad log: {entry['raw_line']}",
                 section="journal",
             )
             continue
@@ -662,16 +749,14 @@ def _fetch_new_keypad_logs(
             state.ignored_journal_entries.append(
                 {
                     "button_name": button_name,
-                    "timestamp_text": timestamp_text,
-                    "message": message,
-                    "raw_line": raw_clean,
+                    **common_meta,
                     "reason": f"unexpected source={src}",
                 }
             )
             _keypad_debug(
                 shared,
                 state,
-                f"ignoring keypad log from unexpected source={src}: {raw_clean}",
+                f"ignoring keypad log from unexpected source={src}: {entry['raw_line']}",
                 section="journal",
             )
             continue
@@ -680,33 +765,35 @@ def _fetch_new_keypad_logs(
         state.journal_backlog.append(
             {
                 "entry_id": entry_id,
-                "timestamp_dt": timestamp_dt,
-                "timestamp_text": timestamp_text,
-                "message": message,
-                "raw_line": raw_clean,
                 "button_name": button_name,
                 "src": src,
+                **common_meta,
             }
         )
         new_candidates += 1
 
-    if max_dt is not None:
-        state.last_journal_timestamp_dt = max_dt
-        state.last_journal_timestamp_text = max_text
-        state.last_journal_cursor_since = _cursor_from_datetime(max_dt)
+    # The batch is parsed completely before any state is changed. Only then is
+    # the opaque cursor advanced to the final entry, regardless of whether that
+    # entry was a keypad message. This prevents non-key traffic from being read
+    # repeatedly and makes wall-clock changes irrelevant to acquisition.
+    state.current_journal_cursor = entries[-1]["journal_cursor"]
+    state.journal_entries_processed += len(entries)
 
-    state.journal_backlog.sort(key=lambda entry: (entry["timestamp_dt"], entry["entry_id"]))
     _keypad_debug(
         shared,
         state,
         (
-            f"journal poll #{state.journal_poll_count}: parsed_lines={parsed_lines}, "
+            f"journal poll #{state.journal_poll_count}: entries={len(entries)}, "
             f"new_candidates={new_candidates}, backlog={len(state.journal_backlog)}, "
-            f"cursor_since={state.last_journal_cursor_since}"
+            f"cursor={state.current_journal_cursor}"
         ),
         section="journal",
     )
-    return new_candidates
+    return JournalFetchResult(
+        ok=True,
+        new_candidates=new_candidates,
+        entries_processed=len(entries),
+    )
 
 
 def _attempt_is_journal_match_eligible(
@@ -749,6 +836,7 @@ def _match_keypad_logs(
             state.ignored_journal_entries.append(
                 {
                     "button_name": button_name,
+                    "journal_cursor": entry["journal_cursor"],
                     "timestamp_text": entry["timestamp_text"],
                     "message": entry["message"],
                     "raw_line": entry["raw_line"],
@@ -761,6 +849,7 @@ def _match_keypad_logs(
             state.ignored_journal_entries.append(
                 {
                     "button_name": button_name,
+                    "journal_cursor": entry["journal_cursor"],
                     "timestamp_text": entry["timestamp_text"],
                     "message": entry["message"],
                     "raw_line": entry["raw_line"],
@@ -774,6 +863,7 @@ def _match_keypad_logs(
             state.ignored_journal_entries.append(
                 {
                     "button_name": button_name,
+                    "journal_cursor": entry["journal_cursor"],
                     "timestamp_text": entry["timestamp_text"],
                     "message": entry["message"],
                     "raw_line": entry["raw_line"],
@@ -810,6 +900,7 @@ def _match_keypad_logs(
         attempt.meter_log_timestamp_text = entry["timestamp_text"]
         attempt.meter_log_message = entry["message"]
         attempt.meter_log_raw_line = entry["raw_line"]
+        attempt.meter_log_cursor = entry["journal_cursor"]
 
         if attempt.robot_pressed is None:
             attempt.result = "confirmed_without_robot_result"
@@ -824,6 +915,7 @@ def _match_keypad_logs(
             {
                 "button_name": button_name,
                 "attempt": attempt.attempt,
+                "journal_cursor": entry["journal_cursor"],
                 "timestamp_text": entry["timestamp_text"],
                 "message": entry["message"],
                 "raw_line": entry["raw_line"],
@@ -883,9 +975,17 @@ def _final_journal_recheck(
     retry_command_timeout_s: float,
     force_attempt_ids: Optional[set[tuple[str, int]]] = None,
     reason: str,
-) -> None:
+) -> bool:
     _keypad_debug(shared, state, f"running final journal recheck | reason={reason}", section="journal")
-    _fetch_new_keypad_logs(meter, shared, state)
+    fetch_result = _fetch_new_keypad_logs(meter, shared, state)
+    if not fetch_result.ok:
+        _keypad_debug(
+            shared,
+            state,
+            f"deferring journal absence decision because recheck failed | reason={reason}",
+            section="journal",
+        )
+        return False
     _match_keypad_logs(
         shared,
         state,
@@ -894,6 +994,7 @@ def _final_journal_recheck(
         retry_command_timeout_s=retry_command_timeout_s,
         force_attempt_ids=force_attempt_ids,
     )
+    return True
 
 
 def _check_attempt_timeouts(
@@ -949,7 +1050,7 @@ def _check_attempt_timeouts(
                     f"robot reported pressed=false; verifying meter log after "
                     f"{state.journal_after_buffer_s:.1f}s after-buffer"
                 )
-                _final_journal_recheck(
+                journal_recheck_ok = _final_journal_recheck(
                     meter,
                     shared,
                     state,
@@ -962,6 +1063,13 @@ def _check_attempt_timeouts(
                     ),
                 )
                 if attempt.meter_confirmed:
+                    continue
+                if not journal_recheck_ok:
+                    attempt.result = "journal_recheck_pending"
+                    attempt.note = (
+                        "robot reported pressed=false; journal acquisition failed, "
+                        "so retry decision is deferred"
+                    )
                     continue
 
                 if _request_retry(
@@ -1000,7 +1108,7 @@ def _check_attempt_timeouts(
                 attempt.note = (
                     f"meter log did not confirm the press within {per_button_timeout_s:.1f}s"
                 )
-                _final_journal_recheck(
+                journal_recheck_ok = _final_journal_recheck(
                     meter,
                     shared,
                     state,
@@ -1010,6 +1118,13 @@ def _check_attempt_timeouts(
                     reason=f"meter log timeout check for '{attempt.raw_button_name}' attempt {attempt.attempt}",
                 )
                 if attempt.meter_confirmed:
+                    continue
+                if not journal_recheck_ok:
+                    attempt.result = "journal_recheck_pending"
+                    attempt.note = (
+                        "meter log timeout reached; journal acquisition failed, "
+                        "so retry decision is deferred"
+                    )
                     continue
 
                 if _request_retry(
@@ -1046,6 +1161,15 @@ def _write_keypad_meta(shared: SharedState, state: KeypadRunState) -> None:
             "confirmed_counts": dict(state.confirmed_counts),
             "program_done_data": dict(state.program_done_data or {}),
             "errors": list(state.errors),
+            "journal": {
+                "initial_cursor": state.initial_journal_cursor,
+                "current_cursor": state.current_journal_cursor,
+                "poll_count": state.journal_poll_count,
+                "entries_processed": state.journal_entries_processed,
+                "read_error_count": state.journal_read_error_count,
+                "consecutive_read_errors": state.journal_consecutive_read_errors,
+                "last_error": state.journal_last_error,
+            },
             "duration_s": round(max(0.0, time.monotonic() - state.start_monotonic_s), 3),
         }
     )
@@ -1111,14 +1235,13 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     if not is_on_keypad_page(meter, shared):
         _keypad_log(shared, "warning: did NOT make it to the keypad page", section="ui")
 
-    initial_journal_cursor_since, meter_year = _get_initial_meter_journal_cursor(meter)
+    initial_journal_cursor, initial_journal_error = _get_initial_meter_journal_cursor(meter)
     state = KeypadRunState(
         expected_buttons=buttons,
         required_per_button=job_count,
         start_epoch_s=start_epoch_s,
         start_monotonic_s=start_monotonic_s,
-        initial_journal_cursor_since=initial_journal_cursor_since,
-        meter_year=meter_year,
+        initial_journal_cursor=initial_journal_cursor,
         debug_keypad=debug_keypad,
         journal_after_buffer_s=journal_after_buffer_s,
     )
@@ -1131,12 +1254,26 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
         ),
         section="init",
     )
+    if initial_journal_error:
+        state.journal_read_error_count = 1
+        state.journal_consecutive_read_errors = 1
+        state.journal_last_error = initial_journal_error
+        state.journal_last_fetch_ok = False
+        try:
+            _fail_keypad(
+                shared,
+                state,
+                f"Unable to initialize meter journal acquisition: {initial_journal_error}",
+            )
+        finally:
+            shared.log(f"KeypadRunState = {state}")
+            _write_keypad_meta(shared, state)
     _keypad_debug(
         shared,
         state,
         (
             f"initial meter journal cursor captured after keypad navigation | "
-            f"since={state.initial_journal_cursor_since} | meter_year={state.meter_year}"
+            f"cursor={state.initial_journal_cursor}"
         ),
         section="journal",
     )
@@ -1235,7 +1372,10 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
                         ),
                         section="robot",
                     )
-                elif time.monotonic() - state.program_done_seen_monotonic_s >= robot_program_done_grace_s:
+                elif (
+                    time.monotonic() - state.program_done_seen_monotonic_s >= robot_program_done_grace_s
+                    and state.journal_last_fetch_ok
+                ):
                     _fail_keypad(
                         shared,
                         state,
@@ -1248,6 +1388,15 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
 
             elapsed_s = time.monotonic() - state.start_monotonic_s
             if elapsed_s > max_duration_s:
+                if state.journal_consecutive_read_errors > 0:
+                    _fail_keypad(
+                        shared,
+                        state,
+                        (
+                            f"Meter journal acquisition remained unavailable until max duration "
+                            f"({max_duration_s:.1f} sec): {state.journal_last_error}"
+                        ),
+                    )
                 _fail_keypad(shared, state, f"max duration exceeded ({max_duration_s:.1f} sec)")
 
             if not is_on_keypad_page(meter, shared):
@@ -1256,6 +1405,18 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
                     "No longer on keypad page... re-navigating to keypad page",
                     section="ui",
                 )
+                # TODO(keypad-recovery): Do not navigate while the robot can
+                # still press the meter. A platform/UI restart can return the
+                # display to the normal UX page while the robot job continues.
+                # Physical UP/DOWN/BACK/ENTER/CANCEL/ACCEPT presses can then
+                # race goto_diagnostics_path()'s synthetic navigation presses,
+                # invalidate its page/selection snapshot, and make recovery
+                # time out on the wrong diagnostics page. Other keys can also
+                # trigger normal UX behavior (for example, claiming the modem).
+                # A future recovery flow should stop or pause robot motion,
+                # perform a final cursor read and reconcile completed presses,
+                # wait for the meter UI to stabilize, navigate back to Keyboard
+                # diagnostics, and start/resume only the remaining buttons.
                 meter.goto_keypad()
 
             time.sleep(poll_s)
@@ -1268,7 +1429,9 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             state,
             (
                 f"final summary: success={state.success}, confirmed_counts={state.confirmed_counts}, "
-                f"retry_counts={state.retry_counts}, backlog={len(state.journal_backlog)}"
+                f"retry_counts={state.retry_counts}, backlog={len(state.journal_backlog)}, "
+                f"journal_entries={state.journal_entries_processed}, "
+                f"journal_read_errors={state.journal_read_error_count}"
             ),
             section="summary",
         )
