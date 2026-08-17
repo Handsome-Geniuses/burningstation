@@ -788,6 +788,26 @@ class SSHMeter(sshkit.Client):
             return "plus", down_steps
         return "minus", up_steps
 
+    @staticmethod
+    def _diagnostics_debug_context(state: DiagPageState) -> str:
+        selected_index = state["selected_index"]
+        selected_item = None
+        if selected_index is not None and 0 <= selected_index < len(state["menu_items"]):
+            selected_item = state["menu_items"][selected_index]["text"]
+
+        return (
+            "\nDiagnostics page state:"
+            f"\n  title={state['title']!r}"
+            f"\n  title_segments={state['title_segments']!r}"
+            f"\n  is_menu={state['is_menu']!r}"
+            f"\n  selected_index={selected_index!r}"
+            f"\n  selected_item={selected_item!r}"
+            f"\n  menu_items={state['menu_items']!r}"
+            "\n----- BEGIN DIAGNOSTICS PAGE HTML -----\n"
+            f"{state['page_html']}\n"
+            "----- END DIAGNOSTICS PAGE HTML -----"
+        )
+
     def get_diagnostics_state(self, timeout: float = 5.0) -> DiagPageState:
         page_html = self._get_uipage_html(timeout=timeout)
 
@@ -861,12 +881,16 @@ class SSHMeter(sshkit.Client):
 
         state = self.get_diagnostics_state(timeout=fetch_timeout)
         if not state["title_segments"]:
-            raise RuntimeError("Unable to parse the current diagnostics page title")
+            raise RuntimeError(
+                "Unable to parse the current diagnostics page title"
+                f"{self._diagnostics_debug_context(state)}"
+            )
 
         service_aliases = self._diag_step_aliases("service")
         if reset_to_service and not self._diag_matches(service_aliases, state["title_segments"][-1]):
             raise RuntimeError(
                 f"Expected diagnostics home page after reset, found '{state['title']}'"
+                f"{self._diagnostics_debug_context(state)}"
             )
 
         for target_aliases in steps:
@@ -877,6 +901,7 @@ class SSHMeter(sshkit.Client):
             if not state["is_menu"]:
                 raise RuntimeError(
                     f"Cannot navigate from non-menu diagnostics page '{state['title']}'"
+                    f"{self._diagnostics_debug_context(state)}"
                 )
 
             matching_indexes = [
@@ -888,10 +913,14 @@ class SSHMeter(sshkit.Client):
                 raise RuntimeError(
                     f"Unable to find diagnostics item matching {sorted(target_aliases)} on "
                     f"'{state['title']}'. Available items: {available}"
+                    f"{self._diagnostics_debug_context(state)}"
                 )
 
             if state["selected_index"] is None:
-                raise RuntimeError(f"Unable to determine the selected diagnostics item on '{state['title']}'")
+                raise RuntimeError(
+                    f"Unable to determine the selected diagnostics item on '{state['title']}'"
+                    f"{self._diagnostics_debug_context(state)}"
+                )
 
             target_index = min(
                 matching_indexes,
@@ -919,6 +948,7 @@ class SSHMeter(sshkit.Client):
                     raise RuntimeError(
                         f"Timed out opening diagnostics item matching {sorted(target_aliases)} "
                         f"from '{previous_title}'"
+                        f"{self._diagnostics_debug_context(state)}"
                     )
 
                 state = self.get_diagnostics_state(timeout=fetch_timeout)
