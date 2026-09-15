@@ -120,6 +120,7 @@ def test_robot_display_brightness(
                     "meter_type": meter.meter_type,
                     "meter_id": meter.hostname,
                     "charuco_frame": kwargs.get("charuco_frame"),
+                    "burningstation_logfile_path": shared.logfile_path,
                 },
             )
 

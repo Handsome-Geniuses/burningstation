@@ -86,7 +86,11 @@ def run_and_retrieve_charuco(robot: RobotClient, meter: SSHMeter, shared: Shared
     robot.wait_until_ready(wait_timeout)
 
     meter.set_ui_mode("charuco")
-    job_id = robot.run_program("run_find_meter", args={"meter_type": meter.meter_type, "meter_id": meter.hostname})
+    job_id = robot.run_program("run_find_meter", args={
+        "meter_type": meter.meter_type,
+        "meter_id": meter.hostname,
+        "burningstation_logfile_path": shared.logfile_path,
+    })
 
     robot.wait_for_event("program_done", job_id=job_id, timeout=20)
 

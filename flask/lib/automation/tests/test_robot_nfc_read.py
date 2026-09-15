@@ -92,7 +92,12 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState, **kwargs):
         meter.set_ui_mode("banner")
 
     robot = RobotClient()
-    job_id = robot.run_program("run_nfc_card", {"meter_type": meter.meter_type, "meter_id": meter.hostname, "charuco_frame": kwargs.get("charuco_frame")})
+    job_id = robot.run_program("run_nfc_card", {
+        "meter_type": meter.meter_type,
+        "meter_id": meter.hostname,
+        "charuco_frame": kwargs.get("charuco_frame"),
+        "burningstation_logfile_path": shared.logfile_path,
+    })
 
     meter.goto_nfc()
     #! double check that we made it to the right page
