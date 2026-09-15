@@ -1,9 +1,11 @@
 from lib.system.bay_guess import empty_bay_guess
 from lib.system.states import states
 from lib.gpio import emergency, rm, mdm, tm, lm
+from lib.hardware import hardware
 
 
 # setting up states
+states['hardware'] = hardware.to_frontend()
 states['emergency'] = emergency.state
 states['motors'] = rm.get_value_list()
 states['mds'] = mdm.get_value_list()
@@ -16,10 +18,13 @@ states['workOrder'] = None
 
 
 # initialize some values. motors of. tower off. lamps off
-lm.lamp(0,0,100)        # changing the dc here doesn't update screen. its not registered listening
-lm.lamp(1,0,100)
-rm.set_value(0)
-tm.set_value_list([0,0,0,0])
+if hardware.has("lamp"):
+    lm.lamp(0,0,100)        # changing the dc here doesn't update screen. its not registered listening
+    lm.lamp(1,0,100)
+if hardware.has("motor_control"):
+    rm.set_value(0)
+if hardware.has("tower"):
+    tm.set_value_list([0,0,0,0])
 
 
 # import lib.system.tasks as tasks

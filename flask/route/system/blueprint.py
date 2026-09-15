@@ -8,6 +8,7 @@ import signal
 from lib.automation.jobs import start_job
 from lib.sse.question import setResponse
 from lib.utils import secrets
+from lib.hardware import HardwareCapabilityUnavailable, hardware
 from .manager import *
 from lib.gpio.gpio_setup import hardware_map
 
@@ -39,7 +40,10 @@ def __suicide():
 
 @bp.get("hardware")
 def __hardware():
-    return flask.jsonify(hardware_map)
+    return flask.jsonify({
+        **hardware_map,
+        "hardware": hardware.to_frontend(),
+    })
 
 
 # ================================================================
@@ -81,6 +85,29 @@ handlers = {
     "program": program,
 }
 
+
+def require_action_capability(type, action, data):
+    if type == "override" and action == "motor":
+        hardware.require("motor_control")
+    elif type == "station":
+        if action == "load":
+            hardware.require("belt")
+        elif action == "tower":
+            hardware.require("tower")
+        elif action == "lamp":
+            hardware.require("lamp")
+        elif action == "emergency":
+            hardware.require("emergency_gpio")
+        elif action == "mode" and data.get("value") == "auto":
+            hardware.require("auto_mode")
+    elif type == "sim":
+        if action == "roller":
+            hardware.require("motor_control")
+        elif action == "meter":
+            hardware.require("meter_detection")
+        elif action == "emergency":
+            hardware.require("emergency_gpio")
+
 @bp.post("/<type>/<action>")
 def handle_action(type, action):
     handler = handlers.get(type)
@@ -89,9 +116,17 @@ def handle_action(type, action):
         return f"Unknown type '{type}'", 404
 
     data = flask.request.get_json() or {}
-    # if secrets.MOCK and handler!=sim: sim.on_action(action, **data)
-    if secrets.MOCK and handler!=sim: return sim.on_mock(handler,action,**data)
-    return handler.on_action(action, **data)
+    try:
+        require_action_capability(type, action, data)
+        # if secrets.MOCK and handler!=sim: sim.on_action(action, **data)
+        if secrets.MOCK and handler!=sim: return sim.on_mock(handler,action,**data)
+        return handler.on_action(action, **data)
+    except HardwareCapabilityUnavailable as exc:
+        return flask.jsonify({
+            "error": str(exc),
+            "capability": exc.capability,
+            "profile": exc.profile,
+        }), 409
 
 
 

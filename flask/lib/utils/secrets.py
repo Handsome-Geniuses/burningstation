@@ -6,6 +6,7 @@ load_dotenv()
 class secrets:
     VERBOSE = os.getenv("VERBOSE", "0") == "1"
     MOCK = os.getenv("MOCK", "1") == "1"
+    HARDWARE_PROFILE = os.getenv("HARDWARE_PROFILE", "full").strip().lower() or "full"  # full / portable
     BASE = os.getenv("BASE", "192.168.169.")
     RANGE = list(map(int, os.getenv("RANGE", "2-254").split('-')))
     FUN = os.getenv("FUN", "0") == "1"

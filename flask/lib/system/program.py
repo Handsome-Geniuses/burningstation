@@ -4,7 +4,8 @@
 import threading
 import time
 from lib.automation.jobs import _state, start_job, start_operator_job, start_passive_job, start_physical_job, stop_job
-from lib.gpio import HWGPIO, HWGPIO_MONITOR, emergency
+from lib.gpio import HWGPIO, HWGPIO_MONITOR, emergency, ensure_gpio_monitor_started
+from lib.hardware import hardware
 from asyncdec import AsyncManager, async_fire_and_forget
 from lib.meter.meter_manager import METERMANAGER as mm
 from lib.sse.sse_queue_manager import SSEQM as master
@@ -14,7 +15,9 @@ am_program = AsyncManager("am_program")
 def emergency_event(p:HWGPIO):
     if p.state: am_program.emergency_stop()
     else: am_program.emergency_reset()
-HWGPIO_MONITOR.add_listener(emergency,emergency_event)
+if hardware.has("emergency_gpio"):
+    ensure_gpio_monitor_started()
+    HWGPIO_MONITOR.add_listener(emergency,emergency_event)
 
 
 @am_program.operation(timeout=10)

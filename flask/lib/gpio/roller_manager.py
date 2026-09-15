@@ -1,19 +1,36 @@
-from lib.gpio.gpio_setup import HBridge, pcfio_motors
+from lib.gpio.gpio_setup import get_pcfio_motors
+from lib.hardware import hardware
 from lib.utils import packer, unpacker
 from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.system.states import states
 
-motors = [
-    HBridge(*pcfio_motors[0]),
-    HBridge(*pcfio_motors[1]),
-    HBridge(*pcfio_motors[2]),
-]
+motors = None
+
+FORWARD = 0b01
+REVERSE = 0b10
+COAST = 0b00
+BRAKE = 0b11
+
+
+def _get_motors():
+    global motors
+    hardware.require("motor_control")
+    if motors is None:
+        from lib.gpio.hbridge import HBridgeViaPCF8574 as HBridge
+
+        pcfio_motors = get_pcfio_motors()
+        motors = [
+            HBridge(*pcfio_motors[0]),
+            HBridge(*pcfio_motors[1]),
+            HBridge(*pcfio_motors[2]),
+        ]
+    return motors
 
 class ROLLER_MANAGER:
-    FORWARD = HBridge.FORWARD
-    REVERSE = HBridge.BACKWARD
-    COAST = HBridge.COAST
-    BRAKE = HBridge.BRAKE
+    FORWARD = FORWARD
+    REVERSE = REVERSE
+    COAST = COAST
+    BRAKE = BRAKE
 
     @staticmethod
     def unpack(value: int) -> list[int]:
@@ -31,6 +48,9 @@ class ROLLER_MANAGER:
     @staticmethod
     def get_value() -> int:
         """Get packed byte of all 3 motors (2 bits each)"""
+        if not hardware.has("motor_control"):
+            return 0
+        motors = _get_motors()
         return (motors[0].value << 0) | (motors[1].value << 2) | (motors[2].value << 4)
 
     @staticmethod
@@ -48,12 +68,14 @@ class ROLLER_MANAGER:
     @staticmethod
     def set_value_list(values: list[int]):
         """Set all 3 motors from a list of 2-bit values"""
+        hardware.require("motor_control")
         assert isinstance(values, list), "states must be a list"
         assert len(values) == 3, "expected list of 3 motor states"
         assert all(isinstance(s, int) for s in values), "each motor state must be an int"
         assert all(0 <= s <= 0b11 for s in values), "each motor state must fit in 2 bits (0–3)"
         
         if states['motors'] == values: return
+        motors = _get_motors()
         for ch, value in enumerate(values):
             motors[ch].value = value
         states['motors'] = values
@@ -94,4 +116,3 @@ class ROLLER_MANAGER:
         assert len(bits) == 2, "bits list must have exactly 2 elements"
         ch_value = sum((b & 1) << i for i, b in enumerate(bits))
         ROLLER_MANAGER.set_ch_value(ch, ch_value)
-

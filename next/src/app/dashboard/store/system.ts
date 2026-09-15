@@ -1,5 +1,22 @@
 
 type MotorState = 0 | 1 | 2 | 3
+export type HardwareCapability =
+    | "station_io"
+    | "i2c"
+    | "belt"
+    | "motor_control"
+    | "meter_detection"
+    | "tower"
+    | "lamp"
+    | "emergency_gpio"
+    | "robot_remote_power"
+    | "auto_mode"
+
+export type HardwareState = {
+    profile: string
+    capabilities: Record<HardwareCapability, boolean>
+}
+
 type BayGuess = [
     string | null,
     string | null,
@@ -49,6 +66,8 @@ export interface MeterState extends MeterInfo {
 }
 
 export interface SystemState {
+    hardware: HardwareState
+
     // motors for rollers
     motors: [MotorState, MotorState, MotorState]
 
@@ -92,6 +111,21 @@ export interface SystemState {
     mode: 'auto' | 'manual'
 }
 export const initialSystemState: SystemState = {
+    hardware: {
+        profile: "full",
+        capabilities: {
+            station_io: true,
+            i2c: true,
+            belt: true,
+            motor_control: true,
+            meter_detection: true,
+            tower: true,
+            lamp: true,
+            emergency_gpio: true,
+            robot_remote_power: true,
+            auto_mode: true,
+        },
+    },
     motors: [0, 0, 0],
     mds: [false, false, false, false, false, false, false, false, false],
     bayGuess: [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
@@ -106,6 +140,13 @@ export const initialSystemState: SystemState = {
     tower: [false, false, false, false],
     lamp: [0, 0, 0, 0],
     mode: 'manual'
+}
+
+export function hasHardwareCapability(
+    systemState: SystemState,
+    capability: HardwareCapability
+) {
+    return Boolean(systemState.hardware.capabilities[capability])
 }
 
 export type Action =

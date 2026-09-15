@@ -3,6 +3,7 @@
 # controls turning on/off motors to move meters
 # ====================================================
 from lib.gpio import *
+from lib.hardware import hardware
 from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.system import states
 import time
@@ -19,7 +20,9 @@ am_station = AsyncManager("am_station")
 def emergency_event(p:HWGPIO):
     if p.state: am_station.emergency_stop()
     else: am_station.emergency_reset()
-HWGPIO_MONITOR.add_listener(emergency,emergency_event)
+if hardware.has("emergency_gpio"):
+    ensure_gpio_monitor_started()
+    HWGPIO_MONITOR.add_listener(emergency,emergency_event)
 
 def check_robot_clear_of_conveyor():
     robot = RobotClient()
@@ -112,6 +115,7 @@ def on_load_exception(e: Exception):
 # Align meter in loading bay
 # ----------------------------------------------------
 def load_L_precheck(**kwargs):
+    hardware.require("belt")
     boxes = sensors_to_boxes(mdm.get_value_list())
     if BAY_STARTS[0] in boxes:
         return "Already loaded", 204
@@ -134,6 +138,7 @@ def load_L(**kwargs):
 # Move meter into middle
 # ----------------------------------------------------
 def load_M_precheck(**kwargs):
+    hardware.require("belt")
     boxes = sensors_to_boxes(mdm.get_value_list())
     box_index = _find_box_for_range(boxes, BAY_STARTS[0], BAY_STARTS[1] - 1, prefer_right=True)
     if box_index is None:
@@ -154,6 +159,7 @@ def load_M(**kwargs):
 # Move meter into unloading station
 # ----------------------------------------------------
 def load_R_precheck(**kwargs):
+    hardware.require("belt")
     boxes = sensors_to_boxes(mdm.get_value_list())
     box_index = _find_box_for_range(boxes, BAY_STARTS[1], BAY_STARTS[2] - 1, prefer_right=True)
     if box_index is None:
@@ -178,6 +184,7 @@ def _coerce_unload_steps(**kwargs) -> int:
         return 0
 
 def load_R_unload_precheck(**kwargs):
+    hardware.require("belt")
     steps = _coerce_unload_steps(**kwargs)
     target = BAY_STARTS[2] + steps
     if steps <= 0:
@@ -208,6 +215,7 @@ def load_R_unload(**kwargs):
 # Move middle to unloading and load new middle
 # ----------------------------------------------------
 def load_ALL_precheck(**kwargs):
+    hardware.require("belt")
     boxes = sensors_to_boxes(mdm.get_value_list())
     if BAY_STARTS[0] not in boxes:
         return "[load_ALL] L->M nothing to move", 204
@@ -233,6 +241,7 @@ def load_ALL(**kwargs):
 # SECRET! HANDSOME PEOPLE ONLY
 # ---------------------------------------------------- 
 def load_M_to_L_precheck(**kwargs):
+    hardware.require("belt")
     boxes = sensors_to_boxes(mdm.get_value_list())
     box_index = _find_box_for_range(boxes, BAY_STARTS[0], BAY_STARTS[1], prefer_right=False)
     if box_index is None:
@@ -251,6 +260,7 @@ def load_M_to_L(**kwargs):
     return "[load_M_to_L] completed", 200
 
 def load_R_to_M_precheck(**kwargs):
+    hardware.require("belt")
     boxes = sensors_to_boxes(mdm.get_value_list())
     box_index = _find_box_for_range(boxes, BAY_STARTS[1], BAY_STARTS[2], prefer_right=False)
     if box_index is None:
@@ -283,6 +293,7 @@ def load_R_to_L(**kwargs):
 # handle moving meter around
 # ----------------------------------------------------   
 def on_load(**kwargs):
+    hardware.require("belt")
     option = kwargs.get('type', None)
     
     if option in ("M", "R", "RU", "ALL", "ML", "RM", "RL"):
@@ -303,6 +314,7 @@ def on_load(**kwargs):
 # tower control red, yellow, green, buzzer
 # ----------------------------------------------------
 def on_tower(**kwargs):
+    hardware.require("tower")
     option = kwargs.get('type', None)
     if option==None: return
     elif option=='R': tm.red( not states['tower'][0])
@@ -321,6 +333,7 @@ def on_tower(**kwargs):
 # solar lamp control
 # ----------------------------------------------------
 def on_lamp(**kwargs):
+    hardware.require("lamp")
     option = kwargs.get('type', None)
     dc = kwargs.get('dc', None)
     state = kwargs.get('state', None)
@@ -354,6 +367,7 @@ def on_mode(**kwargs):
     elif mode == 'manual': 
         states['mode']='manual'                    # manual mode
     elif mode == 'auto':                            # auto mode but check if allowed
+        hardware.require("auto_mode")
         if store.settings.handsome.allow_auto_switch:
             states['mode']='auto'
         elif all(not b for b in mdm.get_value_list()[2:]):
@@ -368,6 +382,7 @@ def on_mode(**kwargs):
     SSEQM.broadcast("state", key_payload("mode", states['mode']))
 
 def on_emergency(**kwargs):
+    hardware.require("emergency_gpio")
     value = kwargs.get('value', None)
     if value is None:
         return "Missing emergency value", 400

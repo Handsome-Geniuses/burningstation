@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 import { PANEL } from "./shared"
 import { Accordion } from "@/components/ui/accordion"
 
-import { MeterState } from "../../store/system"
+import { hasHardwareCapability, MeterState } from "../../store/system"
 
 import React from "react"
 import { MeterDialog } from "./meter-dialog"
@@ -16,6 +16,7 @@ export const ControlsTab = () => {
     const { systemState } = useStoreContext()
     const [openItems, setOpenItems] = React.useState<string[]>(["belt", "meter"]);
     const [selectedMeter, setSelectedMeter] = React.useState<MeterState | null>(null)
+    const beltAvailable = hasHardwareCapability(systemState, "belt")
 
     React.useEffect(() => {
         const saved = localStorage.getItem(STORAGE_KEY);
@@ -41,7 +42,7 @@ export const ControlsTab = () => {
         <div className="p-2 grid grid-cols-[1fr_25%] gap-2 ">
             <div>
                 <Accordion type="multiple" className={cn(PANEL, "p-0 rounded-lg overflow-hidden")} value={openItems} onValueChange={handleValueChange}>
-                    <StationVisualizer systemState={systemState} onMeterSelected={setSelectedMeter} />
+                    {beltAvailable && <StationVisualizer systemState={systemState} onMeterSelected={setSelectedMeter} />}
                     <MeterManager systemState={systemState} onMeterSelected={setSelectedMeter} />
                 </Accordion>
                 <MeterDialog

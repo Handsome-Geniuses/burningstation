@@ -78,40 +78,60 @@ const MotorControls = () => {
 type Actions = 'roller' | 'meter' | string
 export default () => {
     const [loading, setLoading] = React.useState(false)
+    const [capabilities, setCapabilities] = React.useState<Record<string, boolean> | null>(null)
+
+    React.useEffect(() => {
+        flask.get("/hardware")
+            .then((res) => res.json())
+            .then((data) => setCapabilities(data?.hardware?.capabilities ?? null))
+            .catch(() => setCapabilities(null))
+    }, [])
+
+    const hasCapability = (capability: string) => capabilities?.[capability] ?? true
 
     return (
         <div className="flex flex-col space-x-2 space-y-2 font-mono m-2 overflow-shown">
             <div>some io controls</div>
-            <div className="flex gap-2">
-                <SimWrap action="roller" />
-                <SimWrap action="emergency" text="tog emergency" />
-            </div>
+            {hasCapability("motor_control") && (
+                <div className="flex gap-2">
+                    <SimWrap action="roller" />
+                    {hasCapability("emergency_gpio") && <SimWrap action="emergency" text="tog emergency" />}
+                </div>
+            )}
 
-            <LampControls />
-            <MotorControls />
-
-
-
-            <div>Buttons users will use</div>
-            <div className="flex gap-2">
-                <StationWrap action="load" text="load L" kwargs={{ type: 'L' }} />
-                <StationWrap action="load" text="load M" kwargs={{ type: 'M' }} />
-                <StationWrap action="load" text="load R" kwargs={{ type: 'R' }} />
-                {/* <StationWrap action="load" text="load RM" kwargs={{ type: 'RM' }} /> */}
-                <StationWrap action="load" text="shift all" kwargs={{ type: 'ALL' }} />
-                <StationWrap action="load" text="M to L" kwargs={{ type: 'ML' }} />
-                <StationWrap action="load" text="R to M" kwargs={{ type: 'RM' }} />
-            </div>
+            {(hasCapability("tower") || hasCapability("lamp")) && <LampControls />}
+            {hasCapability("motor_control") && <MotorControls />}
 
 
 
-            <div>meter move simulation</div>
-            <div className="flex gap-2">
-                <SimWrap action="meter" kwargs={{ type: 0 }} text="randomize" />
-                <SimWrap action="meter" kwargs={{ type: 10 }} text="user loading meter" />
-                <SimWrap action="meter" kwargs={{ type: 14 }} text="user unloading meter" />
-                {/* <SimWrap action="meter" kwargs={{ type: 15 }} text="user pressed shift ALL" /> */}
-            </div>
+            {hasCapability("belt") && (
+                <>
+                    <div>Buttons users will use</div>
+                    <div className="flex gap-2">
+                        <StationWrap action="load" text="load L" kwargs={{ type: 'L' }} />
+                        <StationWrap action="load" text="load M" kwargs={{ type: 'M' }} />
+                        <StationWrap action="load" text="load R" kwargs={{ type: 'R' }} />
+                        {/* <StationWrap action="load" text="load RM" kwargs={{ type: 'RM' }} /> */}
+                        <StationWrap action="load" text="shift all" kwargs={{ type: 'ALL' }} />
+                        <StationWrap action="load" text="M to L" kwargs={{ type: 'ML' }} />
+                        <StationWrap action="load" text="R to M" kwargs={{ type: 'RM' }} />
+                    </div>
+                </>
+            )}
+
+
+
+            {hasCapability("belt") && (
+                <>
+                    <div>meter move simulation</div>
+                    <div className="flex gap-2">
+                        <SimWrap action="meter" kwargs={{ type: 0 }} text="randomize" />
+                        <SimWrap action="meter" kwargs={{ type: 10 }} text="user loading meter" />
+                        <SimWrap action="meter" kwargs={{ type: 14 }} text="user unloading meter" />
+                        {/* <SimWrap action="meter" kwargs={{ type: 15 }} text="user pressed shift ALL" /> */}
+                    </div>
+                </>
+            )}
             <div className="flex gap-2">
                 {/* <SimWrap action="meter" kwargs={{ type: 11 }} text="user pressed meter load" />
                 <SimWrap action="meter" kwargs={{ type: 12 }} text="user pressed load middle" />

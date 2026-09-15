@@ -11,6 +11,7 @@ from lib.automation.runner import run_test_job
 # from lib.database import insertJobs
 # from lib.meter.meter_manager import METERMANAGER as mm
 from lib.database import insert_meter_jobs
+from lib.hardware import hardware
 from lib.meter.meter_manager import METERMANAGER as mm
 from lib.sse.sse_queue_manager import SSEQM as master
 from typing import Literal
@@ -384,6 +385,16 @@ def _handle_auto_job_done(meter_ip, current_program):
             {
                 "ntype": "info",
                 "msg": f"Auto skipped after {auto_action}; mode is {states.get('mode')}",
+            },
+        )
+        return
+
+    if not hardware.has("auto_mode"):
+        master.broadcast(
+            "notify",
+            {
+                "ntype": "info",
+                "msg": f"Auto skipped after {auto_action}; hardware profile does not support auto mode",
             },
         )
         return

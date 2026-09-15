@@ -4,7 +4,7 @@ import { ManualAutoBox } from "./manual-auto-box";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/lib/notify";
 import { flask } from "@/lib/flask";
-import { BAY_GUESS_BAY_STARTS, SystemState } from "../../store/system";
+import { BAY_GUESS_BAY_STARTS, hasHardwareCapability, SystemState } from "../../store/system";
 import { Separator } from "@/components/ui/separator";
 import * as React from "react";
 import {
@@ -417,6 +417,7 @@ export function ControlsPanel({ systemState, className }: { systemState: SystemS
     const { values: serverSettings } = useServerSettings()
     const loadCheck = getBooleanOption(serverSettings, "flow", "load_check", true)
     const physicalCheck = getBooleanOption(serverSettings, "flow", "physical_check", true)
+    const beltAvailable = hasHardwareCapability(systemState, "belt")
 
     return (
         <div className={cn(PANEL, className)}>
@@ -433,11 +434,15 @@ export function ControlsPanel({ systemState, className }: { systemState: SystemS
                 {/* <JobsDivider isManual={isManual} /> */}
                 <RobotDivider isManual={isManual} />
 
-                <SectionDivider label="programs" className="pt-4" />
-                <div className="grid grid-cols-2 gap-2 pt-2">
-                    <MeterMiddlePhysical physicalCheck={physicalCheck} systemState={systemState} />
-                    <LoadMeter loadCheck={loadCheck} systemState={systemState} />
-                </div>
+                {beltAvailable && (
+                    <>
+                        <SectionDivider label="programs" className="pt-4" />
+                        <div className="grid grid-cols-2 gap-2 pt-2">
+                            <MeterMiddlePhysical physicalCheck={physicalCheck} systemState={systemState} />
+                            <LoadMeter loadCheck={loadCheck} systemState={systemState} />
+                        </div>
+                    </>
+                )}
             </div>
         </div>
     )

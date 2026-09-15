@@ -1,4 +1,5 @@
-from lib.gpio import HWGPIO, HWGPIO_MONITOR, emergency, rm, mdm
+from lib.gpio import HWGPIO, HWGPIO_MONITOR, emergency, rm, mdm, ensure_gpio_monitor_started
+from lib.hardware import hardware
 from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.system.bay_guess import empty_bay_guess, infer_bay_guess_from_mds
 from lib.system.states import states
@@ -19,12 +20,14 @@ def emergency_event(p: HWGPIO):
         states["running"] = False
     SSEQM.broadcast("state", key_payload("emergency", p.state))
     
-HWGPIO_MONITOR.add_listener(emergency, emergency_event)
+if hardware.has("emergency_gpio"):
+    ensure_gpio_monitor_started()
+    HWGPIO_MONITOR.add_listener(emergency, emergency_event)
 
 # =============================================================
 # interrupt for meter detection manager
 # =============================================================
-mds = mdm.get_mds()
+mds = mdm.get_mds() if hardware.has("meter_detection") else []
 def mds_event_builder(p: HWGPIO, index: int):
     def handler(p: HWGPIO):
         if secrets.VERBOSE:
@@ -44,5 +47,7 @@ def mds_event_builder(p: HWGPIO, index: int):
         SSEQM.broadcast("state", key_payload("bayGuess", states["bayGuess"]))
     return handler
 
-for i, md in enumerate(mds):
-    HWGPIO_MONITOR.add_listener(md, mds_event_builder(md, i))
+if hardware.has("meter_detection"):
+    ensure_gpio_monitor_started()
+    for i, md in enumerate(mds):
+        HWGPIO_MONITOR.add_listener(md, mds_event_builder(md, i))

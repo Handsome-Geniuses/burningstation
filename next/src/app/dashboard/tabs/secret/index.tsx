@@ -5,6 +5,7 @@ import { flask } from "@/lib/flask"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { useStoreContext } from "@/app/dashboard/store"
+import { hasHardwareCapability } from "@/app/dashboard/store/system"
 import React from "react"
 import { useDebounce } from "@/hooks/useDebounce"
 import { Pinout } from "./Pinout"
@@ -121,6 +122,7 @@ const MotorControls = () => {
 const ManualAutoBox = () => {
     const { systemState } = useStoreContext()
     const isManual = systemState.mode === 'manual'
+    const autoAvailable = hasHardwareCapability(systemState, "auto_mode")
     return (
         <div className="flex flex-col w-full gap-1">
             <div className="w-full flex items-center gap-2 justify-end">
@@ -129,6 +131,7 @@ const ManualAutoBox = () => {
                     id="mode"
                     checked={!isManual}
                     onCheckedChange={(checked) => flask.handleAction('station', 'mode', { value: checked ? 'auto' : 'manual' })}
+                    disabled={!autoAvailable}
                 />
             </div>
             {
@@ -155,6 +158,10 @@ const ManualAutoBox = () => {
 
 export const SecretTab = () => {
     const { systemState } = useStoreContext()
+    const beltAvailable = hasHardwareCapability(systemState, "belt")
+    const motorAvailable = hasHardwareCapability(systemState, "motor_control")
+    const towerAvailable = hasHardwareCapability(systemState, "tower")
+    const lampAvailable = hasHardwareCapability(systemState, "lamp")
 
     return (
         <div className="flex items-center justify-around">
@@ -166,12 +173,12 @@ export const SecretTab = () => {
                         <ManualAutoBox />
                     </div>
                 </div>
-                <MeterSlots classname="border border-border p-1" />
+                {beltAvailable && <MeterSlots classname="border border-border p-1" />}
             </div>
             <div className="bg-muted/70 gap-2 p-4 flex flex-col items-center">
-                <TowerLampControls />
-                <MeterLoadControls />
-                <MotorControls />
+                {(towerAvailable || lampAvailable) && <TowerLampControls />}
+                {beltAvailable && <MeterLoadControls />}
+                {motorAvailable && <MotorControls />}
             </div>
         </div>
     )

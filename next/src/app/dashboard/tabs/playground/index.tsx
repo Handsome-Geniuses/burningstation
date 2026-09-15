@@ -56,7 +56,7 @@ const VirtualEmergency = ({ state }: { state: boolean }) => {
 }
 const RandomMeterSim = () => {
     const { run, running } = useAsyncAction()
-    
+
     return (
         <PGCard label="Random Meter" desc="Trigger simulated random meter occupancy">
             <div className="grid grid-cols-2 gap-1">
@@ -287,12 +287,6 @@ export const PlaygroundTab = () => {
     const { systemState } = useStoreContext()
 
     return (
-        // <div className="p-4 flex flex-wrap gap-2 items-start">
-        // <div className="p-4 space-y-1 space-x-1">
-        // <div className="p-4 flex flex-wrap gap-3 items-start content-start overflow-scroll">
-        // <div className="grid grid-cols-[1fr_1fr_1fr] gap-2 overflow-scroll p-4">
-        // <div className="grid grid-cols-[repeat(3,max-content)] items-start gap-2 overflow-auto p-4">
-        // <div className="grid grid-cols-[repeat(3,max-content)] auto-rows-max items-start gap-2 overflow-auto p-4">
         <div className="grid grid-cols-[1fr_1fr_1fr] content-start gap-2 overflow-auto p-4">
             <VirtualEmergency state={systemState.emergency} />
             <RandomMeterSim />
@@ -300,8 +294,8 @@ export const PlaygroundTab = () => {
             <LogMeters />
             <NumpadPromptPlayground />
             <MeterBayToggleSim />
-            <LoadingMeter/>
-            <UnloadingMeter/>
+            <LoadingMeter />
+            <UnloadingMeter />
         </div>
     )
 }
