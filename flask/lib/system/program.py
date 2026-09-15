@@ -3,7 +3,7 @@
 # ====================================================
 import threading
 import time
-from lib.automation.jobs import _state, start_job, start_passive_job, start_physical_job, stop_job
+from lib.automation.jobs import _state, start_job, start_operator_job, start_passive_job, start_physical_job, stop_job
 from lib.gpio import HWGPIO, HWGPIO_MONITOR, emergency
 from asyncdec import AsyncManager, async_fire_and_forget
 from lib.meter.meter_manager import METERMANAGER as mm
@@ -36,6 +36,9 @@ def stop_passive_job(meter_ip):
 def stop_physical_job(meter_ip):
     return stop_job(meter_ip)
 
+def stop_operator_job(meter_ip):
+    return stop_job(meter_ip)
+
 
 def meter_from_kwargs(**kwargs):
     meter_ip = kwargs.get('meter_ip', None)
@@ -65,6 +68,10 @@ def manual_action(**kwargs):
         if meter: start_physical_job(meter_ip)
     elif program == "stop_physical_job":
         if meter: stop_physical_job(meter_ip)
+    elif program == "start_operator_job":
+        if meter: start_operator_job(meter_ip)
+    elif program == "stop_operator_job":
+        if meter: stop_operator_job(meter_ip)
 
 
     elif program == "hello": print("hello from program.py", {})
@@ -123,6 +130,10 @@ def neutral(**kwargs):
         if meter: start_physical_job(meter_ip)
     elif program == "stop_physical_job":
         if meter: stop_physical_job(meter_ip)
+    elif program == "start_operator_job":
+        if meter: start_operator_job(meter_ip)
+    elif program == "stop_operator_job":
+        if meter: stop_operator_job(meter_ip)
 
 
 

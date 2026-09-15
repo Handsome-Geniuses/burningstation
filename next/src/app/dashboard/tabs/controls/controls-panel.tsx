@@ -91,12 +91,15 @@ const JobsDivider = ({ isManual }: { isManual: boolean }) => {
     return (
         <div>
             <SectionDivider label="jobs" className="pt-4" />
-            <div className="grid grid-cols-2 gap-2 pt-2">
+            <div className="grid grid-cols-3 gap-2 pt-2">
                 <Button variant="outline" onClick={() => flask.handleAction('program', 'manual', { program: 'start_passive_job' })} disabled={!isManual}>
                     passive
                 </Button>
                 <Button variant="outline" onClick={() => flask.handleAction('program', 'manual', { program: 'start_physical_job' })} disabled={!isManual}>
                     physical
+                </Button>
+                <Button variant="outline" onClick={() => flask.handleAction('program', 'manual', { program: 'start_operator_job' })} disabled={!isManual}>
+                    operator
                 </Button>
             </div>
         </div>

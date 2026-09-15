@@ -1738,6 +1738,7 @@ fclose($myfile);
 
     def update_display_results(self, shared: SharedState) -> None:
         """Update the meter's _display_results dict based on the completed job in SharedState."""
+        # TODO: Support operator cycle results
         program_name = shared.current_program
         if program_name not in ["cycle_all", "physical_cycle_all"]:
             shared.log(f"unable to update display results for program_name = '{program_name}'", console=True)

@@ -12,10 +12,12 @@ import {
     meterRunBlinkUntil,
     meterRunDummy,
     meterRunPassive,
+    meterRunOperator,
     meterRunPrintFw,
     meterStopBlink,
     meterStopPassive,
     meterStopPhysical,
+    meterStopOperator,
 } from "@/lib/ep"
 
 import { MeterState, SystemState } from "../../store/system"
@@ -60,6 +62,7 @@ export const MeterDialog = ({
     const isMeterReady = meter?.status === "ready"
     const isPassiveRunning = meter?.current_action === "cycle_all"
     const isPhysicalRunning = meter?.current_action === "physical_cycle_all"
+    const isOperatorRunning = meter?.current_action === "operator_cycle_all"
     const isBlinking = meter?.current_action === "blinking"
 
     const handleDialogOpenChange = (open: boolean) => {
@@ -107,6 +110,13 @@ export const MeterDialog = ({
                     >
                         run passive
                     </Button>
+                    <Button
+                        variant="outline"
+                        onClick={run(() => meterRunOperator(meter?.ip))}
+                        disabled={running || systemState.mode !== "manual" || !isMeterReady}
+                    >
+                        run operator
+                    </Button>
                 </div>
 
                 <DialogFooter className="border-t p-4">
@@ -126,6 +136,15 @@ export const MeterDialog = ({
                             disabled={running}
                         >
                             physical
+                        </Button>
+                    }
+                    {isOperatorRunning &&
+                        <Button
+                            variant="destructive"
+                            onClick={run(() => meterStopOperator(meter?.ip))}
+                            disabled={running}
+                        >
+                            stop operator
                         </Button>
                     }
                     <Button
