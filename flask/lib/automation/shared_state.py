@@ -60,6 +60,10 @@ class SharedState:
             pending.append(action)
 
     #----- Logging methods -----#
+    @property
+    def logfile_path(self) -> Optional[str]:
+        return self._logfile_path
+
     def set_logfile(self, path: Optional[str]):
         """Set the logfile path at job start. Creates parent directory if needed."""
         self._logfile_path = path

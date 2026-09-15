@@ -29,7 +29,15 @@ def test_robot_coin_shutter(meter: SSHMeter, shared: SharedState, **kwargs):
         if not subtest:
             shared.broadcast_progress(meter.host, 'coin_shutter', cycle_num, job_count)
 
-        job_id = robot.run_program("run_coin_shutter", {"meter_type": meter.meter_type, "meter_id": meter.hostname, "charuco_frame": kwargs.get("charuco_frame")})
+        job_id = robot.run_program(
+            "run_coin_shutter",
+            {
+                "meter_type": meter.meter_type,
+                "meter_id": meter.hostname,
+                "charuco_frame": kwargs.get("charuco_frame"),
+                "burningstation_logfile_path": shared.logfile_path,
+            },
+        )
 
         robot.wait_for_event("taking_enabled_picture", job_id=job_id, timeout=40)
         meter.coin_shutter_hold_open(10)

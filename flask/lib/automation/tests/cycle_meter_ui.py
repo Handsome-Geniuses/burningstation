@@ -1071,7 +1071,8 @@ def execute_pay_ui_action(
             "meter_type": meter.meter_type,
             "meter_id": meter.hostname,
             "charuco_frame": context.charuco_frame,
-            "config_idx": "nfc_gui"
+            "config_idx": "nfc_gui",
+            "burningstation_logfile_path": shared.logfile_path,
         }
         _debug_log(shared, meter, debug_ui, f'>> robot.run_program("{action.robot_program}", {job_args})')
         job_id = context.robot.run_program(action.robot_program, job_args)

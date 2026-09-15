@@ -34,7 +34,24 @@ PROG2DEVICE = {
     "cycle_call_in":"call in", "call in":"call in", "call_in":"call in",
     "cycle_meter_ui":"screen test", "screen test":"screen test",
     "cycle_all": None,
+    "operator_cycle_all": None,
     "keypad": "keypad",
+    "test_operator_keypad": "keypad",
+    "operator_keypad": "keypad",
+    "test_operator_nfc_tap": "contactless",
+    "operator_nfc_tap": "contactless",
+    "test_operator_touchscreen": "touchscreen",
+    "operator_touchscreen": "touchscreen",
+    "test_operator_display_brightness": "display_brightness",
+    "operator_display_brightness": "display_brightness",
+    "test_operator_card_reader": "card_reader",
+    "operator_card_reader": "card_reader",
+    "test_solar": "solar",
+    "test_robot_coin_shutter": "coin_shutter",
+    "test_robot_nfc_read": "nfc",
+    "test_robot_keypad": "robot_keypad",
+    "test_robot_display_brightness": "display_brightness",
+    "robot_display_brightness": "display_brightness",
     "passive:": None,
 }
 
@@ -53,7 +70,11 @@ PROG2MODULE = {
     "call in":"MK7_XE910",
     "call_in":"MK7_XE910",
     "robot_keypad": "KEY_PAD_2",
-    "robot_keypad2": "KBD_CONTROLLER"
+    "robot_keypad2": "KBD_CONTROLLER",
+    "keypad": "KEY_PAD_2",
+    "keypad2": "KBD_CONTROLLER",
+    "contactless": ("KIOSK_NFC", "KIOSK_NEO"),
+    "card_reader": "EMV_CONTACT",
 }
 
 def _module_info_for_program(meter: SSHMeter, program_name: str, default_info):
@@ -222,7 +243,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
         st.extras['kwargs'] = kwargs
         job_done(meter_ip)
-        meter.beep(3)
+        meter.beep(3) # leave uncommented for production
 
         # if program_name in ['cycle_all', 'all tests'] and meter.meter_type != 'msx':
             # meter.custom_print()
@@ -337,6 +358,16 @@ def start_physical_job(meter_ip, buttons=None):
     return success, msg
 
 
+def start_operator_job(meter_ip):
+    meter = mm.get_meter(meter_ip)
+    modules = meter.module_info
+    buttons = get_default_buttons(modules, meter.meter_type)
+    meter.set_ui_mode("banner")
+    meter.setup_custom_display()
+
+    kwargs = build_operator_kwargs(modules, buttons=buttons)
+    return start_job(meter_ip, "operator_cycle_all", kwargs, verbose=True)
+
 
 def _handle_auto_job_done(meter_ip, current_program):
     auto_actions = {
@@ -422,6 +453,36 @@ def job_done(meter_ip):
             if key == "robot_keypad":
                 info = meter.module_info.get(PROG2MODULE.get("robot_keypad2"), default_info)
                 job_results["robot_keypad2"] = {
+                    "status": val,
+                    "fw": info.get("ver", -1),
+                    "id": info.get("id", -1),
+                }
+
+        data["results"] = job_results
+        if st.last_error:
+            data["last_error"] = st.last_error
+        if st.device_meta:
+            data["device_meta"] = st.device_meta
+
+    elif current_program == "operator_cycle_all":
+        for key, val in st.device_results.items():
+            if val == "fail":
+                overall_status = "fail"
+                break
+
+        default_info = {'ver': -1, 'mod': -1, 'id': -1}
+        job_results = {}
+        for key, val in st.device_results.items():
+            info = _module_info_for_program(meter, key, default_info)
+
+            job_results[key] = {
+                "status": val,
+                "fw": info.get("ver", -1),
+                "id": info.get("id", -1),
+            }
+            if key == "keypad":
+                info = meter.module_info.get(PROG2MODULE.get("keypad2"), default_info)
+                job_results["keypad2"] = {
                     "status": val,
                     "fw": info.get("ver", -1),
                     "id": info.get("id", -1),

@@ -59,6 +59,9 @@ def build_physical_kwargs(modules: dict, buttons=None):
         "solar": {
             "job_count": (j.solar if has_solar else 0)
         },
+        "display_brightness": {
+            "job_count": j.display_brightness,
+        },
         "coin_shutter": {
             "job_count": (j.coin_shutter if has_coin_shutter else 0)
         },
@@ -74,3 +77,27 @@ def build_physical_kwargs(modules: dict, buttons=None):
     }
 
     return kwargs
+
+
+def build_operator_kwargs(modules: dict, buttons=None):
+    store.load()
+    buttons = list(buttons or [])
+
+    s = store.settings.operator
+    j = s.job_counts
+
+    return {
+        "numBurnCycles": s.cycles,
+        "numBurnDelay": s.test_delay,
+        "screen_test": {"job_count": j.screen_test},
+        "touchscreen": {"job_count": j.touchscreen, "max_duration_s": 60.0},
+        "display_brightness": {"job_count": j.display_brightness, "max_duration_s": 60.0},
+        "keypad": {"job_count": j.keypad, "buttons": buttons},
+        "contactless": {"job_count": j.contactless},
+        "card_reader": {
+            "job_count": j.card_reader,
+            "max_duration_s": 90.0,
+            "poll_s": 0.5,
+            "require_card_accepted": False,
+        },
+    }
