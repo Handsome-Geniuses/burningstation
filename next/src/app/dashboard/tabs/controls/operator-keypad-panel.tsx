@@ -65,7 +65,7 @@ function KeypadCell({
             variant="outline"
             title={keySpec.title ?? keySpec.button}
             className={cn(
-                "relative min-w-0 flex-col gap-0 px-0 py-0 text-center leading-none transition-colors",
+                "relative min-w-0 flex-col gap-0 px-0 pb-0 text-center leading-none transition-colors",
                 "border-border bg-background text-foreground shadow-none h-8",
                 keySpec.colSpan === 2 && "col-span-2",
                 keySpec.tone === "utility" && "border-blue-300 bg-blue-50 text-blue-950 hover:bg-blue-100",
@@ -116,7 +116,7 @@ export function OperatorKeypadPanel({
     }
 
     return (
-        <div className="bg-muted/20 px-[20%]">
+        <div className="bg-muted/20 px-[15%] my-2">
             <div className="mb-3 flex items-center justify-between gap-4 hidden">
                 <div>
                     <div className="text-sm font-semibold leading-tight">operator keypad</div>

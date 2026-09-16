@@ -68,7 +68,9 @@ export const MeterDialog = ({
     const isOperatorKeypadRunning = meter?.current_action === "operator_keypad"
     const isBlinking = meter?.current_action === "blinking"
     const keypadState = meter ? systemState.operatorKeypad[meter.ip] : undefined
-    const showOperatorKeypad = Boolean(keypadState || isOperatorKeypadRunning)
+    const keypadIncomplete = keypadState ? keypadState.total <= 0 || keypadState.current < keypadState.total : false
+    const isOperatorCycleKeypadActive = Boolean(isOperatorRunning && keypadIncomplete)
+    const showOperatorKeypad = Boolean(isOperatorKeypadRunning || isOperatorCycleKeypadActive)
 
     const handleDialogOpenChange = (open: boolean) => {
         if (open) return
@@ -88,7 +90,8 @@ export const MeterDialog = ({
 
     return (
         <Dialog open={meter != undefined} onOpenChange={handleDialogOpenChange}>
-            <DialogContent className="w-fit max-w-[min(96vw,76rem)] max-h-[92vh] overflow-y-auto m-0 p-0 space-y-0 space-x-0 [&>button]:hidden gap-0">
+            {/* min-w-100 max-w-[min(96vw,76rem)]  */}
+            <DialogContent className="w-fit max-h-[92vh] w-100 overflow-y-auto m-0 p-0 space-y-0 space-x-0 [&>button]:hidden gap-0"> 
                 <DialogHeader className="gap-0 border-b p-4">
                     <DialogTitle>{meter?.hostname ?? "Meter"}</DialogTitle>
                     <div className="text-muted-foreground text-sm">
@@ -97,46 +100,55 @@ export const MeterDialog = ({
                     </div>
                 </DialogHeader>
 
-                <div className="min-w-80 p-4 grid grid-cols-3 gap-2">
-                    {systemState.playground &&
+                {!showOperatorKeypad &&
+                    <div className="p-4 grid grid-cols-3 gap-2">
+                        {systemState.playground &&
+                            <Button
+                                variant="outline"
+                                onClick={run(() => meterRunDummy(meter?.ip))}
+                                disabled={running}
+                            >
+                                Dummy
+                            </Button>
+                        }
+
                         <Button
                             variant="outline"
-                            onClick={run(() => meterRunDummy(meter?.ip))}
-                            disabled={running}
+                            onClick={run(() => meterRunPassive(meter?.ip))}
+                            disabled={running || systemState.mode !== "manual" || !isMeterReady}
                         >
-                            Dummy
+                            run passive
                         </Button>
-                    }
-
-                    <Button
-                        variant="outline"
-                        onClick={run(() => meterRunPassive(meter?.ip))}
-                        disabled={running || systemState.mode !== "manual" || !isMeterReady}
-                    >
-                        run passive
-                    </Button>
-                    <Button
-                        variant="outline"
-                        onClick={run(() => meterRunOperator(meter?.ip))}
-                        disabled={running || systemState.mode !== "manual" || !isMeterReady}
-                    >
-                        run operator
-                    </Button>
-                    <Button
-                        variant="outline"
-                        onClick={run(() => meterRunOperatorKeypad(meter?.ip))}
-                        disabled={running || systemState.mode !== "manual" || !isMeterReady}
-                    >
-                        run keypad test
-                    </Button>
-                </div>
+                        <Button
+                            variant="outline"
+                            onClick={run(() => meterRunOperator(meter?.ip))}
+                            disabled={running || systemState.mode !== "manual" || !isMeterReady}
+                        >
+                            run operator
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={run(() => meterRunOperatorKeypad(meter?.ip))}
+                            disabled={running || systemState.mode !== "manual" || !isMeterReady}
+                        >
+                            run keypad test
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={run(() => meterRunPrintFw(meter?.ip))}
+                            disabled={running || !isMeterReady}
+                        >
+                            Print Info
+                        </Button>
+                    </div>
+                }
 
                 {meter && showOperatorKeypad &&
                     <OperatorKeypadPanel
                         meterIp={meter.ip}
                         keypadState={keypadState}
                         mock={systemState.hardware.mock}
-                        running={Boolean(isOperatorKeypadRunning || (isOperatorRunning && keypadState))}
+                        running={Boolean(isOperatorKeypadRunning || isOperatorCycleKeypadActive)}
                     />
                 }
 
@@ -165,7 +177,7 @@ export const MeterDialog = ({
                             onClick={run(() => meterStopOperator(meter?.ip))}
                             disabled={running}
                         >
-                            {isOperatorKeypadRunning ? "stop keypad" : "stop operator"}
+                            {isOperatorKeypadRunning ? "stop test" : "stop operator"}
                         </Button>
                     }
                     <Button
@@ -175,13 +187,6 @@ export const MeterDialog = ({
                         disabled={running || (!isMeterReady && !isBlinking)}
                     >
                         Blink
-                    </Button>
-                    <Button
-                        variant="outline"
-                        onClick={run(() => meterRunPrintFw(meter?.ip))}
-                        disabled={running || !isMeterReady}
-                    >
-                        Print
                     </Button>
                 </DialogFooter>
             </DialogContent>

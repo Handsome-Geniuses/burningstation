@@ -162,6 +162,30 @@ def _state(ip):
             _states[ip] = JobState(ip)
         return _states[ip]
 
+
+def get_frontend_job_state(meter_ip: str):
+    with _registry_lock:
+        st = _states.get(meter_ip)
+    if st is None or st.status != "running":
+        return {}
+
+    state = {}
+    if st.current_program:
+        state["current_action"] = st.current_program
+
+    keypad_state = st.extras.get("operator_keypad_state")
+    if isinstance(keypad_state, dict):
+        state["operator_keypad"] = dict(keypad_state)
+        current = keypad_state.get("current")
+        total = keypad_state.get("total")
+        if isinstance(current, int) and isinstance(total, int):
+            state["progress"] = {
+                "current": current,
+                "total": total,
+            }
+
+    return state
+
 def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     meter = mm.get_meter(meter_ip)
     st = _state(meter_ip)

@@ -190,8 +190,14 @@ export function reducer(state: SystemState, action: Action): SystemState {
             }
 
             if (!action.info) return state
+            const nextOperatorKeypad = { ...state.operatorKeypad }
+            if (action.info.status === "ready") {
+                delete nextOperatorKeypad[action.ip]
+            }
+
             return {
                 ...state,
+                operatorKeypad: nextOperatorKeypad,
                 meters: {
                     ...state.meters,
                     [action.ip]: {
@@ -209,9 +215,14 @@ export function reducer(state: SystemState, action: Action): SystemState {
         case 'meter:status': {
             const meter = state.meters[action.ip]
             if (!meter) return state
+            const nextOperatorKeypad = { ...state.operatorKeypad }
+            if (action.status === "ready") {
+                delete nextOperatorKeypad[action.ip]
+            }
 
             return {
                 ...state,
+                operatorKeypad: nextOperatorKeypad,
                 meters: {
                     ...state.meters,
                     [action.ip]: {

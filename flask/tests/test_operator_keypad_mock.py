@@ -68,6 +68,7 @@ class OperatorKeypadMockTests(unittest.TestCase):
             assert payload["required_per_button"] == 2, payload
             assert payload["current"] == 1, payload
             assert payload["total"] == 4, payload
+            assert shared.extras["operator_keypad_state"] == payload, shared.extras
             print("payload-ok")
             """
         )
@@ -168,6 +169,74 @@ class OperatorKeypadMockTests(unittest.TestCase):
             """
         )
         self.assertIn("kbd-controller-remap-ok", result.stdout)
+
+    def test_initial_sse_replays_active_operator_keypad_state(self):
+        result = self.run_python(
+            """
+            import json
+            import time
+
+            import tools.mock as mock
+            from lib.automation import jobs
+            from lib.meter.meter_manager import METERMANAGER as mm
+            from lib.meter.ssh_meter import SSHMeter
+            from route.system.manager import initial_payloads
+
+            jobs.insert_meter_jobs = lambda *args, **kwargs: []
+
+            host = "192.168.9.250"
+            meter = SSHMeter(host)
+            mm.meters[host] = meter
+            mm._METERMANAGER__meters.add(host)
+            mock._mock_meter_ips.add(host)
+
+            ok, msg = jobs.start_job(
+                host,
+                "operator_keypad",
+                {
+                    "job_count": 1,
+                    "buttons": ["1", "ACCEPT"],
+                    "poll_s": 0.02,
+                    "max_duration_s": 5,
+                },
+                log=False,
+                verbose=False,
+            )
+            assert ok, msg
+
+            state = jobs._state(host)
+            deadline = time.time() + 3
+            while "operator_keypad_state" not in state.extras:
+                if time.time() > deadline:
+                    raise AssertionError("operator keypad state was not cached")
+                time.sleep(0.01)
+
+            payloads = [
+                json.loads(chunk.strip()[len("data: "):])
+                for chunk in initial_payloads()
+                if chunk.strip().startswith("data: ")
+            ]
+            meter_payload = next(
+                payload for payload in payloads
+                if payload["event"] == "meter" and payload["payload"]["ip"] == host
+            )
+            keypad_payload = next(
+                payload for payload in payloads
+                if payload["event"] == "operator_keypad" and payload["payload"]["ip"] == host
+            )
+
+            assert meter_payload["payload"]["info"]["current_action"] == "operator_keypad", meter_payload
+            assert meter_payload["payload"]["info"]["progress"] == {"current": 0, "total": 2}, meter_payload
+            assert keypad_payload["payload"]["expected_buttons"] == ["1", "ACCEPT"], keypad_payload
+            assert keypad_payload["payload"]["counts"] == {"1": 0, "ACCEPT": 0}, keypad_payload
+            assert keypad_payload["payload"]["current"] == 0, keypad_payload
+            assert keypad_payload["payload"]["total"] == 2, keypad_payload
+
+            jobs.stop_job(host)
+            print("initial-sse-keypad-replay-ok")
+            """
+        )
+        self.assertIn("initial-sse-keypad-replay-ok", result.stdout)
 
     def test_mock_operator_keypad_job_completes_and_stop_job_cancels_cleanly(self):
         result = self.run_python(

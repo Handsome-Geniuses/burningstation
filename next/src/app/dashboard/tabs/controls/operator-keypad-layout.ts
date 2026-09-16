@@ -20,9 +20,9 @@ export const FUNCTION_KEYPAD_KEYS: OperatorKeypadKey[] = [
     { button: "MAX", label: "", icon: "globe", tone: "utility" },
     { button: "UP", label: "", icon: "up", tone: "utility" },
     { button: "DOWN", label: "", icon: "down", tone: "utility" },
-    { button: "CANCEL", label: "", icon: "cancel", tone: "danger" },
-    { button: "ACCEPT", label: "", icon: "accept", tone: "confirm" },
-    { button: "HELP", label: "", icon: "help" },
+    { button: "CANCEL", label: "", icon: "cancel", tone: "utility" },
+    { button: "ACCEPT", label: "", icon: "accept", tone: "utility" },
+    { button: "HELP", label: "", icon: "help", tone: "utility"  },
 ]
 
 export const MAIN_KEYPAD_ROWS: OperatorKeypadKey[][] = [
@@ -50,7 +50,7 @@ export const MAIN_KEYPAD_ROWS: OperatorKeypadKey[][] = [
         { button: "BACK", label: "", icon: "back", tone: "utility", colSpan: 2 },
         { button: "Y", label: "Y" },
         { button: "Z", label: "Z" },
-        { button: "ENTER", label: "OK", icon: "accept", tone: "confirm", colSpan: 2 },
+        { button: "ENTER", label: "OK", icon: "accept", tone: "utility", colSpan: 2 },
     ],
 ]
 

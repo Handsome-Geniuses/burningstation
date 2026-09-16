@@ -268,20 +268,19 @@ def _broadcast_keypad_state(
         if state.accepted_presses
         else None
     )
+    payload = {
+        "ip": meter.host,
+        "expected_buttons": list(state.expected_buttons),
+        "counts": dict(state.confirmed_counts),
+        "required_per_button": state.required_per_button,
+        "latest_button": latest_button,
+        "missing": _missing_buttons(state),
+        "current": completed,
+        "total": total,
+    }
+    shared.extras["operator_keypad_state"] = payload
     shared.broadcast_progress(meter.host, "operator_keypad", completed, total)
-    SSEQM.broadcast(
-        "operator_keypad",
-        {
-            "ip": meter.host,
-            "expected_buttons": list(state.expected_buttons),
-            "counts": dict(state.confirmed_counts),
-            "required_per_button": state.required_per_button,
-            "latest_button": latest_button,
-            "missing": _missing_buttons(state),
-            "current": completed,
-            "total": total,
-        },
-    )
+    SSEQM.broadcast("operator_keypad", payload)
 
 
 def _fail_keypad(shared: SharedState, state: OperatorKeypadRunState, message: str) -> None:
@@ -442,7 +441,6 @@ def test_operator_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             f"journal_entries={state.journal_entries_processed} | "
             f"journal_read_errors={state.journal_read_error_count}"
         )
-
 
 
 
