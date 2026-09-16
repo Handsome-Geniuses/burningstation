@@ -114,6 +114,31 @@ class HardwareProfileSmokeTests(unittest.TestCase):
         )
         self.assertIn("portable-mock-unavailable-ok", result.stdout)
 
+    def test_devwo_wipe_sim_action_works_with_or_without_mock(self):
+        source = """
+        import os
+
+        from lib import database
+        from lib.system import sim
+
+        if os.environ["MOCK"] == "1":
+            import tools.mock
+
+        calls = []
+        database.delete_meter_jobs_for_work_order = lambda work_order: calls.append(work_order) or 7
+
+        payload, status = sim.on_action("wipe_devwo_jobs")
+        assert status == 200, (status, payload)
+        assert payload == {"status": "deleted", "work_order": 999999999, "count": 7}, payload
+        assert calls == [999999999], calls
+        print(f"devwo-wipe-ok-mock-{os.environ['MOCK']}")
+        """
+
+        for mock in ("0", "1"):
+            with self.subTest(mock=mock):
+                result = self.run_python(source, profile="portable", mock=mock)
+                self.assertIn(f"devwo-wipe-ok-mock-{mock}", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

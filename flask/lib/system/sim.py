@@ -260,7 +260,13 @@ def on_meter(**kwargs):
 
 def on_action(action, **kwargs):
     res = None
-    if not secrets.MOCK: print("🕯️ [sim] not mock so not safe to sim", fg="#ffaa00")
+    if action == "wipe_devwo_jobs":
+        from lib import database
+
+        count = database.delete_meter_jobs_for_work_order(999999999)
+        res = {"status": "deleted", "work_order": 999999999, "count": count}, 200
+    elif not secrets.MOCK:
+        print("🕯️ [sim] not mock so not safe to sim", fg="#ffaa00")
     elif action == "roller":
         res = roller_move(**kwargs)
     elif action == "meter":
@@ -269,11 +275,6 @@ def on_action(action, **kwargs):
         res = on_question(**kwargs)
     elif action == "emergency":
         res = toggle_emergency(**kwargs)
-    elif action == "wipe_devwo_jobs":
-        from lib import database
-
-        count = database.delete_meter_jobs_for_work_order(999999999)
-        res = {"status": "deleted", "work_order": 999999999, "count": count}, 200
     
     return res if res is not None else ("", 200)
 

@@ -509,8 +509,7 @@ def _mock_sim_on_action(action, **kwargs):
     if action == "list_meters":
         return list_mock_meters(), 200
     if action == "wipe_devwo_jobs":
-        count = database.delete_meter_jobs_for_work_order(999999999)
-        return {"status": "deleted", "work_order": 999999999, "count": count}, 200
+        return _original_sim_on_action(action, **kwargs)
     if action == "operator_keypad_press":
         meter_ip = kwargs.get("meter_ip")
         if not meter_ip:
