@@ -247,6 +247,38 @@ const LogMeters = () => {
     )
 }
 
+const DevWorkOrderCleanup = () => {
+    const { run, running } = useAsyncAction()
+    const onWipe = run(async () => {
+        try {
+            const res = await flask.handleAction("sim", "wipe_devwo_jobs")
+            const payload = await res.json().catch(() => ({}))
+
+            if (!res.ok) {
+                throw new Error(payload?.error ?? `Failed to wipe DEVWO jobs (${res.status})`)
+            }
+
+            notify.success(`deleted ${payload?.count ?? 0} DEVWO job rows`)
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to wipe DEVWO jobs"
+            notify.error(msg)
+        }
+    })
+
+    return (
+        <PGCard label="Dev Work Order" desc="delete WO999999999 job rows">
+            <Button
+                variant="outline"
+                className="w-full"
+                onClick={onWipe}
+                disabled={running}
+            >
+                wipe WO999999999
+            </Button>
+        </PGCard>
+    )
+}
+
 const NumpadPromptPlayground = () => {
     const [open, setOpen] = React.useState(false)
     const [value, setValue] = React.useState<number | undefined>()
@@ -292,6 +324,7 @@ export const PlaygroundTab = () => {
             <RandomMeterSim />
             <AddFakeMeterSim />
             <LogMeters />
+            <DevWorkOrderCleanup />
             <NumpadPromptPlayground />
             <MeterBayToggleSim />
             <LoadingMeter />

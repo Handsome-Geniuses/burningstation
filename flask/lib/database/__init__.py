@@ -278,6 +278,65 @@ def retrieve_jobs_filtered(
 
 
 # ==============================================================================
+# Job deletion helpers
+# ==============================================================================
+def delete_meter_jobs_for_meter_identifier(identifier: int | str, conn: None | psycopg.Connection = None):
+    """
+    Delete meter_job rows for either a meter.hostname or a numeric meter_job.meter_id.
+    Returns the number of deleted meter_job rows.
+    """
+    raw_identifier = str(identifier).strip()
+    if not raw_identifier:
+        raise ValueError("identifier is required")
+
+    numeric_identifier = int(raw_identifier) if raw_identifier.isdigit() else None
+
+    sql = """
+        DELETE FROM meter_job mj
+        USING meter m
+        WHERE mj.meter_id = m.id
+          AND (
+            m.hostname = %s
+            OR (%s IS NOT NULL AND mj.meter_id = %s)
+          );
+    """
+    params = (raw_identifier, numeric_identifier, numeric_identifier)
+
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.rowcount
+
+    with psycopg.connect(dbcs) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.rowcount
+
+
+def delete_meter_jobs_for_work_order(work_order: int, conn: None | psycopg.Connection = None):
+    """
+    Delete meter_job rows whose joined meter row has the given work_order.
+    Returns the number of deleted meter_job rows.
+    """
+    sql = """
+        DELETE FROM meter_job mj
+        USING meter m
+        WHERE mj.meter_id = m.id
+          AND m.work_order = %s;
+    """
+
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (work_order,))
+            return cur.rowcount
+
+    with psycopg.connect(dbcs) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (work_order,))
+            return cur.rowcount
+
+
+# ==============================================================================
 # cleanup for testing
 # ==============================================================================
 def cleanup_test():

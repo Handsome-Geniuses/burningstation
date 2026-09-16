@@ -1,9 +1,8 @@
 # ====================================================
 # 
 # ====================================================
-import threading
 import time
-from lib.automation.jobs import _state, start_job, start_operator_job, start_passive_job, start_physical_job, stop_job
+from lib.automation.jobs import _state, start_job, start_operator_job, start_operator_keypad_job, start_passive_job, start_physical_job, stop_job
 from lib.gpio import HWGPIO, HWGPIO_MONITOR, emergency, ensure_gpio_monitor_started
 from lib.hardware import hardware
 from asyncdec import AsyncManager, async_fire_and_forget
@@ -73,6 +72,8 @@ def manual_action(**kwargs):
         if meter: stop_physical_job(meter_ip)
     elif program == "start_operator_job":
         if meter: start_operator_job(meter_ip)
+    elif program == "start_operator_keypad_job":
+        if meter: start_operator_keypad_job(meter_ip)
     elif program == "stop_operator_job":
         if meter: stop_operator_job(meter_ip)
 
@@ -135,6 +136,8 @@ def neutral(**kwargs):
         if meter: stop_physical_job(meter_ip)
     elif program == "start_operator_job":
         if meter: start_operator_job(meter_ip)
+    elif program == "start_operator_keypad_job":
+        if meter: start_operator_keypad_job(meter_ip)
     elif program == "stop_operator_job":
         if meter: stop_operator_job(meter_ip)
 

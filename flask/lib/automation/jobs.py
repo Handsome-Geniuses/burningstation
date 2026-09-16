@@ -260,12 +260,15 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 def stop_job(meter_ip):
     st = _state(meter_ip)
     meter = mm.get_meter(meter_ip)
-    if (st.status!='running' and meter.status!='busy'): 
+    if (st.status!='running' and meter.status!='busy'):
         master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': 'tried stopping a non busy meter', 'current_action': ''})
 
     st.log(f"JOB CANCELLED BY USER", console=True)
     st.flush_logs()
-    
+
+    st.extras["failure_reason"] = "manually stopped"
+    if not st.last_error:
+        st.last_error = "manually stopped"
     st.stop_event.set()
     st.status = "cancelled"
     meter.status = "ready"
@@ -370,6 +373,28 @@ def start_operator_job(meter_ip):
     return start_job(meter_ip, "operator_cycle_all", kwargs, verbose=True)
 
 
+def start_operator_keypad_job(meter_ip):
+    meter = mm.get_meter(meter_ip)
+    modules = meter.module_info
+    buttons = get_default_buttons(modules, meter.meter_type)
+    store.load()
+    job_count = int(store.settings.operator.job_counts.keypad)
+
+    if not buttons:
+        return False, "operator keypad has no buttons to test"
+    if job_count <= 0:
+        return False, "operator keypad job count is disabled"
+
+    meter.set_ui_mode("banner")
+    meter.setup_custom_display()
+
+    kwargs = {
+        "job_count": job_count,
+        "buttons": buttons,
+    }
+    return start_job(meter_ip, "operator_keypad", kwargs, verbose=True)
+
+
 def _handle_auto_job_done(meter_ip, current_program):
     auto_actions = {
         "cycle_all": "passive",
@@ -407,6 +432,88 @@ def _handle_auto_job_done(meter_ip, current_program):
         AUTO_COORDINATOR.on_physical_done(meter_ip)
 
 
+def _job_has_failure(st: JobState) -> bool:
+    return (
+        st.result == "fail"
+        or st.stop_event.is_set()
+        or any(status == "fail" for status in st.device_results.values())
+    )
+
+
+def _job_failure_reason(st: JobState, device: str | None = None) -> str:
+    explicit_reason = st.extras.get("failure_reason")
+    if explicit_reason:
+        return _format_job_failure_reason(st, str(explicit_reason), device)
+    if st.last_error:
+        return _format_job_failure_reason(st, str(st.last_error), device)
+
+    if device:
+        meta = st.device_meta.get(device)
+        if isinstance(meta, dict) and meta.get("error"):
+            return _format_job_failure_reason(st, str(meta["error"]), device)
+
+    for meta in st.device_meta.values():
+        if isinstance(meta, dict) and meta.get("error"):
+            return _format_job_failure_reason(st, str(meta["error"]), device)
+
+    return "failed"
+
+
+def _format_job_failure_reason(
+    st: JobState,
+    reason: str,
+    device: str | None = None,
+) -> str:
+    if reason != "manually stopped":
+        return reason
+
+    missing = None
+    if device:
+        meta = st.device_meta.get(device)
+        if isinstance(meta, dict):
+            missing = meta.get("missing")
+
+    if not missing:
+        for meta in st.device_meta.values():
+            if isinstance(meta, dict) and meta.get("missing"):
+                missing = meta["missing"]
+                break
+
+    if isinstance(missing, dict) and missing:
+        return f"{reason}; missing={missing}"
+    return reason
+
+
+def _normalize_device_status(status, fallback_status: str) -> str:
+    if status in (None, "running"):
+        return fallback_status
+    return status
+
+
+def _build_keypad_job_results(meter: SSHMeter, keypad_status: str, error: str | None = None):
+    default_info = {'ver': -1, 'mod': -1, 'id': -1}
+    info = _module_info_for_program(meter, "keypad", default_info)
+    job_results = {
+        "keypad": {
+            "status": keypad_status,
+            "fw": info.get("ver", -1),
+            "id": info.get("id", -1),
+        }
+    }
+    if error:
+        job_results["keypad"]["error"] = error
+
+    keypad2_info = meter.module_info.get(PROG2MODULE.get("keypad2"))
+    if keypad2_info is not None:
+        job_results["keypad2"] = {
+            "status": keypad_status,
+            "fw": keypad2_info.get("ver", -1),
+            "id": keypad2_info.get("id", -1),
+        }
+
+    return job_results
+
+
 # using this to database?
 def job_done(meter_ip):
     meter = mm.get_meter(meter_ip)
@@ -417,7 +524,7 @@ def job_done(meter_ip):
     _handle_auto_job_done(meter_ip, current_program)
 
     if meter.db_id==None: return
-    meter.results.pop(current_program)
+    meter.results.pop(current_program, None)
 
     # initial 
     overall_status = "pass"
@@ -505,8 +612,23 @@ def job_done(meter_ip):
         if st.device_meta:
             data["device_meta"] = st.device_meta
 
-        
-    
+    elif current_program == "operator_keypad":
+        failed = _job_has_failure(st)
+        overall_status = "fail" if failed else "pass"
+        failure_reason = _job_failure_reason(st, "keypad") if failed else None
+        keypad_status = _normalize_device_status(
+            st.device_results.get("keypad"),
+            overall_status,
+        )
+
+        data["results"] = _build_keypad_job_results(meter, keypad_status, failure_reason)
+        if st.last_error:
+            data["last_error"] = st.last_error
+        if failure_reason:
+            data["failure_reason"] = failure_reason
+        if st.device_meta:
+            data["device_meta"] = st.device_meta
+
     # insertion time!
     job_data = {
         "name": current_program,

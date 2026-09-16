@@ -15,6 +15,18 @@ export type HardwareCapability =
 export type HardwareState = {
     profile: string
     capabilities: Record<HardwareCapability, boolean>
+    mock: boolean
+}
+
+export type OperatorKeypadState = {
+    ip: string
+    counts: Record<string, number>
+    expected_buttons: string[]
+    required_per_button: number
+    latest_button: string | null
+    missing: Record<string, number>
+    current: number
+    total: number
 }
 
 type BayGuess = [
@@ -93,6 +105,9 @@ export interface SystemState {
     // known connected meters
     meters: Record<string, MeterState>
 
+    // operator keypad progress by meter IP
+    operatorKeypad: Record<string, OperatorKeypadState>
+
     // current tab
     currentTab: string | undefined
 
@@ -113,6 +128,7 @@ export interface SystemState {
 export const initialSystemState: SystemState = {
     hardware: {
         profile: "full",
+        mock: false,
         capabilities: {
             station_io: true,
             i2c: true,
@@ -134,6 +150,7 @@ export const initialSystemState: SystemState = {
     playground: false,
     connected: false,
     meters: {},
+    operatorKeypad: {},
     currentTab: undefined,
     workOrder: null,
     running: false,
@@ -154,6 +171,7 @@ export type Action =
     | { type: 'meter'; ip: string; info?: MeterInfo; alive: boolean }
     | { type: 'meter:status'; ip: string; status: string; msg?: string; current_action?: string }
     | { type: 'meter:progress'; ip: string; current: number; total: number }
+    | { type: 'operator-keypad'; state: OperatorKeypadState }
     | { type: 'meters:clear' }
 
 export const BAY_GUESS_BAY_STARTS = [2, 6, 10] as const
@@ -165,8 +183,10 @@ export function reducer(state: SystemState, action: Action): SystemState {
         case 'meter': {
             if (!action.alive) {
                 const nextMeters = { ...state.meters }
+                const nextOperatorKeypad = { ...state.operatorKeypad }
                 delete nextMeters[action.ip]
-                return { ...state, meters: nextMeters }
+                delete nextOperatorKeypad[action.ip]
+                return { ...state, meters: nextMeters, operatorKeypad: nextOperatorKeypad }
             }
 
             if (!action.info) return state
@@ -184,7 +204,7 @@ export function reducer(state: SystemState, action: Action): SystemState {
             }
         }
         case 'meters:clear':
-            return { ...state, meters: {} }
+            return { ...state, meters: {}, operatorKeypad: {} }
 
         case 'meter:status': {
             const meter = state.meters[action.ip]
@@ -222,6 +242,15 @@ export function reducer(state: SystemState, action: Action): SystemState {
                 },
             }
         }
+
+        case 'operator-keypad':
+            return {
+                ...state,
+                operatorKeypad: {
+                    ...state.operatorKeypad,
+                    [action.state.ip]: action.state,
+                },
+            }
         default:
             return state
     }

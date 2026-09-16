@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List
 
+import requests
+
 from lib.automation.helpers import StopAutomation, check_stop_event
 from lib.automation.shared_state import SharedState
 from lib.meter.ssh_meter import SSHMeter
@@ -18,12 +20,6 @@ from lib.sse.sse_queue_manager import SSEQM
 KEYPAD_PAGE = "Service:Utilities:Peripherals:Keyboard"
 JOURNAL_UNIT = "MS3_Platform.service"
 ALLOWED_KEYPAD_SOURCES = {"KEY_PAD_2", "KBD_CONTROLLER"}
-KBD_CONTROLLER_BUTTON_REMAP = {
-    # Current meters report the outer KBD-controller buttons opposite the
-    # physical legends: raw HELP is the left globe/MAX key, raw MAX is help.
-    "HELP": "MAX",
-    "MAX": "HELP",
-}
 KEY_PRESSED_RE = re.compile(
     r"KEY_PRESSED:\s*(?P<key>[^,]+),\s*isAutoRepeat=(?P<auto_repeat>true|false),\s*from\s+(?P<source>\S+)",
     re.IGNORECASE,
@@ -56,13 +52,6 @@ class OperatorKeypadRunState:
 
 def _normalize_button(value: Any) -> str:
     return str(value or "").strip().upper()
-
-
-def _canonical_keypad_button(button: Any, source: Any) -> str:
-    normalized = _normalize_button(button)
-    if _normalize_button(source) == "KBD_CONTROLLER":
-        return KBD_CONTROLLER_BUTTON_REMAP.get(normalized, normalized)
-    return normalized
 
 
 def _journal_message(value: Any) -> str:
@@ -189,9 +178,8 @@ def _poll_keypad_presses(
         if not match:
             continue
 
-        raw_button = _normalize_button(match.group("key"))
+        button = _normalize_button(match.group("key"))
         source = _normalize_button(match.group("source"))
-        button = _canonical_keypad_button(raw_button, source)
         auto_repeat = match.group("auto_repeat").lower() == "true"
         press_data = {
             "button": button,
@@ -201,8 +189,6 @@ def _poll_keypad_presses(
             "timestamp": entry["timestamp"],
             "message": entry["message"],
         }
-        if raw_button != button:
-            press_data["raw_button"] = raw_button
 
         ignore_reason = ""
         if auto_repeat:
@@ -235,7 +221,9 @@ def _poll_keypad_presses(
 
 
 def _is_on_keypad_page(meter: SSHMeter, timeout_s: float) -> bool:
-    return KEYPAD_PAGE in meter.get_ui_page_html(timeout=timeout_s)
+    response = requests.get(f"http://{meter.host}:8005/UIPage.php", timeout=timeout_s)
+    response.raise_for_status()
+    return KEYPAD_PAGE in response.text
 
 
 def _all_buttons_satisfied(state: OperatorKeypadRunState) -> bool:
@@ -263,20 +251,13 @@ def _broadcast_keypad_state(
         for count in state.confirmed_counts.values()
     )
     total = len(state.expected_buttons) * state.required_per_button
-    latest_button = (
-        state.accepted_presses[-1]["button"]
-        if state.accepted_presses
-        else None
-    )
     shared.broadcast_progress(meter.host, "operator_keypad", completed, total)
     SSEQM.broadcast(
         "operator_keypad",
         {
             "ip": meter.host,
-            "expected_buttons": list(state.expected_buttons),
             "counts": dict(state.confirmed_counts),
             "required_per_button": state.required_per_button,
-            "latest_button": latest_button,
             "missing": _missing_buttons(state),
             "current": completed,
             "total": total,
@@ -442,6 +423,8 @@ def test_operator_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             f"journal_entries={state.journal_entries_processed} | "
             f"journal_read_errors={state.journal_read_error_count}"
         )
+
+
 
 
 

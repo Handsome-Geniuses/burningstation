@@ -2,6 +2,7 @@ from lib.system.bay_guess import empty_bay_guess
 from lib.system.states import states
 from lib.gpio import emergency, rm, mdm, tm, lm
 from lib.hardware import hardware
+from lib.utils import secrets
 
 
 # setting up states
@@ -14,7 +15,7 @@ states['tower'] = tm.get_value_list()
 states['lamp'] = lm.get_value_list()
 states['mode'] = 'manual'
 states['dummy'] = {}
-states['workOrder'] = None
+states['workOrder'] = 999999999 if secrets.DEVWO else None
 
 
 # initialize some values. motors of. tower off. lamps off

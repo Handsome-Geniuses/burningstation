@@ -12,6 +12,7 @@ from asyncdec import AsyncManager, async_fire_and_forget
 from lib.robot.robot_client import RobotClient
 from lib.system.bay_guess import BAY_GUESS_BAY_STARTS, empty_bay_guess, place_meter
 from lib.system.belt_logic import BAY_STARTS, BOX_LEFT_MAX, boxes_are_valid, sensors_to_boxes
+from lib.utils import secrets
 
 from lib.store import store
 
@@ -390,6 +391,11 @@ def on_emergency(**kwargs):
     return "", 200
 
 def on_work_order(**kwargs):
+    if secrets.DEVWO:
+        states['workOrder'] = 999999999
+        SSEQM.broadcast("state", key_payload("workOrder", states['workOrder']))
+        return "", 200
+
     value = kwargs.get('value', None)
 
     if value in (None, ""):

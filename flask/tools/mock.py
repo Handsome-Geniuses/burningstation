@@ -1,12 +1,14 @@
 from unittest.mock import patch
 import ip_scanner
+import json
+import re
 import time
 from datetime import datetime, timedelta, date
 
 from lib.automation.jobs import _handle_auto_job_done, _wait_for_middle_bay_full
 from lib.meter.meter_manager import METERMANAGER as mm
 from lib.meter.ssh_meter import SSHMeter
-from lib.system import sim
+from lib.system import program, sim
 from lib.sse.sse_queue_manager import SSEQM as master
 from lib.system.belt_logic import boxes_to_sensors, sensors_to_boxes, step_boxes
 from lib.system.states import states
@@ -83,8 +85,28 @@ MOCK_JOB_COUNT = 30
 # ================================================================
 _mock_meter_ips: set[str] = set()
 _original_meter_init = SSHMeter.__init__
+_original_exec_parse = SSHMeter.exec_parse
 _original_get_ips = ip_scanner.get_ips
 _original_sim_on_action = sim.on_action
+_original_stop_operator_job = program.stop_operator_job
+
+_mock_keypad_journals: dict[str, list[dict]] = {}
+_mock_keypad_page_hosts: set[str] = set()
+_mock_keypad_cursor_seq: dict[str, int] = {}
+_mock_operator_timers: dict[str, threading.Timer] = {}
+
+_MOCK_KEYPAD_PAGE_HTML = f"<html><body>Service:Utilities:Peripherals:Keyboard</body></html>"
+_MAIN_KEYPAD_BUTTONS = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
+    "ASTERISK", "POUND",
+    *[chr(code) for code in range(ord("A"), ord("Z") + 1)],
+    "BACK", "ENTER",
+}
+_FUNCTION_KEYPAD_BUTTONS = {"MAX", "UP", "DOWN", "CANCEL", "ACCEPT", "HELP", "CENTER"}
+_MOCK_KBD_CONTROLLER_RAW_BUTTONS = {
+    "MAX": "HELP",
+    "HELP": "MAX",
+}
 
 
 # ================================================================
@@ -129,6 +151,105 @@ def _apply_meter_runtime_mocks(meter: SSHMeter):
     return meter
 
 
+def _mock_keypad_source(button: str):
+    if button in _FUNCTION_KEYPAD_BUTTONS:
+        return "KBD_CONTROLLER"
+    if button in _MAIN_KEYPAD_BUTTONS:
+        return "KEY_PAD_2"
+    return "KEY_PAD_2"
+
+
+def _mock_keypad_cursor(host: str):
+    _mock_keypad_cursor_seq[host] = _mock_keypad_cursor_seq.get(host, 0) + 1
+    return f"mock:{host}:{_mock_keypad_cursor_seq[host]}"
+
+
+def _mock_keypad_entry(host: str, message: str):
+    return {
+        "__CURSOR": _mock_keypad_cursor(host),
+        "__REALTIME_TIMESTAMP": str(int(time.time() * 1_000_000)),
+        "MESSAGE": message,
+    }
+
+
+def _ensure_mock_keypad_journal(host: str):
+    if host not in _mock_keypad_journals:
+        _mock_keypad_journals[host] = [
+            _mock_keypad_entry(host, "mock keypad journal seed")
+        ]
+    return _mock_keypad_journals[host]
+
+
+def _mock_journal_json(entries: list[dict]):
+    return "\n".join(json.dumps(entry) for entry in entries)
+
+
+def append_mock_operator_keypad_press(host: str, button: str):
+    button = str(button or "").strip().upper()
+    if not button:
+        raise ValueError("button is required")
+
+    entries = _ensure_mock_keypad_journal(host)
+    source = _mock_keypad_source(button)
+    raw_button = (
+        _MOCK_KBD_CONTROLLER_RAW_BUTTONS.get(button, button)
+        if source == "KBD_CONTROLLER"
+        else button
+    )
+    entries.append(
+        _mock_keypad_entry(
+            host,
+            f"KEY_PRESSED: {raw_button}, isAutoRepeat=false, from {source}",
+        )
+    )
+    return {
+        "status": "pressed",
+        "ip": host,
+        "button": button,
+        "raw_button": raw_button,
+        "source": source,
+    }
+
+
+def _cursor_number(cursor: str):
+    match = re.search(r":(\d+)$", cursor or "")
+    return int(match.group(1)) if match else 0
+
+
+def _mock_exec_parse(self, command: str):
+    command = str(command or "")
+    if "journalctl" not in command or "MS3_Platform.service" not in command:
+        return _original_exec_parse(self, command)
+
+    entries = _ensure_mock_keypad_journal(self.host)
+    if "-n 1" in command:
+        return 0, _mock_journal_json(entries[-1:]), ""
+
+    match = re.search(r"--after-cursor=(?P<cursor>\S+)", command)
+    if not match:
+        return 0, "", ""
+
+    cursor = match.group("cursor").strip("'\"")
+    cursor_number = _cursor_number(cursor)
+    newer_entries = [
+        entry
+        for entry in entries
+        if _cursor_number(entry.get("__CURSOR", "")) > cursor_number
+    ]
+    return 0, _mock_journal_json(newer_entries), ""
+
+
+def _mock_goto_keypad(self):
+    _mock_keypad_page_hosts.add(self.host)
+    _ensure_mock_keypad_journal(self.host)
+
+
+def _mock_get_ui_page_html(self, timeout: float = 5.0):
+    if self.host in _mock_keypad_page_hosts:
+        return _MOCK_KEYPAD_PAGE_HTML
+    return ""
+
+
 def _next_mock_meter_ip():
     start, end = mm.address_range
     for suffix in range(end, start - 1, -1):
@@ -145,6 +266,26 @@ def _build_meter_payload(host: str, meter: SSHMeter, status: str):
         "hostname": meter.hostname,
         "meter_type": meter.meter_type,
     }
+
+
+def _register_mock_meter(host: str):
+    meter = SSHMeter(host)
+    _apply_meter_runtime_mocks(meter)
+    mm.meters[host] = meter
+    mm._METERMANAGER__meters.add(host)
+    mm._METERMANAGER__stale_counts.pop(host, None)
+    mm._METERMANAGER__attempts.pop(host, None)
+    mm._METERMANAGER__booted.pop(host, None)
+    mm._METERMANAGER__splash.discard(host)
+    master.broadcast(
+        "meter",
+        {
+            "ip": host,
+            "alive": True,
+            "info": meter.get_info(),
+        },
+    )
+    return meter
 
 
 def list_mock_meters():
@@ -277,17 +418,8 @@ def add_mock_meter(host: str | None = None):
         return _build_meter_payload(host, meter, "exists")
 
     _mock_meter_ips.add(host)
-    mm._METERMANAGER__stale_counts.pop(host, None)
-    mm._METERMANAGER__attempts.pop(host, None)
-    mm._METERMANAGER__booted.pop(host, None)
-    mm._METERMANAGER__splash.discard(host)
-    mm.refresh()
-
-    meter = mm.meters.get(host)
-    if meter:
-        return _build_meter_payload(host, meter, "added")
-
-    raise RuntimeError(f"Failed to add mock meter {host}")
+    meter = _register_mock_meter(host)
+    return _build_meter_payload(host, meter, "added")
 
 
 def wipe_mock_meters():
@@ -296,6 +428,10 @@ def wipe_mock_meters():
     _mock_meter_ips.clear()
 
     for host in hosts:
+        _mock_keypad_journals.pop(host, None)
+        _mock_keypad_cursor_seq.pop(host, None)
+        _mock_keypad_page_hosts.discard(host)
+        _cancel_mock_operator_timer(host)
         if host in mm.meters:
             for _ in range(threshold):
                 mm.stale_meter(host)
@@ -329,6 +465,10 @@ def disconnect_mock_meter(host: str | None = None):
         return {"status": "not_found", "ip": None}
 
     _mock_meter_ips.discard(host)
+    _mock_keypad_journals.pop(host, None)
+    _mock_keypad_cursor_seq.pop(host, None)
+    _mock_keypad_page_hosts.discard(host)
+    _cancel_mock_operator_timer(host)
     _mock_stop_passive_job(host)
     _mock_stop_physical_job(host)
 
@@ -368,6 +508,14 @@ def _mock_sim_on_action(action, **kwargs):
         return wipe_mock_meters(), 200
     if action == "list_meters":
         return list_mock_meters(), 200
+    if action == "wipe_devwo_jobs":
+        count = database.delete_meter_jobs_for_work_order(999999999)
+        return {"status": "deleted", "work_order": 999999999, "count": count}, 200
+    if action == "operator_keypad_press":
+        meter_ip = kwargs.get("meter_ip")
+        if not meter_ip:
+            return {"error": "meter_ip is required"}, 400
+        return append_mock_operator_keypad_press(meter_ip, kwargs.get("button")), 200
     return _original_sim_on_action(action, **kwargs)
 
 
@@ -436,7 +584,10 @@ def _insert_mock_job(meter_ip: str, program: str):
         f"[mock] starting {program} on {meter.hostname}",
         "[mock] completed with status=pass",
     ])
-    database.insert_meter_jobs(meter.db_id, [job_data], jctl)
+    try:
+        database.insert_meter_jobs(meter.db_id, [job_data], jctl)
+    except Exception as exc:
+        print(f"[mock] skipping mock job insert: {exc}")
 
 
 def _mock_start_physical_job(*args, **kwargs): 
@@ -489,6 +640,83 @@ def _mock_stop_physical_job(meter_ip):
     meter = mm.meters.get(meter_ip)
     if meter:
         meter.status = "ready"
+    master.broadcast('status', {'ip': meter_ip, 'status': 'ready', 'current_action': ''})
+    return True, "stopped"
+
+
+def _mock_operator_device_results(status: str = "pass"):
+    return {
+        "screen_test": status,
+        "touchscreen": status,
+        "display_brightness": status,
+        "keypad": status,
+        "contactless": status,
+        "card_reader": status,
+    }
+
+
+def _cancel_mock_operator_timer(meter_ip: str):
+    timer = _mock_operator_timers.pop(meter_ip, None)
+    if timer:
+        timer.cancel()
+        return True
+    return False
+
+
+def _mock_start_operator_job(*args, **kwargs):
+    duration = 6
+    _mock_null_fn_msg("start_operator_job", args, kwargs)
+    meter_ip = args[0] if args else kwargs.get("meter_ip")
+    if not meter_ip:
+        return False, "Missing meter_ip"
+
+    _cancel_mock_operator_timer(meter_ip)
+    meter = mm.get_meter(meter_ip)
+    if meter.status != "ready":
+        return False, "job already running"
+
+    meter.status = "busy"
+    meter.results = {}
+    master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': 'operator_cycle_all'})
+    _broadcast_mock_progress(meter_ip, 'operator_cycle', 0, duration)
+
+    def tick_operator(current_cycle: int = 1):
+        if meter_ip not in _mock_operator_timers:
+            return
+
+        _broadcast_mock_progress(meter_ip, 'operator_cycle', current_cycle, duration)
+        if current_cycle < duration:
+            timer = threading.Timer(1.0, tick_operator, args=(current_cycle + 1,))
+            timer.daemon = True
+            _mock_operator_timers[meter_ip] = timer
+            timer.start()
+            return
+
+        _mock_operator_timers.pop(meter_ip, None)
+        results = _mock_operator_device_results("pass")
+        meter.results.update(results)
+        meter.status = "ready"
+        master.broadcast('devices', {'ip': meter_ip, 'results': results})
+        master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': ''})
+        _insert_mock_job(meter_ip, "operator_cycle_all")
+
+    timer = threading.Timer(1.0, tick_operator)
+    timer.daemon = True
+    _mock_operator_timers[meter_ip] = timer
+    timer.start()
+    return True, "started"
+
+
+def _mock_stop_operator_job(meter_ip):
+    _mock_null_fn_msg("stop_operator_job", (meter_ip,), {})
+    if not _cancel_mock_operator_timer(meter_ip):
+        return _original_stop_operator_job(meter_ip)
+
+    meter = mm.meters.get(meter_ip)
+    if meter:
+        meter.status = "ready"
+        meter.results.update(_mock_operator_device_results("fail"))
+    master.broadcast('devices', {'ip': meter_ip, 'results': _mock_operator_device_results("fail")})
     master.broadcast('status', {'ip': meter_ip, 'status': 'ready', 'current_action': ''})
     return True, "stopped"
 
@@ -583,6 +811,9 @@ def _install_patches():
         patch("lib.meter.ssh_meter.SSHMeter.blink_until_stop", _mock_blink_until_stop).start()
 
         patch("lib.meter.ssh_meter.SSHMeter.update_display_results", _mock_null_fn).start()
+        patch("lib.meter.ssh_meter.SSHMeter.exec_parse", _mock_exec_parse).start()
+        patch("lib.meter.ssh_meter.SSHMeter.goto_keypad", _mock_goto_keypad).start()
+        patch("lib.meter.ssh_meter.SSHMeter.get_ui_page_html", _mock_get_ui_page_html).start()
 
     # stuff that can be mocked when connected 
     if station_connected:
@@ -611,7 +842,10 @@ def _install_patches():
     patch("lib.system.program.stop_passive_job", _mock_stop_passive_job).start()
     patch("lib.system.program.start_physical_job", _mock_start_physical_job).start()
     patch("lib.system.program.stop_physical_job", _mock_stop_physical_job).start()
+    patch("lib.system.program.start_operator_job", _mock_start_operator_job).start()
+    patch("lib.system.program.stop_operator_job", _mock_stop_operator_job).start()
     patch("lib.automation.jobs.start_physical_job", _mock_start_physical_job).start()
+    patch("lib.automation.jobs.start_operator_job", _mock_start_operator_job).start()
 
 _install_patches()
 

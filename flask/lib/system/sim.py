@@ -269,6 +269,11 @@ def on_action(action, **kwargs):
         res = on_question(**kwargs)
     elif action == "emergency":
         res = toggle_emergency(**kwargs)
+    elif action == "wipe_devwo_jobs":
+        from lib import database
+
+        count = database.delete_meter_jobs_for_work_order(999999999)
+        res = {"status": "deleted", "work_order": 999999999, "count": count}, 200
     
     return res if res is not None else ("", 200)
 

@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import {
     meterRunBlinkUntil,
     meterRunDummy,
+    meterRunOperatorKeypad,
     meterRunPassive,
     meterRunOperator,
     meterRunPrintFw,
@@ -21,6 +22,7 @@ import {
 } from "@/lib/ep"
 
 import { MeterState, SystemState } from "../../store/system"
+import { OperatorKeypadPanel } from "./operator-keypad-panel"
 
 const BAY_GUESS_LABELS: Record<string, string> = {
     "111000000000000": "__bay0",
@@ -63,7 +65,10 @@ export const MeterDialog = ({
     const isPassiveRunning = meter?.current_action === "cycle_all"
     const isPhysicalRunning = meter?.current_action === "physical_cycle_all"
     const isOperatorRunning = meter?.current_action === "operator_cycle_all"
+    const isOperatorKeypadRunning = meter?.current_action === "operator_keypad"
     const isBlinking = meter?.current_action === "blinking"
+    const keypadState = meter ? systemState.operatorKeypad[meter.ip] : undefined
+    const showOperatorKeypad = Boolean(keypadState || isOperatorKeypadRunning)
 
     const handleDialogOpenChange = (open: boolean) => {
         if (open) return
@@ -83,7 +88,7 @@ export const MeterDialog = ({
 
     return (
         <Dialog open={meter != undefined} onOpenChange={handleDialogOpenChange}>
-            <DialogContent className="w-fit m-0 p-0 space-y-0 space-x-0 [&>button]:hidden gap-0">
+            <DialogContent className="w-fit max-w-[min(96vw,76rem)] max-h-[92vh] overflow-y-auto m-0 p-0 space-y-0 space-x-0 [&>button]:hidden gap-0">
                 <DialogHeader className="gap-0 border-b p-4">
                     <DialogTitle>{meter?.hostname ?? "Meter"}</DialogTitle>
                     <div className="text-muted-foreground text-sm">
@@ -117,7 +122,23 @@ export const MeterDialog = ({
                     >
                         run operator
                     </Button>
+                    <Button
+                        variant="outline"
+                        onClick={run(() => meterRunOperatorKeypad(meter?.ip))}
+                        disabled={running || systemState.mode !== "manual" || !isMeterReady}
+                    >
+                        run keypad test
+                    </Button>
                 </div>
+
+                {meter && showOperatorKeypad &&
+                    <OperatorKeypadPanel
+                        meterIp={meter.ip}
+                        keypadState={keypadState}
+                        mock={systemState.hardware.mock}
+                        running={Boolean(isOperatorKeypadRunning || (isOperatorRunning && keypadState))}
+                    />
+                }
 
                 <DialogFooter className="border-t p-4">
                     {systemState.playground && isPassiveRunning &&
@@ -138,13 +159,13 @@ export const MeterDialog = ({
                             physical
                         </Button>
                     }
-                    {isOperatorRunning &&
+                    {(isOperatorRunning || isOperatorKeypadRunning) &&
                         <Button
                             variant="destructive"
                             onClick={run(() => meterStopOperator(meter?.ip))}
                             disabled={running}
                         >
-                            stop operator
+                            {isOperatorKeypadRunning ? "stop keypad" : "stop operator"}
                         </Button>
                     }
                     <Button

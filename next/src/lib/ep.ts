@@ -34,6 +34,25 @@ export const meterRunPassive = async (meterIp?: string) => meterRunProg(meterIp,
 export const meterStopPassive = async (meterIp?: string) => meterRunProg(meterIp, "stop_passive_job")
 export const meterStopPhysical = async (meterIp?: string) => meterRunProg(meterIp, "stop_physical_job")
 export const meterRunOperator = async (meterIp?: string) => meterRunProg(meterIp, "start_operator_job")
+export const meterRunOperatorKeypad = async (meterIp?: string) => meterRunProg(meterIp, "start_operator_keypad_job")
 export const meterStopOperator = async (meterIp?: string) => meterRunProg(meterIp, "stop_operator_job")
 export const meterRunPrintFw = async (meterIp?: string) => await meterRunNeutralProg(meterIp, "printfw")
 export const meterRunDummy = async (meterIp?: string) => meterRunNeutralProg(meterIp, "dummy")
+
+export const meterMockOperatorKeypadPress = async (meterIp?: string, button?: string) => {
+    if (!meterIp || !button) return
+
+    try {
+        const res = await flask.handleAction("sim", "operator_keypad_press", {
+            meter_ip: meterIp,
+            button,
+        })
+        const payload = await res.json().catch(() => ({}))
+        if (!res.ok) {
+            throw new Error(payload?.error ?? `Failed to press ${button} (${res.status})`)
+        }
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : `Failed to press ${button}`
+        notify.error(msg)
+    }
+}

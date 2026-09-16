@@ -67,6 +67,7 @@ class HardwareConfig:
         return {
             "profile": self.profile,
             "capabilities": dict(self.capabilities),
+            "mock": os.getenv("MOCK", "1").strip() == "1",
         }
 
 
