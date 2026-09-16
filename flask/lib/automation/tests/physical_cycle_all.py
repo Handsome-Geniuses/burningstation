@@ -92,14 +92,21 @@ def run_and_retrieve_charuco(robot: RobotClient, meter: SSHMeter, shared: Shared
         "burningstation_logfile_path": shared.logfile_path,
     })
 
-    robot.wait_for_event("program_done", job_id=job_id, timeout=20)
+    program_result = robot.wait_for_event("program_done", job_id=job_id, timeout=60)
+    if program_result.get("result") != "success":
+        raise RuntimeError(
+            "Robot meter discovery failed: "
+            + program_result.get("message", "No message from robot")
+        )
 
     data = robot.send_command("get_charuco_frame")
     charuco_frame = data.get("charuco_frame", None)
     shared.log(f"charuco_frame to use for runs: {charuco_frame}")
 
-    if charuco_frame is not None:
-        meter.set_ui_mode("banner")
+    if charuco_frame is None:
+        raise RuntimeError("Robot meter discovery completed without a valid charuco_frame")
+
+    meter.set_ui_mode("banner")
 
     # job_id = robot.run_program("run_button_pic", args={"meter_type": meter.meter_type, "button_name": "i", "charuco_frame": charuco_frame})
     # robot.wait_for_event("program_done", job_id=job_id, timeout=20)

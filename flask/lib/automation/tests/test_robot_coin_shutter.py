@@ -16,12 +16,12 @@ def test_robot_coin_shutter(meter: SSHMeter, shared: SharedState, **kwargs):
     func_name = inspect.currentframe().f_code.co_name
     subtest = bool(kwargs.get("subtest", False))
     job_count = int(kwargs.get("job_count", 1))
+    charuco_frame = kwargs.get("charuco_frame")
+    if charuco_frame is None:
+        raise ValueError("'charuco_frame' argument is required for the robot coin shutter test")
     robot = RobotClient()
 
-    if kwargs.get("charuco_frame") is None:
-        meter.set_ui_mode("charuco")
-    else:
-        meter.set_ui_mode("banner")
+    meter.set_ui_mode("banner")
 
     for i in range(job_count):
         cycle_num = i + 1
@@ -34,7 +34,7 @@ def test_robot_coin_shutter(meter: SSHMeter, shared: SharedState, **kwargs):
             {
                 "meter_type": meter.meter_type,
                 "meter_id": meter.hostname,
-                "charuco_frame": kwargs.get("charuco_frame"),
+                "charuco_frame": charuco_frame,
                 "burningstation_logfile_path": shared.logfile_path,
             },
         )

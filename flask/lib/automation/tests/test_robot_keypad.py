@@ -1226,10 +1226,10 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     if not subtest:
         shared.broadcast_progress(meter.host, func_name, 1, 1)
 
-    if kwargs.get("charuco_frame") is None:
-        meter.set_ui_mode("charuco")
-    else:
-        meter.set_ui_mode("banner")
+    charuco_frame = kwargs.get("charuco_frame")
+    if charuco_frame is None:
+        raise ValueError("'charuco_frame' argument is required for the robot keypad test")
+    meter.set_ui_mode("banner")
 
     meter.goto_keypad()
     if not is_on_keypad_page(meter, shared):
@@ -1289,7 +1289,7 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             "meter_id": meter.hostname,
             "buttons": raw_buttons,
             "job_count": job_count,
-            "charuco_frame": kwargs.get("charuco_frame"),
+            "charuco_frame": charuco_frame,
             "test": False,
             "burningstation_logfile_path": shared.logfile_path,
         },
