@@ -7,7 +7,7 @@ from lib.automation.helpers import StopAutomation
 from lib.automation.tests.test_solar import test_solar
 from lib.automation.tests.test_robot_coin_shutter import test_robot_coin_shutter
 from lib.automation.tests.cycle_meter_ui import test_cycle_meter_ui
-from lib.automation.tests.test_robot_keypad import test_robot_keypad
+from lib.automation.tests.test_robot_keypad import test_robot_keypad, test_robot_keypad_with_solar
 from lib.automation.tests.test_robot_display_brightness import test_robot_display_brightness
 from lib.robot.robot_client import RobotClient
 
@@ -113,6 +113,12 @@ def run_and_retrieve_charuco(robot: RobotClient, meter: SSHMeter, shared: Shared
     return charuco_frame
 
 
+def _combined_solar_keypad_enabled(kwargs) -> bool:
+    solar_enabled, _ = _resolve_subtest_kwargs("solar", kwargs)
+    keypad_enabled, _ = _resolve_subtest_kwargs("robot_keypad", kwargs)
+    return solar_enabled and keypad_enabled
+
+
 def physical_cycle_all(
     meter: SSHMeter,
     shared: SharedState,
@@ -141,6 +147,7 @@ def physical_cycle_all(
         shared.log(f"{meter.host} {func_name} {cycle_num}/{burn_count}")
         shared.broadcast_progress(meter.host, "physical_cycle", cycle_num, burn_count)
 
+        combined_solar_keypad = _combined_solar_keypad_enabled(kwargs)
         for device_name, test_func, default_cfg in PHYSICAL_DEVICES:
             if shared.stop_event.is_set():
                 return
@@ -165,22 +172,38 @@ def physical_cycle_all(
                 shared.device_results[device_name] = "missing"
                 continue
 
+            if device_name == "solar" and combined_solar_keypad:
+                shared.log("Solar will run inside the robot_keypad_with_solar subtest")
+                continue
+
             robot.wait_until_ready(robot_ready_timeout)
 
             shared.current_device = device_name
             shared.device_results[device_name] = "running"
             shared.set_allowed(set(), reason=f"No monitor for {device_name}")
 
+            is_combined_subtest = device_name == "robot_keypad" and combined_solar_keypad
             try:
                 final_kwargs["subtest"] = True
                 final_kwargs["charuco_frame"] = charuco_frame
 
-                test_func(meter, shared=shared, **final_kwargs)
+                if is_combined_subtest:
+                    _, solar_kwargs = _resolve_subtest_kwargs("solar", kwargs)
+                    test_robot_keypad_with_solar(
+                        meter,
+                        shared=shared,
+                        solar_kwargs=solar_kwargs,
+                        **final_kwargs,
+                    )
+                else:
+                    test_func(meter, shared=shared, **final_kwargs)
 
                 if not shared.stop_event.is_set():
                     shared.device_results[device_name] = "pass"
 
             except StopAutomation as e:
+                if is_combined_subtest:
+                    raise
                 shared.log(f"{device_name} subtest fail due to StopAutomation")
                 shared.device_results[device_name] = "fail"
                 shared.last_error = str(e)
@@ -194,6 +217,8 @@ def physical_cycle_all(
                 raise e
             
             except Exception as e:
+                if is_combined_subtest:
+                    raise
                 shared.log(f"{device_name} subtest fail due to {e}")
                 shared.device_results[device_name] = "fail"
                 shared.last_error = str(e)

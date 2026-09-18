@@ -243,7 +243,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
         st.extras['kwargs'] = kwargs
         job_done(meter_ip)
-        meter.beep(3) # leave uncommented for production
+        if os.name != "nt": meter.beep(3) # leave uncommented for production
 
         # if program_name in ['cycle_all', 'all tests'] and meter.meter_type != 'msx':
             # meter.custom_print()
