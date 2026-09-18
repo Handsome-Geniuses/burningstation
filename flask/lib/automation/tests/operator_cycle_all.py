@@ -26,7 +26,11 @@ OPERATOR_TESTS = [
     ("touchscreen", test_operator_touchscreen, {"max_duration_s": 60.0}),
     ("display_brightness", test_operator_display_brightness, {"max_duration_s": 60.0}),
     ("keypad", test_operator_keypad, {}),
-    ("contactless", test_operator_nfc_tap, {}),
+    (
+        "contactless",
+        test_operator_nfc_tap,
+        {"max_duration_s": 60.0, "poll_s": 0.75},
+    ),
     (
         "card_reader",
         test_operator_card_reader,

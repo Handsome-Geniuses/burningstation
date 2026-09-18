@@ -83,6 +83,7 @@ def build_operator_kwargs(modules: dict, buttons=None):
     store.load()
     buttons = list(buttons or [])
     has_validator = "MK7_VALIDATOR" in modules
+    has_nfc = "KIOSK_NFC" in modules or "KIOSK_NEO" in modules
 
     s = store.settings.operator
     j = s.job_counts
@@ -99,7 +100,11 @@ def build_operator_kwargs(modules: dict, buttons=None):
         "touchscreen": {"job_count": j.touchscreen, "max_duration_s": 60.0},
         "display_brightness": {"job_count": j.display_brightness, "max_duration_s": 60.0},
         "keypad": {"job_count": j.keypad, "buttons": buttons},
-        "contactless": {"job_count": j.contactless},
+        "contactless": {
+            "job_count": (j.contactless if has_nfc else 0),
+            "max_duration_s": 60.0,
+            "poll_s": 0.75,
+        },
         "card_reader": {
             "job_count": j.card_reader,
             "max_duration_s": 90.0,
