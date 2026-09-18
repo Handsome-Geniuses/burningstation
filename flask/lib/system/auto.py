@@ -3,6 +3,7 @@ import time
 from typing import Callable
 
 from lib.gpio import mdm
+from lib.hardware import hardware
 from lib.meter.meter_manager import METERMANAGER as mm
 from lib.sse.question import ask_clients, setResponse
 from lib.sse.sse_queue_manager import SSEQM
@@ -26,9 +27,15 @@ class AutoCoordinator:
         self._pending: set[tuple[str, str]] = set()
 
     def on_passive_done(self, meter_ip: str):
+        if not hardware.has("auto_mode"):
+            self._notify("Auto skipped; hardware profile does not support auto mode", "info")
+            return
         self._enqueue("passive_done", meter_ip, self._bay0_to_bay1_then_physical)
 
     def on_physical_done(self, meter_ip: str):
+        if not hardware.has("auto_mode"):
+            self._notify("Auto skipped; hardware profile does not support auto mode", "info")
+            return
         self._enqueue("physical_done", meter_ip, self._bay1_to_bay2)
 
     def _enqueue(self, action: str, meter_ip: str, target: Callable[[str], None]):
@@ -49,6 +56,8 @@ class AutoCoordinator:
         threading.Thread(target=run, daemon=True, name=f"auto:{action}:{meter_ip}").start()
 
     def _flow_active(self, meter_ip: str) -> bool:
+        if not hardware.has("auto_mode"):
+            return False
         if states.get("mode") != "auto":
             return False
         if states.get("emergency"):

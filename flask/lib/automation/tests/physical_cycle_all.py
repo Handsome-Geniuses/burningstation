@@ -8,11 +8,13 @@ from lib.automation.tests.test_solar import test_solar
 from lib.automation.tests.test_robot_coin_shutter import test_robot_coin_shutter
 from lib.automation.tests.cycle_meter_ui import test_cycle_meter_ui
 from lib.automation.tests.test_robot_keypad import test_robot_keypad
+from lib.automation.tests.test_robot_display_brightness import test_robot_display_brightness
 from lib.robot.robot_client import RobotClient
 
 
 PHYSICAL_DEVICES = [
     ("solar",          test_solar, {}),
+    ("display_brightness", test_robot_display_brightness, {"max_duration_s": 40.0}),
     ("coin_shutter",   test_robot_coin_shutter, {}),
     ### ("nfc",            test_robot_nfc_read,     {}),
     ("nfc_gui",        test_cycle_meter_ui,     {"payment_type": "robot_contactless"}),
@@ -84,7 +86,11 @@ def run_and_retrieve_charuco(robot: RobotClient, meter: SSHMeter, shared: Shared
     robot.wait_until_ready(wait_timeout)
 
     meter.set_ui_mode("charuco")
-    job_id = robot.run_program("run_find_meter", args={"meter_type": meter.meter_type, "meter_id": meter.hostname})
+    job_id = robot.run_program("run_find_meter", args={
+        "meter_type": meter.meter_type,
+        "meter_id": meter.hostname,
+        "burningstation_logfile_path": shared.logfile_path,
+    })
 
     robot.wait_for_event("program_done", job_id=job_id, timeout=20)
 
@@ -121,6 +127,7 @@ def physical_cycle_all(
 
     robot = RobotClient()
     charuco_frame = run_and_retrieve_charuco(robot, meter, shared, robot_ready_timeout)
+    # charuco_frame = [-570.921, 143.128, 612.393, 90.673, -0.913, 87.678] #! for desk testing
 
     for cycle in range(burn_count):
         cycle_num = cycle + 1

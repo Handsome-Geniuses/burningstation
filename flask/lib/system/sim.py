@@ -2,6 +2,7 @@ import random
 import threading
 
 from lib.gpio import *
+from lib.hardware import hardware
 from lib.sse import ask_clients
 from lib.system import program
 import lib.system.station as station
@@ -112,7 +113,9 @@ def sim_emergency_reset():
 def emergency_event(p:HWGPIO):
     if p.state:  sim_emergency_stop()
     else:  sim_emergency_reset()
-HWGPIO_MONITOR.add_listener(emergency, emergency_event)
+if hardware.has("emergency_gpio"):
+    ensure_gpio_monitor_started()
+    HWGPIO_MONITOR.add_listener(emergency, emergency_event)
 
 
 @sim_operation(delay=0.5)  # adjust delay per step if needed
@@ -257,7 +260,13 @@ def on_meter(**kwargs):
 
 def on_action(action, **kwargs):
     res = None
-    if not secrets.MOCK: print("🕯️ [sim] not mock so not safe to sim", fg="#ffaa00")
+    if action == "wipe_devwo_jobs":
+        from lib import database
+
+        count = database.delete_meter_jobs_for_work_order(999999999)
+        res = {"status": "deleted", "work_order": 999999999, "count": count}, 200
+    elif not secrets.MOCK:
+        print("🕯️ [sim] not mock so not safe to sim", fg="#ffaa00")
     elif action == "roller":
         res = roller_move(**kwargs)
     elif action == "meter":

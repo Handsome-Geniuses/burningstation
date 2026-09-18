@@ -15,6 +15,13 @@ from lib.automation.monitors import create_monitor
 
 RE_FALLBACK = re.compile(r'^(\w+\s+\d+\s+\d+:\d+:\d+)\s+\S+\s+MS3\[\d+\]:\s*(.*)')
 USELESS_RES = [
+    # CARD_READ_DATA's raw IPSBus payload may contain complete magnetic-stripe
+    # track data. Tests retain the meter's processed summary instead.
+    re.compile(
+        r'^IPSBusLib:.*EMV_CONTACT\.[^\s]*->GENERIC_TERMINAL\.[^\s]*\s+'
+        r'CARD_READ_DATA\b.*\bD=',
+        re.IGNORECASE,
+    ),
     re.compile(r'^WebKitLib:WebKitSetURL:\d+: URL=http://127\.0\.0\.1:8005/UIPage\.php'),
     re.compile(r'^WebKitLib:WebKitRefresh:\d+: Refresh'),
 

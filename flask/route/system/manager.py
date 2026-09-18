@@ -26,11 +26,24 @@ def initial_payloads():
     for ip in mm.list_meters():
         try:
             meter = mm.get_meter(ip)
+            from lib.automation.jobs import get_frontend_job_state
+
+            job_state = get_frontend_job_state(ip)
+            info = meter.get_info()
+            if job_state.get("current_action"):
+                info["current_action"] = job_state["current_action"]
+            if job_state.get("progress"):
+                info["progress"] = job_state["progress"]
             yield dump_sse_payload(sse_payload("meter", {
                 "ip": ip,
                 "alive": True,
-                "info": meter.get_info(),
+                "info": info,
             }))
+            if job_state.get("operator_keypad"):
+                yield dump_sse_payload(sse_payload(
+                    "operator_keypad",
+                    job_state["operator_keypad"],
+                ))
         except Exception:
             pass
 

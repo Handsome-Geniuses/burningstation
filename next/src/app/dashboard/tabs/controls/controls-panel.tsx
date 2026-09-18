@@ -4,7 +4,7 @@ import { ManualAutoBox } from "./manual-auto-box";
 import { Button } from "@/components/ui/button";
 import { notify } from "@/lib/notify";
 import { flask } from "@/lib/flask";
-import { BAY_GUESS_BAY_STARTS, SystemState } from "../../store/system";
+import { BAY_GUESS_BAY_STARTS, hasHardwareCapability, SystemState } from "../../store/system";
 import { Separator } from "@/components/ui/separator";
 import * as React from "react";
 import {
@@ -91,12 +91,18 @@ const JobsDivider = ({ isManual }: { isManual: boolean }) => {
     return (
         <div>
             <SectionDivider label="jobs" className="pt-4" />
-            <div className="grid grid-cols-2 gap-2 pt-2">
+            <div className="grid grid-cols-4 gap-2 pt-2">
                 <Button variant="outline" onClick={() => flask.handleAction('program', 'manual', { program: 'start_passive_job' })} disabled={!isManual}>
                     passive
                 </Button>
                 <Button variant="outline" onClick={() => flask.handleAction('program', 'manual', { program: 'start_physical_job' })} disabled={!isManual}>
                     physical
+                </Button>
+                <Button variant="outline" onClick={() => flask.handleAction('program', 'manual', { program: 'start_operator_job' })} disabled={!isManual}>
+                    operator
+                </Button>
+                <Button variant="outline" onClick={() => flask.handleAction('program', 'manual', { program: 'start_operator_keypad_job' })} disabled={!isManual}>
+                    keypad test
                 </Button>
             </div>
         </div>
@@ -414,6 +420,7 @@ export function ControlsPanel({ systemState, className }: { systemState: SystemS
     const { values: serverSettings } = useServerSettings()
     const loadCheck = getBooleanOption(serverSettings, "flow", "load_check", true)
     const physicalCheck = getBooleanOption(serverSettings, "flow", "physical_check", true)
+    const beltAvailable = hasHardwareCapability(systemState, "belt")
 
     return (
         <div className={cn(PANEL, className)}>
@@ -430,11 +437,15 @@ export function ControlsPanel({ systemState, className }: { systemState: SystemS
                 {/* <JobsDivider isManual={isManual} /> */}
                 <RobotDivider isManual={isManual} />
 
-                <SectionDivider label="programs" className="pt-4" />
-                <div className="grid grid-cols-2 gap-2 pt-2">
-                    <MeterMiddlePhysical physicalCheck={physicalCheck} systemState={systemState} />
-                    <LoadMeter loadCheck={loadCheck} systemState={systemState} />
-                </div>
+                {beltAvailable && (
+                    <>
+                        <SectionDivider label="programs" className="pt-4" />
+                        <div className="grid grid-cols-2 gap-2 pt-2">
+                            <MeterMiddlePhysical physicalCheck={physicalCheck} systemState={systemState} />
+                            <LoadMeter loadCheck={loadCheck} systemState={systemState} />
+                        </div>
+                    </>
+                )}
             </div>
         </div>
     )

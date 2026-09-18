@@ -1291,6 +1291,7 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             "job_count": job_count,
             "charuco_frame": kwargs.get("charuco_frame"),
             "test": False,
+            "burningstation_logfile_path": shared.logfile_path,
         },
     )
     _keypad_log(shared, f"started robot keypad job_id={job_id}", section="robot")

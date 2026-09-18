@@ -56,7 +56,7 @@ const VirtualEmergency = ({ state }: { state: boolean }) => {
 }
 const RandomMeterSim = () => {
     const { run, running } = useAsyncAction()
-    
+
     return (
         <PGCard label="Random Meter" desc="Trigger simulated random meter occupancy">
             <div className="grid grid-cols-2 gap-1">
@@ -247,6 +247,38 @@ const LogMeters = () => {
     )
 }
 
+const DevWorkOrderCleanup = () => {
+    const { run, running } = useAsyncAction()
+    const onWipe = run(async () => {
+        try {
+            const res = await flask.handleAction("sim", "wipe_devwo_jobs")
+            const payload = await res.json().catch(() => ({}))
+
+            if (!res.ok) {
+                throw new Error(payload?.error ?? `Failed to wipe DEVWO jobs (${res.status})`)
+            }
+
+            notify.success(`deleted ${payload?.count ?? 0} DEVWO job rows`)
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to wipe DEVWO jobs"
+            notify.error(msg)
+        }
+    })
+
+    return (
+        <PGCard label="Dev Work Order" desc="delete WO999999999 job rows">
+            <Button
+                variant="outline"
+                className="w-full"
+                onClick={onWipe}
+                disabled={running}
+            >
+                wipe WO999999999
+            </Button>
+        </PGCard>
+    )
+}
+
 const NumpadPromptPlayground = () => {
     const [open, setOpen] = React.useState(false)
     const [value, setValue] = React.useState<number | undefined>()
@@ -287,21 +319,16 @@ export const PlaygroundTab = () => {
     const { systemState } = useStoreContext()
 
     return (
-        // <div className="p-4 flex flex-wrap gap-2 items-start">
-        // <div className="p-4 space-y-1 space-x-1">
-        // <div className="p-4 flex flex-wrap gap-3 items-start content-start overflow-scroll">
-        // <div className="grid grid-cols-[1fr_1fr_1fr] gap-2 overflow-scroll p-4">
-        // <div className="grid grid-cols-[repeat(3,max-content)] items-start gap-2 overflow-auto p-4">
-        // <div className="grid grid-cols-[repeat(3,max-content)] auto-rows-max items-start gap-2 overflow-auto p-4">
         <div className="grid grid-cols-[1fr_1fr_1fr] content-start gap-2 overflow-auto p-4">
             <VirtualEmergency state={systemState.emergency} />
             <RandomMeterSim />
             <AddFakeMeterSim />
             <LogMeters />
+            <DevWorkOrderCleanup />
             <NumpadPromptPlayground />
             <MeterBayToggleSim />
-            <LoadingMeter/>
-            <UnloadingMeter/>
+            <LoadingMeter />
+            <UnloadingMeter />
         </div>
     )
 }

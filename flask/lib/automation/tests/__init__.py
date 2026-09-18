@@ -5,8 +5,10 @@ from .cycle_nfc import test_cycle_nfc
 from .cycle_modem import test_cycle_modem
 from .cycle_call_in import test_cycle_call_in
 from .cycle_all import test_cycle_all
-from .test_keypad import test_keypad
-from .test_nfc_read import test_nfc_read
+from .test_operator_keypad import test_operator_keypad
+from .test_operator_nfc_tap import test_operator_nfc_tap
+from .test_operator_touchscreen import test_operator_touchscreen
+from .test_operator_display_brightness import test_operator_display_brightness
 from .flash_brightness import flash_brightness as test_flash_brightness
 from .test_dummy import test_dummy
 from .refresh_meter import refresh_meter
@@ -15,7 +17,10 @@ from .test_solar import test_solar
 from .test_robot_coin_shutter import test_robot_coin_shutter
 from .test_robot_nfc_read import test_robot_nfc_read
 from .test_robot_keypad import test_robot_keypad
+from .test_robot_display_brightness import test_robot_display_brightness
 from .physical_cycle_all import physical_cycle_all
+from .test_operator_card_reader import test_operator_card_reader
+from .operator_cycle_all import operator_cycle_all
 
 
 PROGRAM_REGISTRY = {
@@ -41,20 +46,38 @@ PROGRAM_REGISTRY = {
     "cycle_all": test_cycle_all,
     "all tests": test_cycle_all,
 
-    "test_keypad": test_keypad,
-    "keypad": test_keypad,
+    "test_operator_keypad": test_operator_keypad,
+    "operator_keypad": test_operator_keypad,
 
-    "test_nfc_read": test_nfc_read,
-    "nfc_read": test_nfc_read,
+    "test_operator_nfc_tap": test_operator_nfc_tap,
+    "operator_nfc_tap": test_operator_nfc_tap,
+
+    "test_operator_touchscreen": test_operator_touchscreen,
+    "operator_touchscreen": test_operator_touchscreen,
+
+    "test_operator_display_brightness": test_operator_display_brightness,
+    "operator_display_brightness": test_operator_display_brightness,
+
+    "test_operator_card_reader": test_operator_card_reader,
+    "operator_card_reader": test_operator_card_reader,
+
+    "operator_cycle_all": operator_cycle_all,
 
     "identify": test_flash_brightness,
     "dummy": test_dummy,
     "refresh_meter": refresh_meter,
 
     "test_solar": test_solar,
+
     "test_robot_coin_shutter": test_robot_coin_shutter,
+
     "test_robot_nfc_read": test_robot_nfc_read,
+
     "test_robot_keypad": test_robot_keypad,
+
+    "test_robot_display_brightness": test_robot_display_brightness,
+    "robot_display_brightness": test_robot_display_brightness,
+
     "physical_cycle_all": physical_cycle_all,
 }
 
@@ -71,11 +94,16 @@ _PROGRAM_MONITORS = {
         ("printer", {"timeout_s": 8.0}),
     ],
     # "test_keypad":       [("keypad",  {"inactivity_timeout_s": 15.0, "layouts": ["1x6"], "count": 1})],
-    "test_keypad":       [("keypad",  {"inactivity_timeout_s": 15.0, "count": 1})],
-    "test_nfc_read":     [("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
+    "test_operator_keypad":       [],
+    "test_operator_nfc_tap":     [],
+    "test_operator_touchscreen":  [],
+    "test_operator_display_brightness": [],
     "test_robot_nfc_read":  [("nfc",  {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
     "test_robot_keypad":    [],
-    "physical_cycle_all":   []
+    "test_robot_display_brightness": [],
+    "physical_cycle_all":   [],
+    "test_operator_card_reader":     [],
+    "operator_cycle_all":   [],
 }
 
 def _build_alias_index(registry):

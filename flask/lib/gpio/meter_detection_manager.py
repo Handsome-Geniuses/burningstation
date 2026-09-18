@@ -1,23 +1,38 @@
 from lib.gpio.gpio_setup import HWGPIO, pins_mds, HWGPIO_INVERTED
+from lib.hardware import hardware
 from lib.utils import packer, unpacker
 from lib.utils import secrets
 
 HWGPIOMDS = HWGPIO if secrets.MOCK else HWGPIO_INVERTED
-mds = [HWGPIOMDS(pin, "in", "pull_up") for pin in pins_mds]
+mds = None
+
+
+def _get_mds():
+    global mds
+    hardware.require("meter_detection")
+    if mds is None:
+        mds = [HWGPIOMDS(pin, "in", "pull_up") for pin in pins_mds]
+    return mds
 
 class METER_DETECTION_MANAGER:
     @staticmethod
     def get_mds():
-        return mds
+        if not hardware.has("meter_detection"):
+            return []
+        return _get_mds()
     @staticmethod
     def get_value_list():
-        return [md.state for md in mds]
+        if not hardware.has("meter_detection"):
+            return [False] * len(pins_mds)
+        return [md.state for md in _get_mds()]
     
     @staticmethod
     def set_value_list(states: list[bool]):
         """Set all 9 sensors from a list of booleans (only in MOCK mode)."""
+        hardware.require("meter_detection")
         if not HWGPIO.MOCK: return
         assert len(states) == 9, "State list must have exactly 9 elements"
+        mds = _get_mds()
         for i, state in enumerate(states):
             mds[i].state = state
 
@@ -39,13 +54,16 @@ class METER_DETECTION_MANAGER:
         if value!=None:
             return bool(value & (1 << index))
         else:
-            return mds[index].state
+            if not hardware.has("meter_detection"):
+                return False
+            return _get_mds()[index].state
 
     @staticmethod
     def set_bit(index: int, value: bool):
         """Set the sensor at given index to True/False (only in MOCK mode)"""
+        hardware.require("meter_detection")
         assert 0 <= index <= 8, "Index must be between 0 and 8"
-        mds[index].state = value
+        _get_mds()[index].state = value
 
 
     @staticmethod
