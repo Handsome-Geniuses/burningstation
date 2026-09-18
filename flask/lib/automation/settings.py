@@ -82,6 +82,7 @@ def build_physical_kwargs(modules: dict, buttons=None):
 def build_operator_kwargs(modules: dict, buttons=None):
     store.load()
     buttons = list(buttons or [])
+    has_validator = "MK7_VALIDATOR" in modules
 
     s = store.settings.operator
     j = s.job_counts
@@ -90,6 +91,11 @@ def build_operator_kwargs(modules: dict, buttons=None):
         "numBurnCycles": s.cycles,
         "numBurnDelay": s.test_delay,
         "screen_test": {"job_count": j.screen_test},
+        "coins": {
+            "job_count": (j.coins if has_validator else 0),
+            "max_duration_s": 60.0,
+            "poll_s": 0.75,
+        },
         "touchscreen": {"job_count": j.touchscreen, "max_duration_s": 60.0},
         "display_brightness": {"job_count": j.display_brightness, "max_duration_s": 60.0},
         "keypad": {"job_count": j.keypad, "buttons": buttons},

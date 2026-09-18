@@ -35,6 +35,8 @@ PROG2DEVICE = {
     "cycle_meter_ui":"screen test", "screen test":"screen test",
     "cycle_all": None,
     "operator_cycle_all": None,
+    "test_operator_coins": "coins",
+    "operator_coins": "coins",
     "keypad": "keypad",
     "test_operator_keypad": "keypad",
     "operator_keypad": "keypad",
@@ -75,6 +77,7 @@ PROG2MODULE = {
     "keypad2": "KBD_CONTROLLER",
     "contactless": ("KIOSK_NFC", "KIOSK_NEO"),
     "card_reader": "EMV_CONTACT",
+    "coins": "MK7_VALIDATOR",
 }
 
 def _module_info_for_program(meter: SSHMeter, program_name: str, default_info):

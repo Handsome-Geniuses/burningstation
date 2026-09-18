@@ -6,6 +6,7 @@ from .cycle_modem import test_cycle_modem
 from .cycle_call_in import test_cycle_call_in
 from .cycle_all import test_cycle_all
 from .test_operator_keypad import test_operator_keypad
+from .test_operator_coins import test_operator_coins
 from .test_operator_nfc_tap import test_operator_nfc_tap
 from .test_operator_touchscreen import test_operator_touchscreen
 from .test_operator_display_brightness import test_operator_display_brightness
@@ -48,6 +49,9 @@ PROGRAM_REGISTRY = {
 
     "test_operator_keypad": test_operator_keypad,
     "operator_keypad": test_operator_keypad,
+
+    "test_operator_coins": test_operator_coins,
+    "operator_coins": test_operator_coins,
 
     "test_operator_nfc_tap": test_operator_nfc_tap,
     "operator_nfc_tap": test_operator_nfc_tap,
@@ -95,6 +99,7 @@ _PROGRAM_MONITORS = {
     ],
     # "test_keypad":       [("keypad",  {"inactivity_timeout_s": 15.0, "layouts": ["1x6"], "count": 1})],
     "test_operator_keypad":       [],
+    "test_operator_coins":        [],
     "test_operator_nfc_tap":     [],
     "test_operator_touchscreen":  [],
     "test_operator_display_brightness": [],

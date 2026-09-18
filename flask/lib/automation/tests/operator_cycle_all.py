@@ -5,6 +5,7 @@ from lib.automation.helpers import StopAutomation
 from lib.automation.shared_state import SharedState
 from lib.automation.tests.cycle_meter_ui import test_cycle_meter_ui
 from lib.automation.tests.test_operator_card_reader import test_operator_card_reader
+from lib.automation.tests.test_operator_coins import test_operator_coins
 from lib.automation.tests.test_operator_keypad import test_operator_keypad
 from lib.automation.tests.test_operator_nfc_tap import test_operator_nfc_tap
 from lib.automation.tests.test_operator_touchscreen import test_operator_touchscreen
@@ -14,6 +15,14 @@ from lib.meter.ssh_meter import SSHMeter
 
 OPERATOR_TESTS = [
     ("screen_test", test_cycle_meter_ui, {"payment_type": "coins", "debug_ui": 0}),
+    (
+        "coins",
+        test_operator_coins,
+        {
+            "max_duration_s": 60.0,
+            "allow_rejected": True,
+        },
+    ),
     ("touchscreen", test_operator_touchscreen, {"max_duration_s": 60.0}),
     ("display_brightness", test_operator_display_brightness, {"max_duration_s": 60.0}),
     ("keypad", test_operator_keypad, {}),
