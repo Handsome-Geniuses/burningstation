@@ -50,6 +50,7 @@ class PhysicalSettings(BaseModel):
 # ==================================================================
 class OperatorJobs(BaseModel):
     screen_test: int = Field(1, ge=0, le=10)
+    coins: int = Field(1, ge=0, le=10)
     touchscreen: int = Field(1, ge=0, le=10)
     display_brightness: int = Field(1, ge=0, le=10)
     keypad: int = Field(1, ge=0, le=10)
