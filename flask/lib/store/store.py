@@ -4,10 +4,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
-try:
-    from .settings import Settings
-except:
-    from settings import Settings
+from .settings import Settings
 
 
 def get_settings_path() -> Path:
