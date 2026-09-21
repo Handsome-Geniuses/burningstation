@@ -10,8 +10,9 @@ services:
         privileged: true
         devices:
             - "/dev/i2c-1:/dev/i2c-1"
-        ports:
-            - "8011:8011"
+        # Interface discovery must run in the host network namespace so Flask
+        # can see wlan0, Docker bridges, and the device's physical eth0.
+        network_mode: host
         restart: unless-stopped
         environment:
             - PYTHONPATH=/app
