@@ -21,8 +21,6 @@ def test_robot_coin_shutter(meter: SSHMeter, shared: SharedState, **kwargs):
         raise ValueError("'charuco_frame' argument is required for the robot coin shutter test")
     robot = RobotClient()
 
-    meter.set_ui_mode("banner")
-
     for i in range(job_count):
         cycle_num = i + 1
         shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")

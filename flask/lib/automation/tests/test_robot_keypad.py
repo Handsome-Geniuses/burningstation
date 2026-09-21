@@ -1239,7 +1239,6 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     charuco_frame = kwargs.get("charuco_frame")
     if charuco_frame is None:
         raise ValueError("'charuco_frame' argument is required for the robot keypad test")
-    meter.set_ui_mode("banner")
 
     meter.goto_keypad()
     if not is_on_keypad_page(meter, shared):

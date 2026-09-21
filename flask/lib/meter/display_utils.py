@@ -70,6 +70,23 @@ def write_results_json(meter: "SSHMeter", results_data: dict) -> None:  # type: 
     cmd = f"cat <<'EOF' > {remote_path}\n{json_content}\nEOF\n" # EOF needs to be on its own line for it to be recognized by the shell
     meter.cli(cmd)
 
+def write_banner_json(meter: "SSHMeter", text: str = "") -> None:  # type: ignore [name-defined]
+    """Write the optional banner suffix to the remote meter."""
+    json_content = json.dumps({"text": text})
+
+    remote_path = "/var/volatile/html/banner.json"
+    temp_path = f"{remote_path}.tmp"
+    ensure_remote_dir(meter, "/var/volatile/html")
+
+    # Write atomically so UIPage.php never observes a partially written file.
+    cmd = (
+        f"cat <<'EOF' > {temp_path}\n"
+        f"{json_content}\n"
+        f"EOF\n"
+        f"mv {temp_path} {remote_path}\n"
+    )
+    meter.cli(cmd)
+
 def upload_image(meter: "SSHMeter", local_path: str, remote_name: str) -> None:  # type: ignore [name-defined]
     """Upload the local image PNG to the remote meter via chunked binary SSH, renaming to remote_name."""
     print(f"uploading asset to {meter.host} (local_path: {local_path} | remote_name: {remote_name} | connected: {meter.connected})")

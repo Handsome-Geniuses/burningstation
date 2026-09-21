@@ -220,7 +220,6 @@ def _run_solar_test(meter: SSHMeter, shared: SharedState, **kwargs):
 
     _check_solar_stop_requested(shared)
     if manage_meter_ui:
-        meter.set_ui_mode("banner")
         meter.goto_power()
     else:
         shared.log("Solar test will not change the meter UI while keypad testing is active")

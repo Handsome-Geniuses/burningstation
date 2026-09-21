@@ -87,3 +87,14 @@ def run_test_job(
         if listener_thread is not None:
             shared.end_listener.set()
             listener_thread.join(timeout=5)
+
+        # This runs before jobs.job_done() can switch completed cycle groups to
+        # results mode. clear_banner_text() does not change the current UI mode,
+        # so cleanup also remains safe if that ordering changes in the future.
+        try:
+            meter.clear_banner_text()
+        except Exception as exc:
+            shared.log(
+                f"Unable to clear the completed test banner on {meter.host}: {exc}",
+                console=True,
+            )

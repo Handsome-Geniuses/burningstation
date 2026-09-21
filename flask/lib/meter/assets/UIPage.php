@@ -3,6 +3,7 @@ $ROOT      = '/var/volatile/html';
 $MODE_FILE = $ROOT . '/.ui_mode';
 $STOCK_UI  = $ROOT . '/UI_0.html';
 $CFG_FILE  = $ROOT . '/ui_overlay.json';
+$BANNER_FILE = $ROOT . '/banner.json';
 $RESULTS_FILE = $ROOT . '/results.json';
 
 // --- tiny helpers ---
@@ -16,6 +17,14 @@ function overlay_banner($text) {
        . 'padding:6px;z-index:2147483647;text-align:center;font:14px/1.2 -apple-system,'
        . 'BlinkMacSystemFont,Segoe UI,Arial,sans-serif">'
        . htmlspecialchars($text, ENT_QUOTES) . '</div>';
+}
+function banner_text($base, $path) {
+    $j = is_readable($path) ? @json_decode(file_get_contents($path), true) : null;
+    $suffix = is_array($j) && isset($j['text']) && is_string($j['text'])
+        ? trim($j['text'])
+        : '';
+
+    return $suffix === '' ? $base : $base . ' - ' . strtoupper($suffix);
 }
 function overlay_charuco_fullscreen($src, $bg) {
     echo '<!doctype html>';
@@ -201,7 +210,7 @@ header('Pragma: no-cache');
 switch ($mode) {
     case 'banner':   // overlay_banner over stock
         stream_stock($STOCK_UI);
-        overlay_banner($cfg['banner']); // append after so it’s on top
+        overlay_banner(banner_text($cfg['banner'], $BANNER_FILE)); // append after so it’s on top
         break;
     case 'charuco':  // overlay_charuco (append the real UI after charuco so that requests.get() still see its content)
         overlay_charuco_fullscreen($cfg['image'], $cfg['bg']);

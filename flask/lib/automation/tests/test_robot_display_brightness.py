@@ -82,8 +82,6 @@ def test_robot_display_brightness(
         )
     robot = RobotClient()
 
-    meter.set_ui_mode("banner")
-
     stored_brightness = meter.get_brightness()
     display_brightness_meta = _get_display_brightness_meta(shared)
     display_brightness_meta.clear()
