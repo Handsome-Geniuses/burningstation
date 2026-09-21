@@ -29,7 +29,7 @@ const Dashboard = () => {
     )
 }
 
-export function DisableTabKey() {
+function DisableTabKey() {
     React.useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if (e.key === "Tab") {

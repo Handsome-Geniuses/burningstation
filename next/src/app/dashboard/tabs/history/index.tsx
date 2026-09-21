@@ -59,34 +59,23 @@ const retrieveJobHistory = async (limit: number, offset: number) => {
     return data
 }
 
+const iconShared = "size-5 inline-block"
 const statusIcon = (status: string, className?: string) => {
-    // switch (status) {
-    //     case 'pass':
-    //         return "✅"
-    //     case 'fail':
-    //         return "❌"
-    //     case 'missing':
-    //         return "⚠️"
-    //     case 'n/a':
-    //         return "❓"
-    //     default:
-    //         return "❔"
-    // }
     switch (status) {
         case 'pass':
-            return <LucideCheck className={cn("size-6 text-green-500 inline-block", className)} />
+            return <LucideCheck className={cn("text-green-500", iconShared, className)} />
         case 'fail':
-            return <LucideX className={cn("size-6 text-red-500 inline-block", className)} />
+            return <LucideX className={cn("text-red-500", iconShared, className)} />
         case 'missing':
-            return <LucideAlertTriangle className={cn("size-6 text-yellow-500 inline-block", className)} />
+            return <LucideAlertTriangle className={cn("text-yellow-500", iconShared, className)} />
         case 'n/a':
-            return <LucideShieldQuestion className={cn("size-6 text-gray-500 inline-block", className)} />
+            return <LucideShieldQuestion className={cn("text-gray-500", iconShared, className)} />
         default:
-            return <LucideShieldBan className={cn("size-6 text-gray-500 inline-block", className)} />
+            return <LucideShieldBan className={cn("text-gray-500", iconShared, className)} />
     }
 }
 
-const historyGridColumns = "w-full grid grid-cols-[2rem_2rem_8rem_8rem_1fr_14rem]"
+const historyGridColumns = "w-full grid grid-cols-[1.5rem_3rem_8rem_8rem_1fr_14rem]"
 const historyHeaderCell = "px-2 py-1 text-left font-medium"
 const historyCell = "min-w-0 px-2 py-1"
 
@@ -100,7 +89,7 @@ const JobRow = ({ job, onClick }: { job: any, onClick?: () => void }) => {
             className={cn(historyGridColumns, "border-b cursor-pointer items-center hover:bg-gray-50")}
         >
             <div role="cell" className={cn(historyCell, "text-center")}>{icon}</div>
-            <div role="cell" className={cn(historyCell, "text-right tabular-nums")}>{job.id}</div>
+            <div role="cell" className={cn(historyCell, "text-left tabular-nums")}>{job.id}</div>
             <div role="cell" className={cn(historyCell, "truncate tabular-nums")}>{job.hostname}</div>
             <div role="cell" className={cn(historyCell, "text-left tabular-nums")}>{job.work_order ?? "-"}</div>
             <div role="cell" className={cn(historyCell, "truncate")}>{job.name}</div>

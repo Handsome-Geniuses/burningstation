@@ -24,6 +24,12 @@ An accepted entry must:
 Button names are stripped, uppercased, de-duplicated in their original order,
 and empty names are discarded. An empty resulting list is an input error.
 
+For `KBD_CONTROLLER` journal entries, the current firmware reports the two
+outer function-row buttons opposite their physical legends. The parser treats
+raw `HELP` as canonical `MAX` for the left globe/MAX key, and raw `MAX` as
+canonical `HELP` for the right help key. The mock journal path emits the same
+raw names so dashboard clicks exercise the production parser.
+
 ## Flow
 
 1. Validate and normalize kwargs.
@@ -37,7 +43,7 @@ and empty names are discarded. An empty resulting list is an input error.
 6. Parse complete batches atomically, filter keypad entries, and advance the
    cursor to the final entry in each successfully parsed batch.
 7. Increment accepted per-button counts and broadcast aggregate progress plus
-   the current count mapping.
+   the current count mapping, expected button list, and latest accepted key.
 8. Return successfully when every requested count is satisfied, or fail when
    `max_duration_s` expires.
 9. Always store the compact final test state in
@@ -56,13 +62,16 @@ The normal `progress` event reports accepted required presses as
 `current / total`. The `operator_keypad` event additionally contains:
 
 - `counts`
+- `expected_buttons`
 - `required_per_button`
+- `latest_button`
 - `missing`
 - `current`
 - `total`
 
-The custom event is available for a future keypad-specific frontend display;
-clients that do not handle it safely ignore it.
+The custom event drives the dashboard operator-keypad panel. In mock mode,
+dashboard clicks append fake journal entries that still flow through this
+same parser, counter, and SSE payload.
 
 ## Metadata
 

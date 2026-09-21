@@ -1,5 +1,6 @@
 import { Led, LedState } from "@/components/ui/indicators"
 import { useStoreContext } from "../../store"
+import { hasHardwareCapability } from "../../store/system"
 import React from "react"
 
 const MotorStateLedMap:Record<number, LedState> = {
@@ -27,24 +28,48 @@ export const Indicators = () => {
     const { systemState } = useStoreContext()
     return (
         <div className="grid grid-cols-[auto_auto] w-fit items-center gap-2">
-            <div className="flex gap-1 items-center w-fit">{systemState.motors.map((v, i) => <Led key={i} state={MotorStateLedMap[v]??'off'} />)}</div>
-            <p>roller motors</p>
+            {hasHardwareCapability(systemState, "motor_control") && (
+                <>
+                    <div className="flex gap-1 items-center w-fit">{systemState.motors.map((v, i) => <Led key={i} state={MotorStateLedMap[v]??'off'} />)}</div>
+                    <p>roller motors</p>
+                </>
+            )}
 
-            <div className="flex gap-1 items-center w-fit">{systemState.mds.map((b, i) => <Led key={i} state={b} />)}</div>
-            <p>meters detected</p>
+            {hasHardwareCapability(systemState, "meter_detection") && (
+                <>
+                    <div className="flex gap-1 items-center w-fit">{systemState.mds.map((b, i) => <Led key={i} state={b} />)}</div>
+                    <p>meters detected</p>
+                </>
+            )}
 
-            <div className="flex gap-1 items-center w-fit"><Led state={'off'} /></div>
-            <p>robot power</p>
+            {hasHardwareCapability(systemState, "robot_remote_power") && (
+                <>
+                    <div className="flex gap-1 items-center w-fit"><Led state={'off'} /></div>
+                    <p>robot power</p>
+                </>
+            )}
 
-            <div className="flex gap-1 items-center w-fit"><Led state={systemState.emergency ? "off" : "neutral"} /></div>
-            <p>EMERGENCY</p>
+            {hasHardwareCapability(systemState, "emergency_gpio") && (
+                <>
+                    <div className="flex gap-1 items-center w-fit"><Led state={systemState.emergency ? "off" : "neutral"} /></div>
+                    <p>EMERGENCY</p>
+                </>
+            )}
 
-            <div className="flex gap-1 items-center w-fit">{systemState.tower.map((b, i) => <Led key={i} state={b} />)}</div>
-            <p>tower rgb buz</p>
+            {hasHardwareCapability(systemState, "tower") && (
+                <>
+                    <div className="flex gap-1 items-center w-fit">{systemState.tower.map((b, i) => <Led key={i} state={b} />)}</div>
+                    <p>tower rgb buz</p>
+                </>
+            )}
 
-            {/* <div className="flex gap-1 items-center w-fit">{systemState.lamp.slice(0,2).map((b, i) => <Led key={i} state={b} />)}</div> */}
-            <LampIndicator lamp={systemState.lamp}/>
-            <p>lamp</p>
+            {hasHardwareCapability(systemState, "lamp") && (
+                <>
+                    {/* <div className="flex gap-1 items-center w-fit">{systemState.lamp.slice(0,2).map((b, i) => <Led key={i} state={b} />)}</div> */}
+                    <LampIndicator lamp={systemState.lamp}/>
+                    <p>lamp</p>
+                </>
+            )}
         </div>
     )
 }

@@ -1,6 +1,6 @@
 'use client'
 import React, { useRef, useEffect, useState, useReducer } from "react"
-import { Action, initialSystemState, MeterInfo, reducer, SystemState } from "./system"
+import { Action, initialSystemState, MeterInfo, OperatorKeypadState, reducer, SystemState } from "./system"
 import { notify } from "@/lib/notify"
 import { Question, QuestionProps } from "./question"
 import { LoadingGif } from "@/components/ui/loading-gif"
@@ -143,6 +143,43 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             total: total_cycles,
         })
     }
+    const onOperatorKeypad = (payload: any) => {
+        const {
+            ip,
+            counts,
+            expected_buttons,
+            required_per_button,
+            latest_button,
+            missing,
+            current,
+            total,
+        } = payload ?? {}
+        if (
+            typeof ip !== "string" ||
+            !counts ||
+            typeof counts !== "object" ||
+            !Array.isArray(expected_buttons) ||
+            typeof required_per_button !== "number" ||
+            !missing ||
+            typeof missing !== "object" ||
+            typeof current !== "number" ||
+            typeof total !== "number"
+        ) return
+
+        systemDispatch({
+            type: "operator-keypad",
+            state: {
+                ip,
+                counts: counts as OperatorKeypadState["counts"],
+                expected_buttons: expected_buttons.filter((button): button is string => typeof button === "string"),
+                required_per_button,
+                latest_button: typeof latest_button === "string" ? latest_button : null,
+                missing: missing as OperatorKeypadState["missing"],
+                current,
+                total,
+            },
+        })
+    }
     const onStatus = (payload: any) => {
         const { ip, msg, status, current_action } = payload ?? {}
         if (typeof ip !== "string" || typeof status !== "string") return
@@ -176,6 +213,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             else if (event === 'devices') onDevices(payload)
             else if (event === 'progress') onProgress(payload)
             else if (event === 'status') onStatus(payload)
+            else if (event === 'operator_keypad') onOperatorKeypad(payload)
             else if (event === 'settings') broadcastServerSettingsChange(payload)
         }
         flasksse.current.onerror = () => {
