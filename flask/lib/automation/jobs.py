@@ -36,6 +36,8 @@ PROG2DEVICE = {
     "cycle_meter_ui":"screen test", "screen test":"screen test",
     "cycle_all": None,
     "operator_cycle_all": None,
+    "test_operator_coins": "coins",
+    "operator_coins": "coins",
     "keypad": "keypad",
     "test_operator_keypad": "keypad",
     "operator_keypad": "keypad",
@@ -76,6 +78,7 @@ PROG2MODULE = {
     "keypad2": "KBD_CONTROLLER",
     "contactless": ("KIOSK_NFC", "KIOSK_NEO"),
     "card_reader": "EMV_CONTACT",
+    "coins": "MK7_VALIDATOR",
 }
 
 def _module_info_for_program(meter: SSHMeter, program_name: str, default_info):
@@ -268,7 +271,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
 
         st.extras['kwargs'] = kwargs
         job_done(meter_ip)
-        meter.beep(3) # leave uncommented for production
+        if os.name != "nt": meter.beep(3) # leave uncommented for production
 
         # if program_name in ['cycle_all', 'all tests'] and meter.meter_type != 'msx':
             # meter.custom_print()
@@ -636,6 +639,7 @@ def job_done(meter_ip):
         if st.device_meta:
             data["device_meta"] = st.device_meta
 
+    # insertion time!
     elif current_program == "operator_keypad":
         failed = _job_has_failure(st)
         overall_status = "fail" if failed else "pass"

@@ -3,10 +3,11 @@ import json
 import re
 import shlex
 import time
+import requests
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List
-
 from lib.automation.helpers import StopAutomation, check_stop_event
 from lib.automation.shared_state import SharedState
 from lib.meter.ssh_meter import SSHMeter

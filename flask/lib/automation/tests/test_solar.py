@@ -1,6 +1,5 @@
 import time
 import re
-import inspect
 from typing import Dict, List, Optional, Union
 
 from lib.meter.ssh_meter import SSHMeter
@@ -93,6 +92,7 @@ def get_latest_power_status(
     log_result: bool = True,
     log_missing: bool = True,
 ) -> Optional[Union[Dict, List[Dict]]]:
+    _check_solar_stop_requested(shared)
     if count < 1:
         raise ValueError(f"count must be >= 1, got {count}")
 
@@ -103,6 +103,7 @@ def get_latest_power_status(
         f"tail -n {count}"
     )
     res = meter.cli(cmd)
+    _check_solar_stop_requested(shared)
     parsed_statuses = _parse_power_status_lines(res, shared)
     if not parsed_statuses:
         if log_missing:
@@ -130,10 +131,18 @@ def _power_status_identity(status: Optional[Dict]) -> Optional[str]:
     return f"{status.get('datetime_str', '')}|{status.get('power_status_raw', '')}"
 
 
+def _check_solar_stop_requested(shared: SharedState) -> None:
+    """Treat the job/listener shutdown events as cancellation before more I/O."""
+    check_stop_event(shared)
+    end_listener = getattr(shared, "end_listener", None)
+    if end_listener is not None and end_listener.is_set():
+        raise StopAutomation("Automation listener stopped")
+
+
 def _sleep_with_stop(shared: SharedState, seconds: float, poll_interval: float = 0.25) -> None:
     deadline = time.time() + max(0.0, seconds)
     while True:
-        check_stop_event(shared)
+        _check_solar_stop_requested(shared)
         remaining = deadline - time.time()
         if remaining <= 0:
             return
@@ -149,6 +158,7 @@ def wait_for_fresh_power_status(
     poll_s: float = POWER_STATUS_POLL_SECONDS,
     window_size: int = POWER_STATUS_WINDOW_SIZE,
 ) -> Dict:
+    _check_solar_stop_requested(shared)
     previous_identity = _power_status_identity(previous_status)
     previous_datetime = previous_status.get("datetime_str") if previous_status else None
     shared.log(
@@ -159,6 +169,7 @@ def wait_for_fresh_power_status(
 
     deadline = time.time() + timeout_s
     while time.time() < deadline:
+        _check_solar_stop_requested(shared)
         latest_status = get_latest_power_status(
             meter,
             shared,
@@ -191,15 +202,31 @@ def _get_solar_meta(shared: SharedState) -> dict:
     return shared.device_meta.setdefault("solar", {})
 
 
-def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
-    func_name = inspect.currentframe().f_code.co_name
+def _turn_off_lamps(shared: SharedState) -> None:
+    """Leave both solar-test lamps off, even when the test exits through an error."""
+    for channel, label in ((0, "rear"), (1, "top")):
+        try:
+            lm.lamp(channel, False, 100)
+        except Exception as exc:
+            shared.log(f"Failed to turn off {label} solar lamp during cleanup: {exc}")
+
+
+def _run_solar_test(meter: SSHMeter, shared: SharedState, **kwargs):
+    # Keep the externally visible test name stable in progress/log messages.
+    func_name = "test_solar"
     subtest = bool(kwargs.get("subtest", False))
     job_count = int(kwargs.get("job_count", 1))
+    manage_meter_ui = bool(kwargs.get("manage_meter_ui", True))
 
-    meter.set_ui_mode("banner") # shouldnt matter if kwargs.charuco_frame is None bc robot isnt used
-    meter.goto_power()
+    _check_solar_stop_requested(shared)
+    if manage_meter_ui:
+        meter.set_ui_mode("banner")
+        meter.goto_power()
+    else:
+        shared.log("Solar test will not change the meter UI while keypad testing is active")
 
     for i in range(job_count):
+        _check_solar_stop_requested(shared)
         cycle_num = i + 1
         shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")
         if not subtest:
@@ -294,3 +321,11 @@ def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
             s = f"ChargeCurrent did not decrease after lamp 2 turned off. {charge_off_l2} --> {charge_on_l2} (cycle {cycle_num}/{job_count})"
             shared.log(s)
             raise StopAutomation(s)
+
+
+def test_solar(meter: SSHMeter, shared: SharedState, **kwargs):
+    """Run the solar check and always restore the lamp state before returning."""
+    try:
+        return _run_solar_test(meter, shared, **kwargs)
+    finally:
+        _turn_off_lamps(shared)

@@ -1444,6 +1444,7 @@ fclose($myfile);
         )
     
     def goto_keypad(self):
+        # TODO: Would be nice if it checks if its already through some of these pages (for keypad test if it has only just left the keypad diag page and is one click away from re-entering it)
         self.goto_diagnostics_path(
             ["Utilities", "Peripherals", ("Keyboard", "Keypad")]
         )

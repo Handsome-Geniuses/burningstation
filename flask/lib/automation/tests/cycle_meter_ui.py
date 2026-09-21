@@ -1064,6 +1064,10 @@ def execute_pay_ui_action(
     elif action.kind == "run_robot_card":
         if context.robot is None:
             raise RuntimeError("robot_contactless payment requested without an initialized RobotClient")
+        if context.charuco_frame is None:
+            raise ValueError(
+                "'charuco_frame' argument is required for robot_contactless payment"
+            )
         ## time.sleep(PRE_CARD_SEND_DELAY_S) # skip bc the robot will take a few seconds to move into position, so we can start the card action req immediately
         context.robot.wait_until_ready(robot_ready_timeout)
         context.robot.flush_event_queue()

@@ -89,6 +89,24 @@ class VersionChecks(BaseModel):
 
 
 # ==================================================================
+# Operator-assisted Settings
+# ==================================================================
+class OperatorJobs(BaseModel):
+    screen_test: int = Field(1, ge=0, le=10)
+    coins: int = Field(1, ge=0, le=10)
+    touchscreen: int = Field(1, ge=0, le=10)
+    display_brightness: int = Field(1, ge=0, le=10)
+    keypad: int = Field(1, ge=0, le=10)
+    contactless: int = Field(1, ge=0, le=10)
+    card_reader: int = Field(1, ge=0, le=10)
+
+
+class OperatorSettings(BaseModel):
+    cycles: int = Field(1, ge=1, le=10, description="number of full test runs")
+    test_delay: int = Field(1, ge=0, le=60, description="delay(s) between test runs")
+    job_counts: OperatorJobs = Field(default_factory=OperatorJobs)
+
+# ==================================================================
 # Other Settings
 # ==================================================================
 class OtherSettings(BaseModel):
@@ -175,24 +193,12 @@ class HandsomeSettings(BaseModel):
 # ==================================================================
 class Settings(BaseModel):
     # dummy: DummySettings = Field(default_factory=DummySettings)
-    handsome: HandsomeSettings = Field(
-        default_factory=HandsomeSettings, description="secret settings"
-    )
-    flow: FlowSettings = Field(
-        default_factory=FlowSettings, description="flow related options"
-    )
-    other: OtherSettings = Field(
-        default_factory=OtherSettings, description="miscellaneous"
-    )
-    passive: PassiveSettings = Field(
-        default_factory=PassiveSettings,
-        description="parameters or testing locally on meter",
-    )
-    physical: PhysicalSettings = Field(
-        default_factory=PhysicalSettings,
-        description="parameters for testing with robot and tools",
-    )
-    operator: OperatorSettings = Field(
-        default_factory=OperatorSettings,
-        description="parameters for operator-assisted testing",
-    )
+    handsome: HandsomeSettings = Field(default_factory=HandsomeSettings, description="secret settings")
+    flow: FlowSettings = Field(default_factory=FlowSettings, description="flow related options")
+    other: OtherSettings = Field(default_factory=OtherSettings, description="miscellaneous")
+    passive: PassiveSettings = Field(default_factory=PassiveSettings, description="parameters or testing locally on meter")
+    physical: PhysicalSettings = Field(default_factory=PhysicalSettings, description="parameters for testing with robot and tools")
+    operator: OperatorSettings = Field(default_factory=OperatorSettings, description="parameters for operator-assisted testing")
+
+
+

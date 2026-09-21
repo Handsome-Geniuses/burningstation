@@ -16,6 +16,7 @@ from lib.automation.helpers import StopAutomation, check_stop_event
 from lib.automation.shared_state import SharedState
 from lib.meter.ssh_meter import SSHMeter
 from lib.robot.robot_client import RobotClient
+from lib.automation.tests.test_solar import test_solar
 
 # Keep flask/lib/docs/meter/test_robot_keypad.md in sync when changing this test.
 KEYPAD_PAGE = "Service:Utilities:Peripherals:Keyboard"
@@ -29,6 +30,7 @@ DEFAULT_JOURNAL_AFTER_BUFFER_S = 3.5
 DEFAULT_MAX_DURATION_BASE_S = 50.0
 DEFAULT_PER_PLANNED_PRESS_TIMEOUT_S = 6.0
 DEFAULT_ROBOT_PROGRAM_DONE_GRACE_S = 6.0
+COMBINED_SOLAR_JOIN_POLL_S = 0.25
 
 
 @dataclass
@@ -62,6 +64,8 @@ class KeypadRunState:
     start_epoch_s: float
     start_monotonic_s: float
     initial_journal_cursor: str
+    device_name: str = "robot_keypad"
+    stop_on_failure: bool = True
     debug_keypad: bool = False
     journal_after_buffer_s: float = DEFAULT_JOURNAL_AFTER_BUFFER_S
     confirmed_counts: Dict[str, int] = field(default_factory=dict)
@@ -269,10 +273,10 @@ def _fail_keypad(shared: SharedState, state: KeypadRunState, message: str) -> No
     state.final_error = message
     state.errors.append(message)
     shared.last_error = message
-    device_name = getattr(shared, "current_device", None) or "robot_keypad"
-    shared.device_results[device_name] = "fail"
+    shared.device_results[state.device_name] = "fail"
     _keypad_log(shared, message, section="fail")
-    shared.stop_event.set()
+    if state.stop_on_failure:
+        shared.stop_event.set()
     raise StopAutomation(message)
 
 
@@ -1193,6 +1197,8 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     max_retries_per_button = max(0, int(kwargs.get("max_retries_per_button", 1)))
     retry_command_timeout_s = float(kwargs.get("retry_command_timeout_s", 3.0))
     subtest = bool(kwargs.get("subtest", False))
+    device_name = str(kwargs.get("device_name") or "robot_keypad")
+    stop_on_failure = bool(kwargs.get("stop_on_failure", True))
     job_count = max(1, int(kwargs.get("job_count", 1)))
     planned_press_count = len(buttons) * job_count
     max_duration_s = (
@@ -1226,10 +1232,14 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     if not subtest:
         shared.broadcast_progress(meter.host, func_name, 1, 1)
 
-    if kwargs.get("charuco_frame") is None:
-        meter.set_ui_mode("charuco")
-    else:
-        meter.set_ui_mode("banner")
+    # Do not begin UI navigation or a journal read after an operator/monitor
+    # has already cancelled the paired physical test.
+    check_stop_event(shared)
+
+    charuco_frame = kwargs.get("charuco_frame")
+    if charuco_frame is None:
+        raise ValueError("'charuco_frame' argument is required for the robot keypad test")
+    meter.set_ui_mode("banner")
 
     meter.goto_keypad()
     if not is_on_keypad_page(meter, shared):
@@ -1242,6 +1252,8 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
         start_epoch_s=start_epoch_s,
         start_monotonic_s=start_monotonic_s,
         initial_journal_cursor=initial_journal_cursor,
+        device_name=device_name,
+        stop_on_failure=stop_on_failure,
         debug_keypad=debug_keypad,
         journal_after_buffer_s=journal_after_buffer_s,
     )
@@ -1289,7 +1301,7 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             "meter_id": meter.hostname,
             "buttons": raw_buttons,
             "job_count": job_count,
-            "charuco_frame": kwargs.get("charuco_frame"),
+            "charuco_frame": charuco_frame,
             "test": False,
             "burningstation_logfile_path": shared.logfile_path,
         },
@@ -1343,8 +1355,7 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             if _all_buttons_satisfied(state):
                 state.success = True
                 state.final_error = ""
-                device_name = getattr(shared, "current_device", None) or "robot_keypad"
-                shared.device_results[device_name] = "pass"
+                shared.device_results[state.device_name] = "pass"
                 _keypad_log(shared, "All keypad buttons were confirmed by the meter logs")
                 try:
                     robot.finish_button_retries(
@@ -1438,3 +1449,186 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
         )
         shared.log(f"KeypadRunState = {state}")
         _write_keypad_meta(shared, state)
+
+
+def _abort_keypad_program(shared: SharedState) -> None:
+    """Stop keypad motion after a local keypad failure without stopping solar."""
+    try:
+        RobotClient().send_command("abort_program")
+        _keypad_log(shared, "Robot program aborted after keypad subtest failure", section="robot")
+    except Exception as exc:
+        _keypad_log(shared, f"Failed to abort robot program: {exc}", section="robot")
+
+
+def _combined_stop_requested(shared: SharedState) -> bool:
+    stop_event = getattr(shared, "stop_event", None)
+    end_listener = getattr(shared, "end_listener", None)
+    return bool(
+        (stop_event is not None and stop_event.is_set())
+        or (end_listener is not None and end_listener.is_set())
+    )
+
+
+def _interrupt_combined_meter_io(
+    meter: SSHMeter,
+    shared: SharedState,
+    interrupted: threading.Event,
+) -> None:
+    """Close the shared SSH transport once to unblock a cancelled solar read."""
+    if interrupted.is_set():
+        return
+    interrupted.set()
+    close = getattr(meter, "close", None)
+    if not callable(close):
+        _keypad_log(
+            shared,
+            "Cancellation requested while solar was active, but meter has no close() method",
+            section="solar",
+        )
+        return
+    try:
+        _keypad_log(
+            shared,
+            "Cancellation requested; closing meter SSH transport to interrupt solar journal I/O",
+            section="solar",
+        )
+        close()
+    except Exception as exc:
+        _keypad_log(shared, f"Failed to close meter SSH transport during cancellation: {exc}", section="solar")
+
+
+def _watch_combined_stop(
+    meter: SSHMeter,
+    shared: SharedState,
+    watcher_done: threading.Event,
+    interrupted: threading.Event,
+) -> None:
+    while not watcher_done.wait(COMBINED_SOLAR_JOIN_POLL_S):
+        if _combined_stop_requested(shared):
+            # stop_job() and critical listener faults already set stop_event.
+            # end_listener normally is only set after the test returns, but if
+            # another shutdown path sets it while this pair is active, turn it
+            # into the same cooperative cancellation signal used by both
+            # foreground keypad code and the solar worker.
+            stop_event = getattr(shared, "stop_event", None)
+            if stop_event is not None:
+                stop_event.set()
+            _interrupt_combined_meter_io(meter, shared, interrupted)
+            return
+
+
+def _join_combined_solar_worker(
+    solar_thread: threading.Thread,
+    meter: SSHMeter,
+    shared: SharedState,
+    interrupted: threading.Event,
+) -> None:
+    """Do not return from the composite while its solar worker is still alive."""
+    while solar_thread.is_alive():
+        solar_thread.join(COMBINED_SOLAR_JOIN_POLL_S)
+        if _combined_stop_requested(shared):
+            _interrupt_combined_meter_io(meter, shared, interrupted)
+    solar_thread.join()
+
+
+def test_robot_keypad_with_solar(meter: SSHMeter, shared: SharedState, **kwargs):
+    """Run the independent solar check while the robot performs keypad presses.
+
+    This is an intentionally paired physical-test program, not a general
+    scheduler.  It preserves the normal solar and keypad result/meta keys so
+    callers can continue to treat them as separate subtests.
+    """
+    solar_kwargs = dict(kwargs.pop("solar_kwargs"))
+    keypad_kwargs = dict(kwargs)
+    solar_error: Optional[Exception] = None
+    keypad_error: Optional[Exception] = None
+    watcher_done = threading.Event()
+    meter_io_interrupted = threading.Event()
+
+    shared.device_results["solar"] = "running"
+    shared.device_results["robot_keypad"] = "running"
+
+    def run_solar() -> None:
+        nonlocal solar_error
+        try:
+            test_solar(
+                meter,
+                shared=shared,
+                **{
+                    **solar_kwargs,
+                    "subtest": True,
+                    "manage_meter_ui": False,
+                },
+            )
+        except Exception as exc:
+            solar_error = exc
+            shared.device_results["solar"] = "fail"
+            shared.log(f"solar subtest fail while keypad is active: {type(exc).__name__}: {exc}")
+        else:
+            if not shared.stop_event.is_set():
+                shared.device_results["solar"] = "pass"
+
+    solar_thread = threading.Thread(
+        target=run_solar,
+        name="robot-keypad-solar",
+        daemon=True,
+    )
+    stop_watcher = threading.Thread(
+        target=_watch_combined_stop,
+        args=(meter, shared, watcher_done, meter_io_interrupted),
+        name="robot-keypad-solar-stop-watcher",
+        daemon=True,
+    )
+    _keypad_log(shared, "Starting solar check alongside robot keypad test", section="solar")
+    stop_watcher.start()
+    solar_started = False
+
+    try:
+        try:
+            solar_thread.start()
+            solar_started = True
+        except Exception as exc:
+            solar_error = exc
+            shared.device_results["solar"] = "fail"
+            shared.log(f"Failed to start solar worker: {type(exc).__name__}: {exc}")
+
+        try:
+            test_robot_keypad(
+                meter,
+                shared=shared,
+                **{
+                    **keypad_kwargs,
+                    "subtest": True,
+                    "device_name": "robot_keypad",
+                    "stop_on_failure": False,
+                },
+            )
+        except Exception as exc:
+            keypad_error = exc
+            shared.device_results["robot_keypad"] = "fail"
+            _abort_keypad_program(shared)
+    finally:
+        # A keypad result must never cut the independent solar measurement
+        # short.  test_solar's own finally turns both lamps off before this
+        # join can return.
+        try:
+            if solar_started:
+                _join_combined_solar_worker(
+                    solar_thread,
+                    meter,
+                    shared,
+                    meter_io_interrupted,
+                )
+        finally:
+            watcher_done.set()
+            stop_watcher.join()
+
+    failures = []
+    if keypad_error is not None:
+        failures.append(f"robot_keypad: {keypad_error}")
+    if solar_error is not None:
+        failures.append(f"solar: {solar_error}")
+    if failures:
+        message = "; ".join(failures)
+        shared.last_error = message
+        raise StopAutomation(message)
