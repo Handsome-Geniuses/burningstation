@@ -19,6 +19,7 @@ JOURNAL_UNIT = "MS3_Platform.service"
 JOURNAL_MAX_LINES = 1000
 LOGICAL_TOUCH_WIDTH = 800
 LOGICAL_TOUCH_HEIGHT = 480
+PROGRESS_PROGRAM = "touchscreen"
 TOUCH_RE = re.compile(
     r"Meter:sProcessWebKitMessage(?::\d+)?:\s*"
     r"Got touch:\s*at\s*\[\s*"
@@ -267,7 +268,12 @@ def test_operator_touchscreen(
         f"max_duration_s={max_duration_s:.1f} | poll_s={poll_s:.2f}"
     )
     if not subtest:
-        shared.broadcast_progress(meter.host, 'touchscreen', 1, 1)
+        shared.broadcast_progress(
+            meter.host,
+            PROGRESS_PROGRAM,
+            0,
+            expected_touch_count,
+        )
 
     try:
         check_stop_event(shared)
@@ -309,6 +315,13 @@ def test_operator_touchscreen(
                     f"physical_y={touch['physical_y']:.6f} | "
                     f"{touch['timestamp']}"
                 )
+                if not subtest:
+                    shared.broadcast_progress(
+                        meter.host,
+                        PROGRESS_PROGRAM,
+                        min(touch_number, expected_touch_count),
+                        expected_touch_count,
+                    )
 
             if len(state.touches) >= expected_touch_count:
                 state.success = True
