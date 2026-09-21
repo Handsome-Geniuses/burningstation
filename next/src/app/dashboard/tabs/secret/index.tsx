@@ -11,6 +11,29 @@ import { useDebounce } from "@/hooks/useDebounce"
 import { Pinout } from "./Pinout"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog"
+import { Loader2, Network } from "lucide-react"
+import { ScrollArea } from "@/components/ui/scroll-area"
+
+type DeviceIpAddress = {
+    interface?: string
+    family?: string
+    address: string
+    source?: string
+}
+
+type DeviceIpPayload = {
+    hostname?: string
+    request_host?: string | null
+    addresses?: DeviceIpAddress[]
+}
 
 const TowerLampControls = () => {
     const { systemState } = useStoreContext()
@@ -137,21 +160,115 @@ const ManualAutoBox = () => {
             {
                 isManual &&
                 <div className="w-full flex flex-col gap-1">
-                    <Button onClick={()=>flask.handleAction('program', 'manual', {program:'setup_custom_display'})}>
+                    <Button onClick={() => flask.handleAction('program', 'manual', { program: 'setup_custom_display' })}>
                         Load Custom Display
                     </Button>
-                    <Button onClick={()=>flask.handleAction('program', 'manual', {program:'start_passive_job'})}>
+                    <Button onClick={() => flask.handleAction('program', 'manual', { program: 'start_passive_job' })}>
                         Start Passive Job
                     </Button>
-                    <Button onClick={()=>flask.handleAction('program', 'manual', {program:'start_physical_job'})}>
+                    <Button onClick={() => flask.handleAction('program', 'manual', { program: 'start_physical_job' })}>
                         Start Physical Job
                     </Button>
-                    <Button onClick={()=>flask.handleAction('program', 'manual', {program:'hello'})}>
+                    <Button onClick={() => flask.handleAction('program', 'manual', { program: 'hello' })}>
                         hello
                     </Button>
                 </div>
             }
         </div>
+    )
+}
+
+const DeviceIpDialog = () => {
+    const [open, setOpen] = React.useState(false)
+    const [payload, setPayload] = React.useState<DeviceIpPayload | null>(null)
+    const [loading, setLoading] = React.useState(false)
+    const [error, setError] = React.useState<string | null>(null)
+
+    const loadDeviceIps = React.useCallback(async () => {
+        setLoading(true)
+        setError(null)
+
+        try {
+            const res = await flask.get("/device/ip-addresses")
+            const data = await res.json().catch(() => null) as DeviceIpPayload | null
+
+            if (!res.ok) {
+                throw new Error(`Could not load device IP addresses (${res.status})`)
+            }
+
+            setPayload(data ?? { addresses: [] })
+        } catch (err) {
+            setPayload(null)
+            setError(err instanceof Error ? err.message : "Could not load device IP addresses")
+        } finally {
+            setLoading(false)
+        }
+    }, [])
+
+    const onOpenChange = (value: boolean) => {
+        setOpen(value)
+        if (value) void loadDeviceIps()
+    }
+
+    const addresses = payload?.addresses ?? []
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogTrigger asChild>
+                <Button variant="outline" className="w-full justify-start">
+                    <Network />
+                    Device IPs
+                </Button>
+            </DialogTrigger>
+            <DialogContent className="max-h-100 overflow-hidden p-0 sm:max-w-md">
+                <ScrollArea
+                    className="min-h-0 max-h-100 w-full"
+                    viewportClassName="max-h-100 overscroll-contain"
+                    scrollBarClassName="w-4 border-l-0 p-0.5 [&>div]:bg-muted-foreground/70 [&>div:hover]:bg-foreground"
+                >
+                    <div className="grid gap-4 p-6 pr-12">
+                        <DialogHeader>
+                            <DialogTitle>Device IP Addresses</DialogTitle>
+                            <DialogDescription className="h-0 w-0 hidden" />
+                        </DialogHeader>
+                        <div className="grid gap-3">
+                            {payload?.hostname && (
+                                <div className="grid gap-1 text-sm">
+                                    <div className="text-muted-foreground">Hostname</div>
+                                    <div className="font-mono break-all">{payload.hostname}</div>
+                                </div>
+                            )}
+                            {payload?.request_host && (
+                                <div className="grid gap-1 text-sm">
+                                    <div className="text-muted-foreground">Request host</div>
+                                    <div className="font-mono break-all">{payload.request_host}</div>
+                                </div>
+                            )}
+                            {loading && (
+                                <div className="flex items-center gap-2 text-muted-foreground">
+                                    <Loader2 className="animate-spin" />
+                                    Loading
+                                </div>
+                            )}
+                            {error && <div className="text-destructive">{error}</div>}
+                            {!loading && !error && addresses.length === 0 && (
+                                <div className="text-muted-foreground">No device IP addresses found.</div>
+                            )}
+                            {!loading && !error && addresses.map((entry, i) => {
+                                const meta = [entry.interface, entry.source, entry.family].filter(Boolean).join(" / ")
+
+                                return (
+                                    <div key={`${entry.address}-${i}`} className="rounded-md border bg-muted/40 px-3 py-2">
+                                        {meta && <div className="text-xs text-muted-foreground">{meta}</div>}
+                                        <div className="font-mono text-lg break-all">{entry.address}</div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+                </ScrollArea>
+            </DialogContent>
+        </Dialog>
     )
 }
 // onClick={() => flask.handleAction('station', 'lamp', { type: type, state: !systemState.lamp[i] })}
@@ -169,8 +286,9 @@ export const SecretTab = () => {
             <div className="bg-muted/70 gap-2 p-4 flex flex-col items-center">
                 <div className="flex justify-between w-full">
                     <div className="border-4 border-border p-1"><Indicators /></div>
-                    <div className="flex flex-col items-center">
+                    <div className="flex flex-col items-center gap-2">
                         <ManualAutoBox />
+                        <DeviceIpDialog />
                     </div>
                 </div>
                 {beltAvailable && <MeterSlots classname="border border-border p-1" />}

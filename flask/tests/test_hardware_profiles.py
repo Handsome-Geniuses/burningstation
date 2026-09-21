@@ -55,6 +55,32 @@ class HardwareProfileSmokeTests(unittest.TestCase):
         )
         self.assertIn("hardware-ok", result.stdout)
 
+    def test_device_ip_endpoint_reports_request_host_ip(self):
+        result = self.run_python(
+            """
+            from app import app
+
+            client = app.test_client()
+            response = client.get(
+                "/api/system/device/ip-addresses",
+                headers={"Host": "192.0.2.10:8010"},
+            )
+            payload = response.get_json()
+            assert response.status_code == 200, response.get_data(as_text=True)
+            assert payload["request_host"] == "192.0.2.10", payload
+            assert isinstance(payload["hostname"], str), payload
+            assert isinstance(payload["addresses"], list), payload
+            assert any(
+                address["address"] == "192.0.2.10" and address["source"] == "request"
+                for address in payload["addresses"]
+            ), payload
+            print("device-ip-ok")
+            """,
+            profile="portable",
+            mock="0",
+        )
+        self.assertIn("device-ip-ok", result.stdout)
+
     def test_portable_station_actions_return_capability_unavailable(self):
         result = self.run_python(
             """

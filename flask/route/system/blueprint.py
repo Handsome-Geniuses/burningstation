@@ -3,8 +3,11 @@
 # Desc: handle routes
 # ================================================================
 import flask
+import ipaddress
 import os
 import signal
+import socket
+import struct
 from lib.automation.jobs import start_job
 from lib.sse.question import setResponse
 from lib.utils import secrets
@@ -18,6 +21,181 @@ from lib import database
 from lib.store import store
 from lib.sse.sse_queue_manager import SSEQM
 bp = flask.Blueprint("hello", __name__)
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+
+def _host_without_port(value):
+    if not value:
+        return None
+
+    host = value.split(",", 1)[0].strip()
+    if host.startswith("[") and "]" in host:
+        return host[1:host.index("]")]
+    if host.count(":") == 1:
+        return host.rsplit(":", 1)[0]
+    return host
+
+
+def _ip_family(address):
+    try:
+        return "IPv6" if ipaddress.ip_address(address).version == 6 else "IPv4"
+    except ValueError:
+        return None
+
+
+def _is_displayable_address(address):
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+
+    return not (ip.is_loopback or ip.is_unspecified or ip.is_multicast)
+
+
+def _dedupe_addresses(addresses):
+    deduped = []
+    seen = set()
+
+    for entry in addresses:
+        key = (entry.get("family"), entry.get("address"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(entry)
+
+    return deduped
+
+
+def _linux_interface_ipv4_addresses():
+    if fcntl is None:
+        return []
+
+    addresses = []
+    try:
+        interfaces = socket.if_nameindex()
+    except OSError:
+        return addresses
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        for _, interface in interfaces:
+            try:
+                request = struct.pack("256s", interface[:15].encode("utf-8"))
+                response = fcntl.ioctl(sock.fileno(), 0x8915, request)
+                address = socket.inet_ntoa(response[20:24])
+            except OSError:
+                continue
+
+            addresses.append({
+                "interface": interface,
+                "family": "IPv4",
+                "address": address,
+                "source": "interface",
+            })
+
+    return addresses
+
+
+def _linux_interface_ipv6_addresses():
+    addresses = []
+    path = "/proc/net/if_inet6"
+    if not os.path.exists(path):
+        return addresses
+
+    try:
+        with open(path, encoding="ascii") as fp:
+            for line in fp:
+                parts = line.split()
+                if len(parts) < 6:
+                    continue
+
+                address_hex, _, _, _, _, interface = parts[:6]
+                try:
+                    address = str(ipaddress.IPv6Address(int(address_hex, 16)))
+                except ValueError:
+                    continue
+
+                addresses.append({
+                    "interface": interface,
+                    "family": "IPv6",
+                    "address": address,
+                    "source": "interface",
+                })
+    except OSError:
+        return addresses
+
+    return addresses
+
+
+def _hostname_addresses():
+    addresses = []
+    hostnames = {socket.gethostname(), socket.getfqdn()}
+
+    for hostname in hostnames:
+        if not hostname:
+            continue
+
+        try:
+            infos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+        except OSError:
+            continue
+
+        for family, _, _, _, sockaddr in infos:
+            if family not in (socket.AF_INET, socket.AF_INET6):
+                continue
+
+            address = sockaddr[0]
+            family_name = "IPv6" if family == socket.AF_INET6 else "IPv4"
+            addresses.append({
+                "interface": hostname,
+                "family": family_name,
+                "address": address,
+                "source": "hostname",
+            })
+
+    return addresses
+
+
+def _request_host_entry():
+    forwarded_host = flask.request.headers.get("X-Forwarded-Host")
+    request_host = _host_without_port(forwarded_host or flask.request.host)
+    family = _ip_family(request_host) if request_host else None
+
+    if not request_host or not family or not _is_displayable_address(request_host):
+        return request_host, None
+
+    return request_host, {
+        "interface": "browser",
+        "family": family,
+        "address": request_host,
+        "source": "request",
+    }
+
+
+def _device_ip_addresses():
+    request_host, request_entry = _request_host_entry()
+    addresses = []
+
+    if request_entry:
+        addresses.append(request_entry)
+
+    addresses.extend(_linux_interface_ipv4_addresses())
+    addresses.extend(_linux_interface_ipv6_addresses())
+    addresses.extend(_hostname_addresses())
+
+    displayable = [
+        entry for entry in addresses
+        if _is_displayable_address(entry.get("address", ""))
+    ]
+
+    return {
+        "hostname": socket.gethostname(),
+        "request_host": request_host,
+        "addresses": _dedupe_addresses(displayable or addresses),
+    }
 
 # ================================================================
 # small helpers
@@ -44,6 +222,10 @@ def __hardware():
         **hardware_map,
         "hardware": hardware.to_frontend(),
     })
+
+@bp.get("/device/ip-addresses")
+def __device_ip_addresses():
+    return flask.jsonify(_device_ip_addresses())
 
 
 # ================================================================
