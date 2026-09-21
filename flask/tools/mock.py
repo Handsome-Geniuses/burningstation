@@ -139,7 +139,8 @@ def _apply_meter_runtime_mocks(meter: SSHMeter):
     meter.is_booting = lambda: False
     meter.in_splash = lambda: False
     meter.set_brightness = lambda val: None
-    meter.set_ui_mode = lambda mode: None
+    meter.set_ui_mode = lambda mode, banner_text=None: None
+    meter.clear_banner_text = lambda: None
     meter.setup_custom_display = lambda: None
     meter.beep = lambda count=1, interval=0: None
     meter.get_meter_status_text = lambda: MOCK_STATUS_TEXT

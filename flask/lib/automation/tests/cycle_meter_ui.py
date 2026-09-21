@@ -1115,7 +1115,6 @@ def run_pay_to_park_session(
     further screen-test runs.
     """
 
-    meter.set_ui_mode("banner")
     reset_to_parking_home(meter, shared=shared, debug_ui=debug_ui)
     cycle_journal_since = _journal_since_now(meter)
 

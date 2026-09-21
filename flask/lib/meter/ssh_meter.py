@@ -21,7 +21,7 @@ from lib.meter.coin_utils import clear_coin_tallies as clear_coin_tallies_impl
 from lib.meter.display_utils import (
     CHARUCO_PATHS, write_ui_page, write_ui_overlay,
     upload_image, is_custom_display_current,
-    get_apriltag_path, write_results_json
+    get_apriltag_path, write_results_json, write_banner_json
 )
 
 
@@ -1691,15 +1691,37 @@ fclose($myfile);
         resp = self._post_busdev_form(data, delay=delay)
         return resp
 
-    def set_ui_mode(self, mode: str) -> None:
-        """Set the UI mode on the meter."""
+    def set_ui_mode(self, mode: str, banner_text: Optional[str] = None) -> None:
+        """Set the UI mode; a banner call without text clears any prior suffix.
+
+        Banner text is also present in the returned UIPage HTML, so keep suffixes
+        to short, controlled labels that cannot resemble meter-screen content.
+        """
+        normalized_mode = mode.lower()
         valid_modes = {"stock", "banner", "charuco", "apriltag", "results"}
-        if mode.lower() not in valid_modes:
+        if normalized_mode not in valid_modes:
             raise ValueError(f"Invalid mode: {mode}. Must be one of {valid_modes}.")
-        cmd = f"echo '{mode.lower()}' | tee /var/volatile/html/.ui_mode"
+        if normalized_mode != "banner" and banner_text is not None:
+            raise ValueError("banner_text can only be used with banner UI mode")
+
+        if normalized_mode == "banner":
+            # A parameterless banner call intentionally clears stale subtest text.
+            write_banner_json(self, "" if banner_text is None else str(banner_text))
+
+        cmd = f"echo '{normalized_mode}' | tee /var/volatile/html/.ui_mode"
         self.safe_exec_command(cmd)
         time.sleep(0.2)
         self.force_diagnostics()
+
+    def clear_banner_text(self) -> None:
+        """Clear the runtime banner suffix without changing the current UI mode."""
+        current_mode = self.cli(
+            "cat /var/volatile/html/.ui_mode 2>/dev/null || true"
+        ).strip().lower()
+        write_banner_json(self, "")
+        if current_mode == "banner":
+            time.sleep(0.2)
+            self.force_diagnostics()
 
     def setup_custom_display(self) -> None:
         """Automate uploading/writing UIPage.php, ui_overlay.json, and type-specific Charuco PNG."""

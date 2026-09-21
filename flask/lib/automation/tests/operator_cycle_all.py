@@ -91,7 +91,10 @@ def _run_operator_test(meter, shared, device, test_func, subtest_kwargs):
 
     try:
         subtest_kwargs = dict(subtest_kwargs)
+        banner_text = f"(Running {device.replace('_', ' ')})"
         subtest_kwargs["subtest"] = True
+        subtest_kwargs["banner_text"] = banner_text
+        meter.set_ui_mode("banner", banner_text)
         test_func(meter, shared=shared, **subtest_kwargs)
         if not shared.stop_event.is_set():
             shared.device_results[device] = "pass"

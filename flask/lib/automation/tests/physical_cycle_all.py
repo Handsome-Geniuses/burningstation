@@ -184,8 +184,14 @@ def physical_cycle_all(
 
             is_combined_subtest = device_name == "robot_keypad" and combined_solar_keypad
             try:
+                banner_name = (
+                    "solar + robot keypad" if is_combined_subtest else device_name
+                )
+                banner_text = f"(Running {banner_name.replace('_', ' ')})"
                 final_kwargs["subtest"] = True
                 final_kwargs["charuco_frame"] = charuco_frame
+                final_kwargs["banner_text"] = banner_text
+                meter.set_ui_mode("banner", banner_text)
 
                 if is_combined_subtest:
                     _, solar_kwargs = _resolve_subtest_kwargs("solar", kwargs)

@@ -95,7 +95,10 @@ def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, subtest_k
     shared.device_results[device] = "running"
 
     try:
+        banner_text = f"(Running {device.replace('_', ' ')})"
         subtest_kwargs["subtest"] = True
+        subtest_kwargs["banner_text"] = banner_text
+        meter.set_ui_mode("banner", banner_text)
         fn(meter, shared=shared, **subtest_kwargs)
         if not shared.stop_event.is_set():
             shared.device_results[device] = "pass"

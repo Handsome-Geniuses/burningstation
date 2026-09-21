@@ -89,7 +89,6 @@ def test_robot_nfc_read(meter: SSHMeter, shared: SharedState, **kwargs):
     charuco_frame = kwargs.get("charuco_frame")
     if charuco_frame is None:
         raise ValueError("'charuco_frame' argument is required for the robot NFC test")
-    meter.set_ui_mode("banner")
 
     robot = RobotClient()
     job_id = robot.run_program("run_nfc_card", {
