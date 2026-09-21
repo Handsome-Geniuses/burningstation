@@ -3,7 +3,6 @@
 # Desc: handle routes
 # ================================================================
 import flask
-import ipaddress
 import os
 import signal
 import socket
@@ -40,28 +39,12 @@ def _host_without_port(value):
     return host
 
 
-def _ip_family(address):
-    try:
-        return "IPv6" if ipaddress.ip_address(address).version == 6 else "IPv4"
-    except ValueError:
-        return None
-
-
-def _is_displayable_address(address):
-    try:
-        ip = ipaddress.ip_address(address.split("%", 1)[0])
-    except ValueError:
-        return False
-
-    return not (ip.is_loopback or ip.is_unspecified or ip.is_multicast)
-
-
 def _dedupe_addresses(addresses):
     deduped = []
     seen = set()
 
     for entry in addresses:
-        key = (entry.get("family"), entry.get("address"))
+        key = (entry.get("interface"), entry.get("family"), entry.get("address"))
         if key in seen:
             continue
         seen.add(key)
@@ -99,102 +82,16 @@ def _linux_interface_ipv4_addresses():
     return addresses
 
 
-def _linux_interface_ipv6_addresses():
-    addresses = []
-    path = "/proc/net/if_inet6"
-    if not os.path.exists(path):
-        return addresses
-
-    try:
-        with open(path, encoding="ascii") as fp:
-            for line in fp:
-                parts = line.split()
-                if len(parts) < 6:
-                    continue
-
-                address_hex, _, _, _, _, interface = parts[:6]
-                try:
-                    address = str(ipaddress.IPv6Address(int(address_hex, 16)))
-                except ValueError:
-                    continue
-
-                addresses.append({
-                    "interface": interface,
-                    "family": "IPv6",
-                    "address": address,
-                    "source": "interface",
-                })
-    except OSError:
-        return addresses
-
-    return addresses
-
-
-def _hostname_addresses():
-    addresses = []
-    hostnames = {socket.gethostname(), socket.getfqdn()}
-
-    for hostname in hostnames:
-        if not hostname:
-            continue
-
-        try:
-            infos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
-        except OSError:
-            continue
-
-        for family, _, _, _, sockaddr in infos:
-            if family not in (socket.AF_INET, socket.AF_INET6):
-                continue
-
-            address = sockaddr[0]
-            family_name = "IPv6" if family == socket.AF_INET6 else "IPv4"
-            addresses.append({
-                "interface": hostname,
-                "family": family_name,
-                "address": address,
-                "source": "hostname",
-            })
-
-    return addresses
-
-
-def _request_host_entry():
+def _request_host():
     forwarded_host = flask.request.headers.get("X-Forwarded-Host")
-    request_host = _host_without_port(forwarded_host or flask.request.host)
-    family = _ip_family(request_host) if request_host else None
-
-    if not request_host or not family or not _is_displayable_address(request_host):
-        return request_host, None
-
-    return request_host, {
-        "interface": "browser",
-        "family": family,
-        "address": request_host,
-        "source": "request",
-    }
+    return _host_without_port(forwarded_host or flask.request.host)
 
 
 def _device_ip_addresses():
-    request_host, request_entry = _request_host_entry()
-    addresses = []
-
-    if request_entry:
-        addresses.append(request_entry)
-
-    addresses.extend(_linux_interface_ipv4_addresses())
-    addresses.extend(_linux_interface_ipv6_addresses())
-    addresses.extend(_hostname_addresses())
-
-    displayable = [
-        entry for entry in addresses
-        if _is_displayable_address(entry.get("address", ""))
-    ]
-
     return {
         "hostname": socket.gethostname(),
-        "request_host": request_host,
-        "addresses": _dedupe_addresses(displayable or addresses),
+        "request_host": _request_host(),
+        "addresses": _dedupe_addresses(_linux_interface_ipv4_addresses()),
     }
 
 # ================================================================

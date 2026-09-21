@@ -55,10 +55,18 @@ class HardwareProfileSmokeTests(unittest.TestCase):
         )
         self.assertIn("hardware-ok", result.stdout)
 
-    def test_device_ip_endpoint_reports_request_host_ip(self):
+    def test_device_ip_endpoint_reports_every_interface_ipv4(self):
         result = self.run_python(
             """
             from app import app
+            from route.system import blueprint as system_blueprint
+
+            system_blueprint._linux_interface_ipv4_addresses = lambda: [
+                {"interface": "lo", "family": "IPv4", "address": "127.0.0.1", "source": "interface"},
+                {"interface": "eth0", "family": "IPv4", "address": "192.0.2.10", "source": "interface"},
+                {"interface": "wlan0", "family": "IPv4", "address": "198.51.100.20", "source": "interface"},
+                {"interface": "docker0", "family": "IPv4", "address": "172.17.0.1", "source": "interface"},
+            ]
 
             client = app.test_client()
             response = client.get(
@@ -69,11 +77,7 @@ class HardwareProfileSmokeTests(unittest.TestCase):
             assert response.status_code == 200, response.get_data(as_text=True)
             assert payload["request_host"] == "192.0.2.10", payload
             assert isinstance(payload["hostname"], str), payload
-            assert isinstance(payload["addresses"], list), payload
-            assert any(
-                address["address"] == "192.0.2.10" and address["source"] == "request"
-                for address in payload["addresses"]
-            ), payload
+            assert payload["addresses"] == system_blueprint._linux_interface_ipv4_addresses(), payload
             print("device-ip-ok")
             """,
             profile="portable",
