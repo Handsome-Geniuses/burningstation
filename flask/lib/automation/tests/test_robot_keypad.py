@@ -24,7 +24,7 @@ KEYPAD_PAGE = "Service:Utilities:Peripherals:Keyboard"
 KEYPAD_EXIT_PRIME_TEXT = "Press [&#10006;] again to exit this test"
 STUCK_TARGET_BUTTONS = {"BACK", "ENTER"}
 STUCK_PROBE_BUTTON = "POUND"
-PRESS_PLAN_VERSION = 1
+PRESS_PLAN_VERSION = 2
 KEY_PRESSED_RE = re.compile(
     r"KEY_PRESSED:\s*(?P<key>[^,]+),\s*isAutoRepeat=(?P<ar>true|false),\s*from\s+(?P<src>\S+)",
     re.IGNORECASE,
@@ -117,6 +117,7 @@ class KeypadRunState:
     physical_attempt_count: int = 0
     progress_current: int = 0
     progress_total: int = 0
+    group_barrier_history: List[Dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.confirmed_counts = {button: 0 for button in self.expected_buttons}
@@ -1397,6 +1398,12 @@ def _handle_structured_robot_events(
                 "resolved": False,
                 "retry_requested": False,
                 "probe_before_target": False,
+                "barrier_waiting": False,
+                "barrier_received_epoch_s": None,
+                "barrier_received_monotonic_s": None,
+                "resolution": "",
+                "resolution_response": {},
+                "resolution_epoch_s": None,
             }
             state.attempt_batches[batch_key] = batch
             state.attempt_batch_order.append(batch_key)
@@ -1436,6 +1443,51 @@ def _handle_structured_robot_events(
                     f"robot STARTED step {attempt.logical_index}/{len(state.press_plan)} "
                     f"'{attempt.raw_button_name}' role={attempt.role} offset={list(attempt.offset_mm)} "
                     f"group={group_id} group_attempt={group_attempt}"
+                ),
+                section="robot",
+            )
+            continue
+
+        if action == "awaiting_group_resolution":
+            if attempt is None:
+                _fail_keypad(
+                    shared,
+                    state,
+                    f"Robot entered a group barrier before pressing structured step {step_id}",
+                )
+            if plan_step["role"] != "stuck_probe":
+                _fail_keypad(
+                    shared,
+                    state,
+                    f"Robot entered a group barrier on non-probe step {step_id}",
+                )
+            if batch["barrier_waiting"]:
+                _keypad_debug(
+                    shared,
+                    state,
+                    f"ignoring duplicate group barrier event for {group_id} attempt {group_attempt}",
+                    section="robot",
+                )
+                continue
+            batch["barrier_waiting"] = True
+            batch["barrier_received_epoch_s"] = float(event["received_epoch_s"])
+            batch["barrier_received_monotonic_s"] = float(event["received_monotonic_s"])
+            state.group_barrier_history.append(
+                {
+                    "group_id": group_id,
+                    "group_attempt": group_attempt,
+                    "step_id": step_id,
+                    "waiting_received_at": _iso_from_epoch(batch["barrier_received_epoch_s"]),
+                    "resolution": "",
+                    "resolution_received_at": None,
+                    "response": {},
+                }
+            )
+            _keypad_log(
+                shared,
+                (
+                    f"robot waiting at safe clearance for group={group_id} "
+                    f"group_attempt={group_attempt} station resolution"
                 ),
                 section="robot",
             )
@@ -1571,6 +1623,99 @@ def _complete_structured_group(
     )
 
 
+def _record_group_resolution(
+    state: KeypadRunState,
+    batch: Dict[str, Any],
+    resolution: str,
+    response: Dict[str, Any],
+) -> None:
+    resolved_epoch_s = time.time()
+    batch["resolution"] = resolution
+    batch["resolution_response"] = dict(response or {})
+    batch["resolution_epoch_s"] = resolved_epoch_s
+    for barrier in reversed(state.group_barrier_history):
+        if (
+            barrier["group_id"] == batch["group_id"]
+            and barrier["group_attempt"] == batch["group_attempt"]
+        ):
+            barrier["resolution"] = resolution
+            barrier["resolution_received_at"] = _iso_from_epoch(resolved_epoch_s)
+            barrier["response"] = dict(response or {})
+            break
+
+
+def _resolve_structured_group(
+    robot: RobotClient,
+    shared: SharedState,
+    state: KeypadRunState,
+    batch: Dict[str, Any],
+    *,
+    job_id: str,
+    resolution: str,
+    reason: str,
+    retry_command_timeout_s: float,
+) -> Dict[str, Any]:
+    last_timeout: Optional[Exception] = None
+    for command_attempt in range(1, 3):
+        try:
+            response = robot.resolve_button_group(
+                job_id=job_id,
+                group_id=batch["group_id"],
+                group_attempt=batch["group_attempt"],
+                resolution=resolution,
+                reason=reason,
+                timeout=retry_command_timeout_s,
+            )
+        except TimeoutError as exc:
+            last_timeout = exc
+            _keypad_log(
+                shared,
+                (
+                    f"resolve_button_group timed out for {batch['group_id']} "
+                    f"attempt {batch['group_attempt']} command try {command_attempt}/2"
+                ),
+                section="robot",
+            )
+            continue
+        except Exception as exc:
+            _fail_keypad(
+                shared,
+                state,
+                f"Unable to resolve keypad group {batch['group_id']} as {resolution}: {exc}",
+            )
+
+        if not response.get("accepted"):
+            _fail_keypad(
+                shared,
+                state,
+                (
+                    f"Robot rejected {resolution} resolution for keypad group "
+                    f"{batch['group_id']} attempt {batch['group_attempt']}: "
+                    f"{response.get('message')}"
+                ),
+            )
+        _record_group_resolution(state, batch, resolution, response)
+        _keypad_log(
+            shared,
+            (
+                f"station resolved group={batch['group_id']} "
+                f"group_attempt={batch['group_attempt']} as {resolution} "
+                f"already_resolved={bool(response.get('already_resolved'))}"
+            ),
+            section="robot",
+        )
+        return response
+
+    _fail_keypad(
+        shared,
+        state,
+        (
+            f"Unable to acknowledge {resolution} resolution for keypad group "
+            f"{batch['group_id']} after two command timeouts: {last_timeout}"
+        ),
+    )
+
+
 def _request_structured_group_retry(
     robot: RobotClient,
     shared: SharedState,
@@ -1594,33 +1739,44 @@ def _request_structured_group_retry(
             ),
         )
 
-    first_step = state.group_plan[group_id][0]
-    try:
-        response = robot.request_button_retry(
-            first_step["button_name"],
+    if batch.get("barrier_waiting"):
+        response = _resolve_structured_group(
+            robot,
+            shared,
+            state,
+            batch,
             job_id=job_id,
+            resolution="retry",
             reason=reason,
-            step_id=first_step["step_id"],
-            group_id=group_id,
-            retry_scope="group",
-            timeout=retry_command_timeout_s,
+            retry_command_timeout_s=retry_command_timeout_s,
         )
-    except Exception as exc:
-        _fail_keypad(
-            shared,
-            state,
-            f"Retry request failed for keypad group {group_id}: {exc}",
-        )
-
-    if not (response.get("accepted") or response.get("already_queued")):
-        _fail_keypad(
-            shared,
-            state,
-            f"Retry request rejected for keypad group {group_id}: {response.get('message')}",
-        )
-
-    if response.get("accepted"):
         state.group_retry_counts[group_id] = retries_used + 1
+    else:
+        first_step = state.group_plan[group_id][0]
+        try:
+            response = robot.request_button_retry(
+                first_step["button_name"],
+                job_id=job_id,
+                reason=reason,
+                step_id=first_step["step_id"],
+                group_id=group_id,
+                retry_scope="group",
+                timeout=retry_command_timeout_s,
+            )
+        except Exception as exc:
+            _fail_keypad(
+                shared,
+                state,
+                f"Retry request failed for keypad group {group_id}: {exc}",
+            )
+        if not (response.get("accepted") or response.get("already_queued")):
+            _fail_keypad(
+                shared,
+                state,
+                f"Retry request rejected for keypad group {group_id}: {response.get('message')}",
+            )
+        if response.get("accepted"):
+            state.group_retry_counts[group_id] = retries_used + 1
     state.retry_pending_groups.add(group_id)
     batch["retry_requested"] = True
     batch["resolved"] = True
@@ -1674,39 +1830,66 @@ def _match_structured_batches(
 
         target_step = next((step for step in planned_steps if step["role"] == "target"), None)
         probe_step = next((step for step in planned_steps if step["role"] == "stuck_probe"), None)
-        future_names = _future_unresolved_button_names(state, batch_key)
 
         if target_step is not None and probe_step is not None:
             target = attempts[target_step["step_id"]]
             probe = attempts[probe_step["step_id"]]
 
-            while state.journal_backlog and not target.meter_confirmed and not probe.meter_confirmed:
+            if not batch["barrier_waiting"]:
+                if age_s >= per_button_timeout_s:
+                    _fail_keypad(
+                        shared,
+                        state,
+                        (
+                            f"Robot did not enter the station gate for keypad group "
+                            f"{batch['group_id']} attempt {batch['group_attempt']}"
+                        ),
+                    )
+                return
+
+            barrier_start = max(
+                latest_pressed,
+                float(batch["barrier_received_monotonic_s"] or latest_pressed),
+            )
+            barrier_age_s = now - barrier_start
+            if barrier_age_s < state.journal_after_buffer_s:
+                return
+
+            while state.journal_backlog:
                 entry = state.journal_backlog[0]
                 observed = _norm(entry["button_name"])
                 if entry.get("src") != "KEY_PAD_2":
-                    _consume_journal_entry(shared, state, ignored_reason="stuck verification requires KEY_PAD_2")
+                    _consume_journal_entry(
+                        shared,
+                        state,
+                        ignored_reason="stuck verification requires KEY_PAD_2",
+                    )
                     continue
-                if observed == target.button_name:
-                    _confirm_structured_attempt(shared, state, target, _consume_journal_entry(shared, state))
-                    break
-                if observed == STUCK_PROBE_BUTTON:
-                    _confirm_structured_attempt(shared, state, probe, _consume_journal_entry(shared, state))
-                    batch["probe_before_target"] = True
-                    break
-                if observed in future_names:
-                    break
-                _consume_journal_entry(shared, state, ignored_reason="unexpected key before verification target")
 
-            if target.meter_confirmed and not probe.meter_confirmed:
-                while state.journal_backlog:
-                    entry = state.journal_backlog[0]
-                    observed = _norm(entry["button_name"])
-                    if entry.get("src") != "KEY_PAD_2":
-                        _consume_journal_entry(shared, state, ignored_reason="stuck probe requires KEY_PAD_2")
-                        continue
+                if not target.meter_confirmed:
+                    if observed == target.button_name:
+                        _confirm_structured_attempt(
+                            shared, state, target, _consume_journal_entry(shared, state)
+                        )
+                    elif observed == STUCK_PROBE_BUTTON:
+                        _confirm_structured_attempt(
+                            shared, state, probe, _consume_journal_entry(shared, state)
+                        )
+                        batch["probe_before_target"] = True
+                    else:
+                        _consume_journal_entry(
+                            shared,
+                            state,
+                            ignored_reason="unexpected key before isolated verification target",
+                        )
+                    continue
+
+                if not probe.meter_confirmed:
                     if observed == STUCK_PROBE_BUTTON:
-                        _confirm_structured_attempt(shared, state, probe, _consume_journal_entry(shared, state))
-                        break
+                        _confirm_structured_attempt(
+                            shared, state, probe, _consume_journal_entry(shared, state)
+                        )
+                        continue
                     if observed in STUCK_TARGET_BUTTONS:
                         bad_entry = _consume_journal_entry(shared, state)
                         probe.result = "stuck_key_detected"
@@ -1724,15 +1907,50 @@ def _match_structured_batches(
                                 f"but the meter reported {observed}. journal={bad_entry['raw_line']}"
                             ),
                         )
-                    if observed in future_names:
-                        break
-                    _consume_journal_entry(shared, state, ignored_reason="unexpected key during stuck probe")
+                    _consume_journal_entry(
+                        shared,
+                        state,
+                        ignored_reason="unexpected key during isolated stuck probe",
+                    )
+                    continue
+
+                if observed in STUCK_TARGET_BUTTONS:
+                    bad_entry = _consume_journal_entry(shared, state)
+                    probe.result = "stuck_key_detected"
+                    probe.note = f"Delayed {observed} followed the confirmed POUND probe"
+                    _fail_keypad(
+                        shared,
+                        state,
+                        (
+                            f"STUCK KEYPAD BUTTON DETECTED: {target.button_name} at offset "
+                            f"{list(target.offset_mm)} produced delayed {observed} evidence after "
+                            f"the POUND probe. journal={bad_entry['raw_line']}"
+                        ),
+                    )
+                _consume_journal_entry(
+                    shared,
+                    state,
+                    ignored_reason="trailing non-target key during isolated settle window",
+                )
 
             if target.meter_confirmed and probe.meter_confirmed and not batch["probe_before_target"]:
+                _resolve_structured_group(
+                    robot,
+                    shared,
+                    state,
+                    batch,
+                    job_id=job_id,
+                    resolution="pass",
+                    reason="isolated target and POUND evidence confirmed",
+                    retry_command_timeout_s=retry_command_timeout_s,
+                )
                 _complete_structured_group(shared, state, batch)
                 continue
 
+            age_s = barrier_age_s
+
         else:
+            future_names = _future_unresolved_button_names(state, batch_key)
             step = planned_steps[0]
             attempt = attempts[step["step_id"]]
             while state.journal_backlog and not attempt.meter_confirmed:
@@ -1786,6 +2004,7 @@ def _write_keypad_meta(shared: SharedState, state: KeypadRunState) -> None:
             "completed_step_ids": sorted(state.completed_step_ids),
             "completed_group_ids": sorted(state.completed_group_ids),
             "group_retry_counts": dict(state.group_retry_counts),
+            "group_barriers": [dict(item) for item in state.group_barrier_history],
             "physical_attempt_count": state.physical_attempt_count,
             "attempts": [_attempt_to_meta(attempt) for attempt in state.attempt_history],
             "program_done_data": dict(state.program_done_data or {}),
@@ -1826,6 +2045,9 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     job_count = max(1, int(kwargs.get("job_count", 1)))
     verify_stuck = bool(kwargs.get("verify_stuck", True))
     back_enter_offsets_mm = kwargs.get("back_enter_offsets_mm", [[0.0, 0.0]])
+    journal_after_buffer_s = float(
+        kwargs.get("journal_after_buffer_s", DEFAULT_JOURNAL_AFTER_BUFFER_S)
+    )
     buttons, press_plan, requested_required_counts = _build_press_plan(
         raw_buttons,
         job_count=job_count,
@@ -1834,20 +2056,26 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     )
     planned_press_count = len(press_plan)
     retry_allowance = planned_press_count * max_retries_per_group
+    verification_group_count = len(
+        {step["group_id"] for step in press_plan if step["role"] == "stuck_probe"}
+    )
+    verification_attempt_allowance = verification_group_count * (1 + max_retries_per_group)
+    group_resolution_timeout_s = max(
+        20.0,
+        per_button_timeout_s + journal_after_buffer_s + 10.0,
+    )
     max_duration_s = (
         float(kwargs["max_duration_s"])
         if kwargs.get("max_duration_s") is not None
         else (
             DEFAULT_MAX_DURATION_BASE_S
             + (DEFAULT_PER_PLANNED_PRESS_TIMEOUT_S * (planned_press_count + retry_allowance))
+            + (journal_after_buffer_s * verification_attempt_allowance)
         )
     )
     robot_program_done_grace_s = float(kwargs.get("robot_program_done_grace_s", DEFAULT_ROBOT_PROGRAM_DONE_GRACE_S))
     poll_s = float(kwargs.get("poll_s", 0.5))
     debug_keypad = bool(kwargs.get("debug_keypad", False))
-    journal_after_buffer_s = float(
-        kwargs.get("journal_after_buffer_s", DEFAULT_JOURNAL_AFTER_BUFFER_S)
-    )
     start_epoch_s = time.time()
     start_monotonic_s = time.monotonic()
     _keypad_log(shared, f"{meter.host} {func_name} 1/1")
@@ -1861,7 +2089,8 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             f"per_button_timeout_s={per_button_timeout_s:.1f} | "
             f"journal_after_buffer_s={journal_after_buffer_s:.1f} | "
             f"robot_program_done_grace_s={robot_program_done_grace_s:.1f} | "
-            f"max_retries_per_group={max_retries_per_group}"
+            f"max_retries_per_group={max_retries_per_group} | "
+            f"group_resolution_timeout_s={group_resolution_timeout_s:.1f}"
         ),
     )
     if not subtest:
@@ -1938,6 +2167,7 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             "meter_id": meter.hostname,
             "press_plan_version": PRESS_PLAN_VERSION,
             "press_plan": press_plan,
+            "group_resolution_timeout_s": group_resolution_timeout_s,
             "charuco_frame": charuco_frame,
             "test": False,
             "burningstation_logfile_path": shared.logfile_path,
@@ -2049,6 +2279,22 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             _maintain_keypad_page(meter, shared)
 
             time.sleep(poll_s)
+
+    except StopAutomation:
+        try:
+            robot.send_command("abort_program", timeout=retry_command_timeout_s)
+            _keypad_log(
+                shared,
+                "Robot program aborted while waiting at a keypad group barrier",
+                section="robot",
+            )
+        except Exception as exc:
+            _keypad_log(
+                shared,
+                f"Failed to abort robot program after keypad failure: {exc}",
+                section="robot",
+            )
+        raise
 
     finally:
         collector_stop.set()

@@ -196,6 +196,14 @@ class RobotKeypadPlanTests(unittest.TestCase):
             }
             events.put({"received_epoch_s": old_epoch, "received_monotonic_s": old_mono, "data": {**common, "action": "pressing"}})
             events.put({"received_epoch_s": old_epoch, "received_monotonic_s": old_mono, "data": {**common, "action": "pressed", "pressed": True}})
+            if step["role"] == "stuck_probe":
+                events.put(
+                    {
+                        "received_epoch_s": old_epoch,
+                        "received_monotonic_s": old_mono,
+                        "data": {**common, "action": "awaiting_group_resolution"},
+                    }
+                )
         keypad._handle_structured_robot_events(events, SharedState(), state)
 
     @staticmethod
@@ -216,6 +224,7 @@ class RobotKeypadPlanTests(unittest.TestCase):
         state.journal_backlog = [self._entry("BACK", 1), self._entry("POUND", 2)]
         shared = SharedState()
         robot = Mock()
+        robot.resolve_button_group.return_value = {"accepted": True}
 
         keypad._match_structured_batches(
             Mock(), shared, state, robot=robot, job_id="1",
@@ -225,7 +234,7 @@ class RobotKeypadPlanTests(unittest.TestCase):
         self.assertEqual(state.progress_current, 2)
         self.assertEqual(state.confirmed_counts, {"BACK": 1})
         self.assertEqual(len(state.completed_group_ids), 1)
-        robot.request_button_retry.assert_not_called()
+        self.assertEqual(robot.resolve_button_group.call_args.kwargs["resolution"], "pass")
 
     def test_probe_reported_as_back_fails_as_stuck(self):
         state = self._make_state()
@@ -247,18 +256,143 @@ class RobotKeypadPlanTests(unittest.TestCase):
         state.journal_backlog = [self._entry("POUND", 1)]
         shared = SharedState()
         robot = Mock()
-        robot.request_button_retry.return_value = {"accepted": True}
+        robot.resolve_button_group.return_value = {"accepted": True}
 
         keypad._match_structured_batches(
             Mock(), shared, state, robot=robot, job_id="1",
             per_button_timeout_s=5, max_retries_per_group=1, retry_command_timeout_s=1,
         )
 
-        kwargs = robot.request_button_retry.call_args.kwargs
-        self.assertEqual(kwargs["retry_scope"], "group")
+        kwargs = robot.resolve_button_group.call_args.kwargs
+        self.assertEqual(kwargs["resolution"], "retry")
         self.assertEqual(kwargs["group_id"], state.press_plan[0]["group_id"])
         self.assertEqual(state.group_retry_counts[kwargs["group_id"]], 1)
         self.assertEqual(state.progress_current, 0)
+
+    def test_registered_target_with_obstructed_probe_retries_without_false_stuck(self):
+        state = self._make_state()
+        self._feed_group_events(state)
+        state.journal_backlog = [self._entry("BACK", 1)]
+        robot = Mock()
+        robot.resolve_button_group.return_value = {"accepted": True}
+
+        keypad._match_structured_batches(
+            Mock(), SharedState(), state, robot=robot, job_id="1",
+            per_button_timeout_s=5, max_retries_per_group=1, retry_command_timeout_s=1,
+        )
+
+        kwargs = robot.resolve_button_group.call_args.kwargs
+        self.assertEqual(kwargs["resolution"], "retry")
+        self.assertEqual(state.attempt_history[0].result, "group_retry_queued")
+        self.assertNotIn("STUCK KEYPAD BUTTON DETECTED", state.final_error)
+
+    def test_obstructed_probe_fails_when_group_retry_budget_is_exhausted(self):
+        state = self._make_state()
+        self._feed_group_events(state)
+        state.journal_backlog = [self._entry("BACK", 1)]
+        robot = Mock()
+
+        with self.assertRaises(StopAutomation):
+            keypad._match_structured_batches(
+                Mock(), SharedState(), state, robot=robot, job_id="1",
+                per_button_timeout_s=5, max_retries_per_group=0, retry_command_timeout_s=1,
+            )
+        robot.resolve_button_group.assert_not_called()
+
+    def test_group_waits_for_full_settle_window_before_pass(self):
+        state = self._make_state()
+        state.journal_after_buffer_s = 3.5
+        self._feed_group_events(state)
+        batch = next(iter(state.attempt_batches.values()))
+        batch["barrier_received_monotonic_s"] = time.monotonic() - 1
+        for attempt in batch["attempts"].values():
+            attempt.pressed_monotonic_s = time.monotonic() - 10
+        state.journal_backlog = [self._entry("BACK", 1), self._entry("POUND", 2)]
+        robot = Mock()
+
+        keypad._match_structured_batches(
+            Mock(), SharedState(), state, robot=robot, job_id="1",
+            per_button_timeout_s=5, max_retries_per_group=1, retry_command_timeout_s=1,
+        )
+
+        robot.resolve_button_group.assert_not_called()
+        self.assertEqual(state.progress_current, 0)
+
+    def test_delayed_target_after_confirmed_probe_is_stuck(self):
+        state = self._make_state()
+        self._feed_group_events(state)
+        state.journal_backlog = [
+            self._entry("BACK", 1),
+            self._entry("POUND", 2),
+            self._entry("BACK", 3),
+        ]
+
+        with self.assertRaises(StopAutomation):
+            keypad._match_structured_batches(
+                Mock(), SharedState(), state, robot=Mock(), job_id="1",
+                per_button_timeout_s=5, max_retries_per_group=1, retry_command_timeout_s=1,
+            )
+
+    def test_group_resolution_command_timeout_retries_idempotently(self):
+        state = self._make_state()
+        self._feed_group_events(state)
+        state.journal_backlog = [self._entry("BACK", 1), self._entry("POUND", 2)]
+        robot = Mock()
+        robot.resolve_button_group.side_effect = [
+            TimeoutError("response lost"),
+            {"accepted": True, "already_resolved": True},
+        ]
+
+        keypad._match_structured_batches(
+            Mock(), SharedState(), state, robot=robot, job_id="1",
+            per_button_timeout_s=5, max_retries_per_group=1, retry_command_timeout_s=1,
+        )
+
+        self.assertEqual(robot.resolve_button_group.call_count, 2)
+        self.assertEqual(state.progress_current, 2)
+        self.assertTrue(state.group_barrier_history[0]["response"]["already_resolved"])
+
+    def test_missing_barrier_event_fails_instead_of_matching_future_evidence(self):
+        state = self._make_state()
+        self._feed_group_events(state)
+        batch = next(iter(state.attempt_batches.values()))
+        batch["barrier_waiting"] = False
+        batch["barrier_received_monotonic_s"] = None
+        state.group_barrier_history.clear()
+        state.journal_backlog = [self._entry("BACK", 1), self._entry("POUND", 2)]
+
+        with self.assertRaises(StopAutomation):
+            keypad._match_structured_batches(
+                Mock(), SharedState(), state, robot=Mock(), job_id="1",
+                per_button_timeout_s=5, max_retries_per_group=1, retry_command_timeout_s=1,
+            )
+
+    def test_standard_step_retry_remains_on_legacy_retry_command(self):
+        buttons, plan, required = keypad._build_press_plan(
+            ["1"], job_count=1, verify_stuck=True, back_enter_offsets_mm=[[0, 0]]
+        )
+        state = keypad.KeypadRunState(
+            expected_buttons=buttons,
+            required_per_button=1,
+            start_epoch_s=time.time(),
+            start_monotonic_s=time.monotonic(),
+            initial_journal_cursor="cursor-0",
+            stop_on_failure=False,
+            journal_after_buffer_s=0,
+            press_plan=plan,
+            requested_required_counts=required,
+        )
+        self._feed_group_events(state)
+        robot = Mock()
+        robot.request_button_retry.return_value = {"accepted": True}
+
+        keypad._match_structured_batches(
+            Mock(), SharedState(), state, robot=robot, job_id="1",
+            per_button_timeout_s=5, max_retries_per_group=1, retry_command_timeout_s=1,
+        )
+
+        robot.request_button_retry.assert_called_once()
+        robot.resolve_button_group.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -263,6 +263,26 @@ class RobotClient:
             params["reason"] = reason
         return self.send_command("finish_button_retries", params=params, timeout=timeout)
 
+    def resolve_button_group(
+        self,
+        *,
+        job_id: str,
+        group_id: str,
+        group_attempt: int,
+        resolution: str,
+        reason: str = "",
+        timeout: float = 3.0,
+    ):
+        params = {
+            "job_id": job_id,
+            "group_id": group_id,
+            "group_attempt": int(group_attempt),
+            "resolution": resolution,
+        }
+        if reason:
+            params["reason"] = reason
+        return self.send_command("resolve_button_group", params=params, timeout=timeout)
+
     def wait_for_event(self, event_name: str, job_id: Optional[str] = None, timeout: float = 30.0):
         """Wait up to `timeout` seconds for a specific event. Consumes the first match."""
         log.info("waiting for event '%s'%s with timeout=%s sec", event_name, f" on job {job_id}" if job_id else "", timeout)
