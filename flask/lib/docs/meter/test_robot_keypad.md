@@ -7,6 +7,36 @@ It is intentionally different from the older monitor-driven keypad approach.
 The test now owns the robot event handling, journal polling, retries, success,
 failure, and metadata directly.
 
+## Structured Press Plans and Stuck-Key Verification
+
+The station now expands the requested buttons into a versioned `press_plan`
+before starting `run_button_press`. Every physical step has a stable `step_id`,
+`group_id`, role, job-count pass, logical progress index, and `[x, y]` offset.
+
+`verify_stuck` defaults to `True`. Each BACK or ENTER target scenario is
+followed immediately by a centered POUND `stuck_probe`. A normal POUND journal
+event passes the probe. A BACK or ENTER journal event in the probe position is
+treated as a stuck-key failure. Missing target or probe evidence retries the
+entire target/probe group, using an independent retry budget for that offset
+scenario.
+
+`back_enter_offsets_mm` defaults to `[[0.0, 0.0]]`. It is ordered and preserves
+duplicates. Offsets apply only to BACK/ENTER targets; probes and all other keys
+remain centered. Each pair must satisfy `abs(x) < 12.75` and `abs(y) < 5.0`.
+
+Requested POUND counts and probe POUND evidence are reported separately.
+Progress counts the expanded logical plan, including probes and offset targets,
+while retry attempts are recorded separately and do not increase the total.
+
+The robot remains in continuous motion. Journal candidates are consumed in
+physical attempt order, and the probe position takes precedence over a later
+BACK/ENTER target if evidence is ambiguous.
+
+The keypad page is also inspected for
+`Press [&#10006;] again to exit this test`. When present, the station sends one synthetic
+`meter.press("BACK")` for that observation. Synthetic `ALL_DEVICES` events are
+still excluded from physical matching.
+
 ## What This Test Proves
 
 The test passes only when it can prove that:

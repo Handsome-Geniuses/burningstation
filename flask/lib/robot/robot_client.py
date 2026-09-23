@@ -199,32 +199,54 @@ class RobotClient:
 
     def request_button_retry(
         self,
-        button_name: str,
+        button_name: str = "",
         *,
         job_id: Optional[str] = None,
         reason: str = "",
+        step_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        retry_scope: Optional[str] = None,
         timeout: float = 3.0,
     ):
-        params = {"button_name": button_name}
+        params = {}
+        if button_name:
+            params["button_name"] = button_name
         if job_id is not None:
             params["job_id"] = job_id
         if reason:
             params["reason"] = reason
+        if step_id:
+            params["step_id"] = step_id
+        if group_id:
+            params["group_id"] = group_id
+        if retry_scope:
+            params["retry_scope"] = retry_scope
         return self.send_command("request_button_retry", params=params, timeout=timeout)
 
     def cancel_button_retry(
         self,
-        button_name: str,
+        button_name: str = "",
         *,
         job_id: Optional[str] = None,
         reason: str = "",
+        step_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        retry_scope: Optional[str] = None,
         timeout: float = 3.0,
     ):
-        params = {"button_name": button_name}
+        params = {}
+        if button_name:
+            params["button_name"] = button_name
         if job_id is not None:
             params["job_id"] = job_id
         if reason:
             params["reason"] = reason
+        if step_id:
+            params["step_id"] = step_id
+        if group_id:
+            params["group_id"] = group_id
+        if retry_scope:
+            params["retry_scope"] = retry_scope
         return self.send_command("cancel_button_retry", params=params, timeout=timeout)
 
     def finish_button_retries(

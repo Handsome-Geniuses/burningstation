@@ -2,6 +2,7 @@
 
 import React from "react"
 import {
+    ArrayRow,
     BooleanRow,
     IntegerRow,
     ObjectRow,
@@ -70,6 +71,20 @@ export const SettingsTable = ({
                     if (node.type === "boolean") {
                         return (
                             <BooleanRow
+                                key={nextPath.join(".")}
+                                fieldKey={fieldKey}
+                                node={node}
+                                value={value}
+                                path={nextPath}
+                                disabled={disabled}
+                                onChange={onChange}
+                            />
+                        )
+                    }
+
+                    if (node.type === "array") {
+                        return (
+                            <ArrayRow
                                 key={nextPath.join(".")}
                                 fieldKey={fieldKey}
                                 node={node}
