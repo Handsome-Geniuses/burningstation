@@ -1,5 +1,7 @@
 from typing import Any
-from pydantic import BaseModel, Field
+import math
+
+from pydantic import BaseModel, Field, field_validator
 
 
 # ==================================================================
@@ -39,10 +41,58 @@ class PhyiscalJobs(BaseModel):
     robot_keypad: int = Field(1, ge=0, le=10)
 
 
+class PhysicalRobotKeypadSettings(BaseModel):
+    verify_stuck: bool = Field(
+        True,
+        description="Follow each robot BACK/ENTER scenario with a centered POUND stuck-key probe",
+    )
+    back_enter_offsets_mm: list[list[float]] = Field(
+        default_factory=lambda: [[0.0, 0.0]],
+        description=(
+            "Ordered [x, y] millimetre offsets for robot BACK/ENTER presses; "
+            "requires abs(x) < 12.75 and abs(y) < 5.0"
+        ),
+    )
+    max_retries_per_group: int = Field(
+        1,
+        ge=0,
+        le=10,
+        description="Retry budget for each job-count/offset keypad scenario",
+    )
+
+    @field_validator("back_enter_offsets_mm")
+    @classmethod
+    def validate_back_enter_offsets(cls, value):
+        if not isinstance(value, list) or not value:
+            raise ValueError("must be a non-empty list of [x, y] pairs")
+        validated = []
+        for index, pair in enumerate(value):
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ValueError(f"item {index} must contain exactly [x, y]")
+            if any(isinstance(component, bool) for component in pair):
+                raise ValueError(f"item {index} values must be finite numbers")
+            try:
+                x, y = float(pair[0]), float(pair[1])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"item {index} values must be finite numbers") from exc
+            if not math.isfinite(x) or not math.isfinite(y):
+                raise ValueError(f"item {index} values must be finite numbers")
+            if abs(x) >= 12.75:
+                raise ValueError(f"item {index} x must satisfy abs(x) < 12.75")
+            if abs(y) >= 5.0:
+                raise ValueError(f"item {index} y must satisfy abs(y) < 5.0")
+            validated.append([x, y])
+        return validated
+
+
 class PhysicalSettings(BaseModel):
     cycles: int = Field(1, ge=1, le=10, description="number of full test runs")
     test_delay: int = Field(5, ge=1, le=60, description="delay(s) between tests")
     job_counts: PhyiscalJobs = Field(default_factory=PhyiscalJobs)
+    robot_keypad: PhysicalRobotKeypadSettings = Field(
+        default_factory=PhysicalRobotKeypadSettings,
+        description="Robot-driven keypad test options",
+    )
 
 
 # ==================================================================

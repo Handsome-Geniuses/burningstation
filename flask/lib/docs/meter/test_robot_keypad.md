@@ -7,6 +7,38 @@ It is intentionally different from the older monitor-driven keypad approach.
 The test now owns the robot event handling, journal polling, retries, success,
 failure, and metadata directly.
 
+## Structured Press Plans and Stuck-Key Verification
+
+The station now expands the requested buttons into a versioned `press_plan`
+before starting `run_button_press`. Every physical step has a stable `step_id`,
+`group_id`, role, job-count pass, logical progress index, and `[x, y]` offset.
+
+`verify_stuck` defaults to `True`. Each BACK or ENTER target scenario is
+followed immediately by a centered POUND `stuck_probe`. A normal POUND journal
+event passes the probe. A BACK or ENTER journal event in the probe position is
+treated as a stuck-key failure. Missing target or probe evidence retries the
+entire target/probe group, using an independent retry budget for that offset
+scenario.
+
+`back_enter_offsets_mm` defaults to `[[0.0, 0.0]]`. It is ordered and preserves
+duplicates. Offsets apply only to BACK/ENTER targets; probes and all other keys
+remain centered. Each pair must satisfy `abs(x) < 12.75` and `abs(y) < 5.0`.
+
+Requested POUND counts and probe POUND evidence are reported separately.
+Progress counts the expanded logical plan, including probes and offset targets,
+while retry attempts are recorded separately and do not increase the total.
+
+Structured plan version 2 isolates every stuck-key group. After the POUND
+probe, the robot lifts to safe clearance and emits
+`awaiting_group_resolution`. It cannot begin another press until the station
+passes or retries that exact group attempt. Ordinary presses remain continuous.
+The existing 3.5 second journal buffer is the isolated settle window.
+
+The keypad page is also inspected for
+`Press [&#10006;] again to exit this test`. When present, the station sends one synthetic
+`meter.press("BACK")` for that observation. Synthetic `ALL_DEVICES` events are
+still excluded from physical matching.
+
 ## What This Test Proves
 
 The test passes only when it can prove that:
@@ -62,6 +94,7 @@ The high-level flow in `test_robot_keypad.py` is:
    - drain queued robot events into local attempt state
    - poll the meter journal incrementally
    - buffer and match eligible `KEY_PRESSED` lines to pending attempts
+   - resolve each target/probe barrier as `pass` or `retry` after its settle window
    - evaluate per-attempt timeouts and retries
    - start a short grace window on early `program_done`
    - fail on overall `max_duration_s`
@@ -167,11 +200,10 @@ Instead it:
    `KEY_PRESSED`
 4. queues a retry only if the meter still did not confirm that button press
 
-When a retry request is accepted, the original attempt is marked as replaced
-and removed from pending journal matching. The retry press must then arrive as a
-new robot `pressing` event, creating a new pending attempt. Future
-`KEY_PRESSED` journal lines for that button are matched to that replacement
-attempt, not to the original attempt that triggered the retry.
+For a gated verification group, the station resolves the active barrier as
+`retry`. The robot immediately repeats the original target and centered probe
+with a new group-attempt number. Evidence already assigned to the replaced
+attempt remains diagnostic history and cannot complete the retry.
 
 Retry replacement attempts follow the same normal matching rule as planned
 attempts: the robot must send its final `pressed=True` or `pressed=False` event,
@@ -180,10 +212,11 @@ attempt.
 
 ### Retry budget with repeated buttons
 
-`max_retries_per_button` is currently a shared retry budget per logical button
-name, not per planned press attempt. With `buttons=["1"]`, `job_count=10`, and
-`max_retries_per_button=1`, the test expects 10 meter-confirmed presses and can
-request at most one retry for button `1` across the whole run.
+`max_retries_per_group` applies independently to each job-count/offset group.
+Repeated BACK/ENTER offsets have distinct stable group IDs, so exhausting one
+offset's retries does not consume another offset's budget. The older
+`max_retries_per_button` kwarg remains a compatibility alias when the group
+setting is omitted.
 
 ### Robot sends `pressing` but never sends `pressed`
 
@@ -228,14 +261,14 @@ already completed its planned queue. It is not a replacement for retry handling.
 ### Failure and robot abort ownership
 
 `test_robot_keypad.py` marks the keypad result as failed, sets
-`shared.stop_event`, and raises `StopAutomation` when it cannot recover a keypad
-failure. It does not directly abort the robot job it started.
+`shared.stop_event`, raises `StopAutomation`, and directly sends `abort_program`
+to release a robot waiting at a group barrier. The physical-cycle wrapper keeps
+its existing best-effort abort as an idempotent fallback.
 
-Normal physical keypad runs are expected to execute through
-`physical_cycle_all.py`. That wrapper catches the failed subtest and sends the
-robot `abort_program` command. If `test_robot_keypad.py` is run directly outside
-that wrapper, the robot may continue its original `run_button_press` queue after
-the station-side test has failed unless the caller sends an abort command.
+If the station disconnects or never resolves a version-2 barrier, the robot
+times out, fails the job, and returns home without pressing another key. The
+timeout passed to the robot is
+`max(20, per_button_timeout_s + journal_after_buffer_s + 10)` seconds.
 
 ### Successful completion retry-window finish
 
@@ -263,7 +296,7 @@ The most important kwargs in `test_robot_keypad.py` are:
 
 - `per_button_timeout_s`
 - `journal_after_buffer_s`
-- `max_retries_per_button`
+- `max_retries_per_group` (`max_retries_per_button` remains an alias)
 - `retry_command_timeout_s`
 - `max_duration_s`
 - `robot_program_done_grace_s`
@@ -278,12 +311,12 @@ thread still polls the robot event queue separately every 0.05 seconds.
 If `max_duration_s` is explicitly passed, the test uses that value exactly. If
 it is omitted, the default is workload-aware:
 
-`50.0 + (6.0 * len(unique_buttons) * job_count)`
+The expanded plan and retry allowance are charged at six seconds per physical
+step. Each possible verification-group attempt also adds the configured journal
+settle window so station-gate time does not prematurely exhaust the run.
 
-The `6.0` second component is named `per_planned_press_timeout_s` in the code's
-default calculation. It covers the planned button presses only, not an expanded
-worst-case retry count. Retry behavior is still bounded by `max_retries_per_button`,
-`per_button_timeout_s`, `journal_after_buffer_s`, and the overall
+Retry behavior is bounded by `max_retries_per_group`, `per_button_timeout_s`,
+`journal_after_buffer_s`, the robot group-resolution timeout, and the overall
 `max_duration_s`.
 
 `debug_keypad` is the easiest bring-up switch.

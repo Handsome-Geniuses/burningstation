@@ -860,12 +860,28 @@ class SSHMeter(sshkit.Client):
         self,
         path: Sequence,
         *,
-        reset_to_service: bool = True,
+        reset_to_service: bool = False,
         fetch_timeout: float = 4.5,
         press_delay: float = 0.15,
         settle_delay: float = 0.4,
         page_timeout: float = 5.0,
+        goal_timeout: float = 8.0,
     ) -> DiagPageState:
+        """Navigate to a diagnostics breadcrumb using the live UI as feedback.
+
+        ``path`` omits the root ``Service`` title. Each entry may be a string,
+        a ``"name|alias"`` string, or an iterable of aliases. By default the
+        current diagnostics breadcrumb is reused; pass ``reset_to_service`` to
+        retain the old start-from-home behavior.
+
+        Navigation uses the title breadcrumb as feedback between actions. Menu
+        movement and known parent traversal are batched to avoid unnecessary
+        page-settle delays; after each batch the actual title and selection are
+        observed again so overlapping physical/robot input remains recoverable.
+        ``goal_timeout`` limits the whole operation. ``page_timeout`` limits how
+        long a menu that lacks the requested item is allowed to persist before
+        a diagnostics-home recovery is attempted.
+        """
         steps: List[set[str]] = []
         for step in path:
             aliases = self._diag_step_aliases(step)
@@ -875,34 +891,83 @@ class SSHMeter(sshkit.Client):
         if reset_to_service:
             self.force_diagnostics()
             time.sleep(settle_delay)
-        if not self.in_diagnostics():
+        elif not self.in_diagnostics():
             self.press('diagnostics')
             time.sleep(settle_delay)
 
-        state = self.get_diagnostics_state(timeout=fetch_timeout)
-        if not state["title_segments"]:
-            raise RuntimeError(
-                "Unable to parse the current diagnostics page title"
-                f"{self._diagnostics_debug_context(state)}"
-            )
+        deadline = time.monotonic() + goal_timeout
+        problem_started: Optional[float] = None
+        pending_open: Optional[Tuple[str, Optional[int], float]] = None
+        last_problem = ""
+        state: Optional[DiagPageState] = None
 
-        service_aliases = self._diag_step_aliases("service")
-        if reset_to_service and not self._diag_matches(service_aliases, state["title_segments"][-1]):
-            raise RuntimeError(
-                f"Expected diagnostics home page after reset, found '{state['title']}'"
-                f"{self._diagnostics_debug_context(state)}"
-            )
-
-        for target_aliases in steps:
-            state = self.get_diagnostics_state(timeout=fetch_timeout)
-            if state["title_segments"] and self._diag_matches(target_aliases, state["title_segments"][-1]):
+        while time.monotonic() < deadline:
+            try:
+                state = self.get_diagnostics_state(timeout=fetch_timeout)
+            except Exception as exc:
+                last_problem = f"Unable to read diagnostics page: {exc}"
+                time.sleep(settle_delay)
                 continue
 
-            if not state["is_menu"]:
-                raise RuntimeError(
-                    f"Cannot navigate from non-menu diagnostics page '{state['title']}'"
-                    f"{self._diagnostics_debug_context(state)}"
+            title_segments = state["title_segments"]
+            if not title_segments:
+                pending_open = None
+                last_problem = "Unable to parse the current diagnostics page title"
+                if not self.in_diagnostics():
+                    self.press("diagnostics", delay=press_delay)
+                else:
+                    self.press("cancel", delay=press_delay)
+                time.sleep(settle_delay)
+                continue
+
+            if pending_open is not None:
+                previous_title, previous_selected, retry_at = pending_open
+                if (
+                    state["title"] == previous_title
+                    and state["selected_index"] == previous_selected
+                    and time.monotonic() < retry_at
+                ):
+                    # Match the old page-open polling behavior: fetch once
+                    # immediately, then settle only while the page is unchanged.
+                    time.sleep(settle_delay)
+                    continue
+                pending_open = None
+
+            # The first segment is the diagnostics root (normally "Service").
+            current_path = title_segments[1:]
+            common_depth = 0
+            for aliases, segment in zip(steps, current_path):
+                if not self._diag_matches(aliases, segment):
+                    break
+                common_depth += 1
+
+            if common_depth == len(steps) and len(current_path) == len(steps):
+                return state
+
+            # If none of the current breadcrumb is useful, returning directly
+            # to diagnostics home is faster and less error-prone than walking
+            # every parent. Otherwise its depth tells us exactly how many
+            # CANCEL presses retain the matching prefix.
+            if common_depth < len(current_path):
+                if common_depth == 0:
+                    self.force_diagnostics()
+                else:
+                    for _ in range(len(current_path) - common_depth):
+                        self.press("cancel", delay=press_delay)
+                problem_started = None
+                time.sleep(settle_delay)
+                continue
+
+            target_aliases = steps[common_depth]
+            if not state["is_menu"] or state["selected_index"] is None:
+                last_problem = (
+                    f"Cannot select {sorted(target_aliases)} from non-menu "
+                    f"diagnostics page '{state['title']}'"
                 )
+                self.press("cancel", delay=press_delay)
+                problem_started = None
+                time.sleep(settle_delay)
+                continue
 
             matching_indexes = [
                 index for index, item in enumerate(state["menu_items"])
@@ -910,59 +975,53 @@ class SSHMeter(sshkit.Client):
             ]
             if not matching_indexes:
                 available = ", ".join(item["text"] for item in state["menu_items"])
-                raise RuntimeError(
-                    f"Unable to find diagnostics item matching {sorted(target_aliases)} on "
-                    f"'{state['title']}'. Available items: {available}"
-                    f"{self._diagnostics_debug_context(state)}"
+                last_problem = (
+                    f"Unable to find diagnostics item matching {sorted(target_aliases)} "
+                    f"on '{state['title']}'. Available items: {available}"
                 )
+                now = time.monotonic()
+                if problem_started is None:
+                    problem_started = now
+                elif now - problem_started >= page_timeout:
+                    self.force_diagnostics()
+                    problem_started = None
+                time.sleep(settle_delay)
+                continue
 
-            if state["selected_index"] is None:
-                raise RuntimeError(
-                    f"Unable to determine the selected diagnostics item on '{state['title']}'"
-                    f"{self._diagnostics_debug_context(state)}"
-                )
-
+            problem_started = None
+            selected_index = state["selected_index"]
             target_index = min(
                 matching_indexes,
                 key=lambda index: min(
-                    (index - state["selected_index"]) % len(state["menu_items"]),
-                    (state["selected_index"] - index) % len(state["menu_items"]),
+                    (index - selected_index) % len(state["menu_items"]),
+                    (selected_index - index) % len(state["menu_items"]),
                 ),
             )
-
             button, count = self._menu_move(
-                state["selected_index"],
+                selected_index,
                 target_index,
                 len(state["menu_items"]),
             )
-            for _ in range(count):
-                self.press(button, delay=press_delay)
+            if count:
+                for _ in range(count):
+                    self.press(button, delay=press_delay)
+                # press() already applies press_delay. Re-read immediately to
+                # verify the real selection before accepting it.
+                continue
 
-            previous_title = state["title"]
-            previous_selected = state["selected_index"]
             self.press("ok", delay=press_delay)
+            pending_open = (
+                state["title"],
+                state["selected_index"],
+                time.monotonic() + page_timeout,
+            )
 
-            deadline = time.time() + page_timeout
-            while True:
-                if time.time() > deadline:
-                    raise RuntimeError(
-                        f"Timed out opening diagnostics item matching {sorted(target_aliases)} "
-                        f"from '{previous_title}'"
-                        f"{self._diagnostics_debug_context(state)}"
-                    )
-
-                state = self.get_diagnostics_state(timeout=fetch_timeout)
-                title_changed = state["title"] != previous_title
-                selection_changed = state["selected_index"] != previous_selected
-
-                if state["title_segments"] and self._diag_matches(target_aliases, state["title_segments"][-1]):
-                    break
-                if title_changed or selection_changed:
-                    time.sleep(settle_delay)
-                else:
-                    time.sleep(settle_delay)
-
-        return self.get_diagnostics_state(timeout=fetch_timeout)
+        message = f"Timed out navigating to diagnostics path {list(path)!r}"
+        if last_problem:
+            message += f". Last problem: {last_problem}"
+        if state is not None:
+            message += self._diagnostics_debug_context(state)
+        raise RuntimeError(message)
 
 
     def press(self, button: str, value: Optional[str] = "1", delay: float = 0.1):
@@ -1444,7 +1503,6 @@ fclose($myfile);
         )
     
     def goto_keypad(self):
-        # TODO: Would be nice if it checks if its already through some of these pages (for keypad test if it has only just left the keypad diag page and is one click away from re-entering it)
         self.goto_diagnostics_path(
             ["Utilities", "Peripherals", ("Keyboard", "Keypad")]
         )

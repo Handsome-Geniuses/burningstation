@@ -1,4 +1,5 @@
 import { ChevronDownIcon } from "lucide-react"
+import { useEffect, useState } from "react"
 import {
     Accordion,
     AccordionContent,
@@ -232,6 +233,81 @@ export const IntegerRow = ({
                 >
                     +
                 </Button>
+            </div>
+        </div>
+    )
+}
+
+const validateSettingsArray = (fieldKey: string, parsed: unknown): string | null => {
+    if (!Array.isArray(parsed)) return "Value must be a JSON array."
+    if (fieldKey !== "back_enter_offsets_mm") return null
+    if (parsed.length === 0) return "Provide at least one [x, y] pair."
+    for (let index = 0; index < parsed.length; index += 1) {
+        const pair = parsed[index]
+        if (!Array.isArray(pair) || pair.length !== 2) {
+            return `Item ${index + 1} must contain exactly [x, y].`
+        }
+        const [x, y] = pair
+        if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) {
+            return `Item ${index + 1} must contain finite numbers.`
+        }
+        if (Math.abs(x) >= 12.75) return `Item ${index + 1}: abs(x) must be less than 12.75 mm.`
+        if (Math.abs(y) >= 5) return `Item ${index + 1}: abs(y) must be less than 5 mm.`
+    }
+    return null
+}
+
+export const ArrayRow = ({
+    fieldKey,
+    node,
+    value,
+    path,
+    disabled,
+    onChange,
+}: RowRendererProps) => {
+    const arrayValue = Array.isArray(value) ? value : (Array.isArray(node.default) ? node.default : [])
+    const serialized = JSON.stringify(arrayValue)
+    const [text, setText] = useState(serialized)
+    const [error, setError] = useState<string | null>(null)
+
+    useEffect(() => {
+        setText(serialized)
+        setError(null)
+    }, [serialized])
+
+    const update = (nextText: string) => {
+        setText(nextText)
+        try {
+            const parsed: unknown = JSON.parse(nextText)
+            const validationError = validateSettingsArray(fieldKey, parsed)
+            setError(validationError)
+            if (!validationError) onChange(path, parsed as SettingsValue[])
+        } catch {
+            setError("Enter valid JSON, for example [[-5,0],[0,0],[5,0]].")
+        }
+    }
+
+    return (
+        <div className={TABLE_ROW}>
+            <div className={TABLE_CELL}>
+                <div className="font-medium">{fieldKey}</div>
+            </div>
+            <div className={TABLE_TEXT_CELL}>
+                <div>{node.description ?? "Ordered JSON array setting."}</div>
+                <div className="flex flex-wrap gap-2">{renderBadge("array")}</div>
+            </div>
+            <div className={TABLE_CELL}>{renderBadge(JSON.stringify(node.default ?? []))}</div>
+            <div className={TABLE_CONTROL_CELL}>
+                <textarea
+                    disabled={disabled}
+                    value={text}
+                    rows={3}
+                    spellCheck={false}
+                    onChange={(event) => update(event.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
+                    aria-invalid={Boolean(error)}
+                />
+                {error && <div className="mt-1 text-xs text-destructive">{error}</div>}
             </div>
         </div>
     )

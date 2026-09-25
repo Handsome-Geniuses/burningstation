@@ -139,7 +139,11 @@ def physical_cycle_all(
     shared.device_results.update({name: "pending" for name, _, _ in PHYSICAL_DEVICES})
 
     robot = RobotClient()
-    charuco_frame = run_and_retrieve_charuco(robot, meter, shared, robot_ready_timeout)
+    charuco_frame = kwargs.get("charuco_frame")
+    if charuco_frame is None:
+        charuco_frame = run_and_retrieve_charuco(robot, meter, shared, robot_ready_timeout)
+    else:
+        shared.log("using supplied charuco_frame; skipping robot meter discovery")
     # charuco_frame = [-570.921, 143.128, 612.393, 90.673, -0.913, 87.678] #! for desk testing
 
     for cycle in range(burn_count):

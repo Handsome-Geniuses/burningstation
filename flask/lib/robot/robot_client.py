@@ -199,32 +199,54 @@ class RobotClient:
 
     def request_button_retry(
         self,
-        button_name: str,
+        button_name: str = "",
         *,
         job_id: Optional[str] = None,
         reason: str = "",
+        step_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        retry_scope: Optional[str] = None,
         timeout: float = 3.0,
     ):
-        params = {"button_name": button_name}
+        params = {}
+        if button_name:
+            params["button_name"] = button_name
         if job_id is not None:
             params["job_id"] = job_id
         if reason:
             params["reason"] = reason
+        if step_id:
+            params["step_id"] = step_id
+        if group_id:
+            params["group_id"] = group_id
+        if retry_scope:
+            params["retry_scope"] = retry_scope
         return self.send_command("request_button_retry", params=params, timeout=timeout)
 
     def cancel_button_retry(
         self,
-        button_name: str,
+        button_name: str = "",
         *,
         job_id: Optional[str] = None,
         reason: str = "",
+        step_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+        retry_scope: Optional[str] = None,
         timeout: float = 3.0,
     ):
-        params = {"button_name": button_name}
+        params = {}
+        if button_name:
+            params["button_name"] = button_name
         if job_id is not None:
             params["job_id"] = job_id
         if reason:
             params["reason"] = reason
+        if step_id:
+            params["step_id"] = step_id
+        if group_id:
+            params["group_id"] = group_id
+        if retry_scope:
+            params["retry_scope"] = retry_scope
         return self.send_command("cancel_button_retry", params=params, timeout=timeout)
 
     def finish_button_retries(
@@ -240,6 +262,26 @@ class RobotClient:
         if reason:
             params["reason"] = reason
         return self.send_command("finish_button_retries", params=params, timeout=timeout)
+
+    def resolve_button_group(
+        self,
+        *,
+        job_id: str,
+        group_id: str,
+        group_attempt: int,
+        resolution: str,
+        reason: str = "",
+        timeout: float = 3.0,
+    ):
+        params = {
+            "job_id": job_id,
+            "group_id": group_id,
+            "group_attempt": int(group_attempt),
+            "resolution": resolution,
+        }
+        if reason:
+            params["reason"] = reason
+        return self.send_command("resolve_button_group", params=params, timeout=timeout)
 
     def wait_for_event(self, event_name: str, job_id: Optional[str] = None, timeout: float = 30.0):
         """Wait up to `timeout` seconds for a specific event. Consumes the first match."""

@@ -73,6 +73,9 @@ def build_physical_kwargs(modules: dict, buttons=None):
         "robot_keypad": {
             "job_count": (j.robot_keypad if has_robot_keypad else 0),
             "buttons": buttons,
+            "verify_stuck": s.robot_keypad.verify_stuck,
+            "back_enter_offsets_mm": s.robot_keypad.back_enter_offsets_mm,
+            "max_retries_per_group": s.robot_keypad.max_retries_per_group,
         },
     }
 
