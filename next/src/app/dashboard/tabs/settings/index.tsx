@@ -19,6 +19,7 @@ import { useStoreContext } from "../../store"
 import { ClientSettingsSection } from "./client/ClientSettingsSection"
 import { useClientSettings } from "./client/store"
 import { broadcastServerSettingsChange } from "./server-store"
+import { VersionChecksSection } from "./_components/VersionChecksSection"
 
 export const SettingsTab = () => {
     const { systemState } = useStoreContext()
@@ -268,17 +269,21 @@ export const SettingsTab = () => {
                             )}
 
                             <Accordion type="multiple" className="flex flex-col gap-2 px-4">
-                                {topLevelEntries.map(([sectionKey, sectionNode]) => (
-                                    <SectionCard
-                                        key={sectionKey}
-                                        sectionKey={sectionKey}
-                                        node={sectionNode}
-                                        value={draft[sectionKey]}
-                                        rootSchema={schema}
-                                        disabled={saving || reloading}
-                                        onChange={onFieldChange}
-                                    />
-                                ))}
+                                {topLevelEntries.map(([sectionKey, sectionNode]) => {
+                                    const Section = sectionKey === "version_checks" ? VersionChecksSection : SectionCard
+
+                                    return (
+                                        <Section
+                                            key={sectionKey}
+                                            sectionKey={sectionKey}
+                                            node={sectionNode}
+                                            value={draft[sectionKey]}
+                                            rootSchema={schema}
+                                            disabled={saving || reloading}
+                                            onChange={onFieldChange}
+                                        />
+                                    )
+                                })}
                             </Accordion>
 
                             {topLevelEntries.length === 0 && (

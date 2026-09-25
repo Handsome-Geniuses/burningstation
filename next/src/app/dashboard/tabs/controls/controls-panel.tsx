@@ -15,7 +15,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { useServerSettings } from "../settings/server-store";
+import type { SettingsObject } from "../settings/_components/types";
 import { Input } from "@/components/ui/input";
 import { PromptNumpad } from "@/components/ui/prompt-numpad";
 
@@ -415,9 +415,15 @@ export function WorkOrder({
     )
 }
 
-export function ControlsPanel({ systemState, className }: { systemState: SystemState } & React.ComponentProps<"div">) {
+export function ControlsPanel({
+    systemState,
+    serverSettings,
+    className,
+}: {
+    systemState: SystemState
+    serverSettings: SettingsObject | null
+} & React.ComponentProps<"div">) {
     const isManual = systemState.mode == "manual"
-    const { values: serverSettings } = useServerSettings()
     const loadCheck = getBooleanOption(serverSettings, "flow", "load_check", true)
     const physicalCheck = getBooleanOption(serverSettings, "flow", "physical_check", true)
     const beltAvailable = hasHardwareCapability(systemState, "belt")

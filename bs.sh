@@ -126,6 +126,12 @@ follow_logs() {
     done
 }
 
+
+force_kill() {
+    fuser -k 8010/tcp
+    fuser -k 8011/tcp
+}
+
 run_local_dev_mode() {
     local mode="$1"
 
@@ -191,6 +197,9 @@ main() {
             ;;
         stop)
             stop_services "${1:-all}"
+            ;;
+        fkill)
+            force_kill
             ;;
         logs | log)
             follow_logs "${1:-all}"

@@ -12,6 +12,7 @@ export type SchemaNode = {
     default?: unknown
     properties?: Record<string, SchemaNode>
     items?: SchemaNode
+    module_aliases?: string[]
 }
 
 export type SettingsPayload = {

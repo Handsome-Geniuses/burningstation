@@ -1,3 +1,6 @@
+import * as React from "react"
+import { ArrowLeft, ListChecks } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -22,7 +25,9 @@ import {
 } from "@/lib/ep"
 
 import { MeterState, SystemState } from "../../store/system"
+import type { SchemaNode, SettingsObject } from "../settings/_components/types"
 import { OperatorKeypadPanel } from "./operator-keypad-panel"
+import { VersionChecksPanel } from "./version-checks-panel"
 
 const BAY_GUESS_LABELS: Record<string, string> = {
     "111000000000000": "__bay0",
@@ -51,13 +56,22 @@ type MeterDialogProps = {
     systemState: SystemState
     selectedMeter: MeterState | null
     onSelectedMeterChange: (meter: MeterState | null) => void
+    serverSettings: {
+        loaded: boolean
+        error: string | null
+        schema: SchemaNode | null
+        values: SettingsObject | null
+        reload: () => Promise<SettingsObject>
+    }
 }
 
 export const MeterDialog = ({
     systemState,
     selectedMeter,
     onSelectedMeterChange,
+    serverSettings,
 }: MeterDialogProps) => {
+    const [view, setView] = React.useState<"actions" | "version-checks">("actions")
     const meters = Object.values(systemState.meters)
     const meter = meters.find(m => m.ip === selectedMeter?.ip)
     const { run, running } = useAsyncAction()
@@ -71,10 +85,16 @@ export const MeterDialog = ({
     const keypadIncomplete = keypadState ? keypadState.total <= 0 || keypadState.current < keypadState.total : false
     const isOperatorCycleKeypadActive = Boolean(isOperatorRunning && keypadIncomplete)
     const showOperatorKeypad = Boolean(isOperatorKeypadRunning || isOperatorCycleKeypadActive)
+    const showVersionChecks = Boolean(meter && !showOperatorKeypad && view === "version-checks")
+
+    React.useEffect(() => {
+        setView("actions")
+    }, [meter?.ip])
 
     const handleDialogOpenChange = (open: boolean) => {
         if (open) return
         if (isBlinking) void meterStopBlink(meter?.ip)
+        setView("actions")
         onSelectedMeterChange(null)
     }
 
@@ -90,8 +110,14 @@ export const MeterDialog = ({
 
     return (
         <Dialog open={meter != undefined} onOpenChange={handleDialogOpenChange}>
-            {/* min-w-100 max-w-[min(96vw,76rem)]  */}
-            <DialogContent className="w-fit max-h-[92vh] w-100 overflow-y-auto m-0 p-0 space-y-0 space-x-0 [&>button]:hidden gap-0"> 
+            <DialogContent
+                className={cn(
+                    "max-h-[92vh] overflow-y-auto m-0 p-0 space-y-0 space-x-0 [&>button]:hidden gap-0",
+                    showVersionChecks
+                        ? "w-[min(48rem,calc(100vw-2rem))] max-w-none sm:max-w-none"
+                        : "w-100",
+                )}
+            >
                 <DialogHeader className="gap-0 border-b p-4">
                     <DialogTitle>{meter?.hostname ?? "Meter"}</DialogTitle>
                     <div className="text-muted-foreground text-sm">
@@ -100,7 +126,7 @@ export const MeterDialog = ({
                     </div>
                 </DialogHeader>
 
-                {!showOperatorKeypad &&
+                {!showOperatorKeypad && view === "actions" &&
                     <div className="p-4 grid grid-cols-3 gap-2">
                         {systemState.playground &&
                             <Button
@@ -140,8 +166,27 @@ export const MeterDialog = ({
                         >
                             Print Info
                         </Button>
+                        <Button
+                            variant="outline"
+                            className="gap-1 px-2 text-xs has-[>svg]:px-2"
+                            onClick={() => setView("version-checks")}
+                        >
+                            <ListChecks />
+                            Version Checks
+                        </Button>
                     </div>
                 }
+
+                {meter && showVersionChecks && (
+                    <VersionChecksPanel
+                        meter={meter}
+                        settings={serverSettings.values}
+                        schema={serverSettings.schema}
+                        settingsLoaded={serverSettings.loaded}
+                        settingsError={serverSettings.error}
+                        onReloadSettings={serverSettings.reload}
+                    />
+                )}
 
                 {meter && showOperatorKeypad &&
                     <OperatorKeypadPanel
@@ -152,43 +197,56 @@ export const MeterDialog = ({
                     />
                 }
 
-                <DialogFooter className="border-t p-4">
-                    {systemState.playground && isPassiveRunning &&
+                {showVersionChecks ? (
+                    <DialogFooter className="border-t p-4 sm:justify-start">
                         <Button
-                            variant="destructive"
-                            onClick={run(() => meterStopPassive(meter?.ip))}
-                            disabled={running}
+                            type="button"
+                            variant="outline"
+                            onClick={() => setView("actions")}
                         >
-                            passive
+                            <ArrowLeft />
+                            Back
                         </Button>
-                    }
-                    {systemState.playground && isPhysicalRunning &&
+                    </DialogFooter>
+                ) : (
+                    <DialogFooter className="border-t p-4">
+                        {systemState.playground && isPassiveRunning &&
+                            <Button
+                                variant="destructive"
+                                onClick={run(() => meterStopPassive(meter?.ip))}
+                                disabled={running}
+                            >
+                                passive
+                            </Button>
+                        }
+                        {systemState.playground && isPhysicalRunning &&
+                            <Button
+                                variant="destructive"
+                                onClick={run(() => meterStopPhysical(meter?.ip))}
+                                disabled={running}
+                            >
+                                physical
+                            </Button>
+                        }
+                        {(isOperatorRunning || isOperatorKeypadRunning) &&
+                            <Button
+                                variant="destructive"
+                                onClick={run(() => meterStopOperator(meter?.ip))}
+                                disabled={running}
+                            >
+                                {isOperatorKeypadRunning ? "stop test" : "stop operator"}
+                            </Button>
+                        }
                         <Button
-                            variant="destructive"
-                            onClick={run(() => meterStopPhysical(meter?.ip))}
-                            disabled={running}
+                            variant={isBlinking ? "destructive" : "outline"}
+                            className={cn("border border-border", isBlinking && "animate-pulse [animation-duration:0.5s]")}
+                            onClick={run(() => isBlinking ? meterStopBlink(meter?.ip) : meterRunBlinkUntil(meter?.ip, 60))}
+                            disabled={running || (!isMeterReady && !isBlinking)}
                         >
-                            physical
+                            Blink
                         </Button>
-                    }
-                    {(isOperatorRunning || isOperatorKeypadRunning) &&
-                        <Button
-                            variant="destructive"
-                            onClick={run(() => meterStopOperator(meter?.ip))}
-                            disabled={running}
-                        >
-                            {isOperatorKeypadRunning ? "stop test" : "stop operator"}
-                        </Button>
-                    }
-                    <Button
-                        variant={isBlinking ? "destructive" : "outline"}
-                        className={cn("border border-border", isBlinking && "animate-pulse [animation-duration:0.5s]")}
-                        onClick={run(() => isBlinking ? meterStopBlink(meter?.ip) : meterRunBlinkUntil(meter?.ip, 60))}
-                        disabled={running || (!isMeterReady && !isBlinking)}
-                    >
-                        Blink
-                    </Button>
-                </DialogFooter>
+                    </DialogFooter>
+                )}
             </DialogContent>
         </Dialog>
     )

@@ -10,12 +10,14 @@ import React from "react"
 import { MeterDialog } from "./meter-dialog"
 import { MeterManager } from "./meter-manager"
 import { StationVisualizer } from "./station-visualizer"
+import { useServerSettings } from "../settings/server-store"
 
 const STORAGE_KEY = "bs-controls-accordion-open-items"
 export const ControlsTab = () => {
     const { systemState } = useStoreContext()
     const [openItems, setOpenItems] = React.useState<string[]>(["belt", "meter"]);
     const [selectedMeter, setSelectedMeter] = React.useState<MeterState | null>(null)
+    const serverSettings = useServerSettings()
     const beltAvailable = hasHardwareCapability(systemState, "belt")
 
     React.useEffect(() => {
@@ -49,9 +51,10 @@ export const ControlsTab = () => {
                     systemState={systemState}
                     selectedMeter={selectedMeter}
                     onSelectedMeterChange={setSelectedMeter}
+                    serverSettings={serverSettings}
                 />
             </div>
-            <ControlsPanel systemState={systemState} />
+            <ControlsPanel systemState={systemState} serverSettings={serverSettings.values} />
         </div>
     )
 }

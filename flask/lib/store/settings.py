@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 import math
 
 from pydantic import BaseModel, Field, field_validator
@@ -117,26 +117,96 @@ class OperatorSettings(BaseModel):
 # ==================================================================
 # Version Checker Settings
 # ==================================================================
+MAX_SAFE_INTEGER = 9_007_199_254_740_991
+ComparisonOperator = Literal["eq", "gt", "gte", "lt", "lte"]
+
+
+class VersionConstraint(BaseModel):
+    value: int = Field(0, ge=0, le=MAX_SAFE_INTEGER, strict=True)
+    operator: ComparisonOperator | None = None
+
+
+class FirmwareVersionCheck(BaseModel):
+    version: VersionConstraint = Field(default_factory=VersionConstraint)
+    mod: VersionConstraint = Field(default_factory=VersionConstraint)
+
+
+def version_check_field(
+    description: str,
+    *,
+    module_aliases: tuple[str, ...] = (),
+):
+    return Field(
+        default_factory=FirmwareVersionCheck,
+        description=description,
+        json_schema_extra={"module_aliases": list(module_aliases)},
+    )
+
+
 class VersionChecks(BaseModel):
-    ms3_via: int = Field(0, description="MS3 VIA System Version")
-    sys_sub: int = Field(0, description="System Sub Version")
-    mspm_pwr: int = Field(0, description="MSPM PWR")
-    xe910: int = Field(0, description="XE910 Bus Modem")
-    bg95: int = Field(0, description="BG 95")
-    bg91_uk: int = Field(0, description="BG 91 (UK)")
-    keypad: int = Field(0, description="1x6/1x7 Keypad/KBD_Controller")
-    coin_us: int = Field(0, description="Coin Shutter (US)")
-    coin_uk: int = Field(0, description="Coin Shutter (UK)")
-    keypad2: int = Field(0, description="KEYPAD 2 (ALPHA)")
-    emvr: int = Field(0, description="EMV Contact Reader")
-    rfid: int = Field(0, description="RFID")
-    m7_validator: int = Field(0, description="M7 Validator (MS3)")
-    reject_validator: int = Field(0, description="Reject Validator (MS3)")
-    printer: int = Field(0, description="Printer")
-    contactless: int = Field(0, description="Contactless Reader (iDtech) Kiosk V")
-    nfc_neo: int = Field(0, description="Kiosk V NFC (NEO)")
-    coin_escrow: int = Field(0, description="Coin Escrow")
-    bna_bus_mei: int = Field(0, description="BNA Bus MEI")
+    ms3_via: FirmwareVersionCheck = version_check_field(
+        "MS3 VIA System Version",
+        module_aliases=("system_version",),
+    )
+    sys_sub: FirmwareVersionCheck = version_check_field(
+        "System Sub Version",
+        module_aliases=("system_sub_version",),
+    )
+    mspm_pwr: FirmwareVersionCheck = version_check_field("MSPM PWR")
+    xe910: FirmwareVersionCheck = version_check_field(
+        "XE910 Bus Modem",
+        module_aliases=("MK7_XE910",),
+    )
+    bg95: FirmwareVersionCheck = version_check_field("BG 95")
+    bg91_uk: FirmwareVersionCheck = version_check_field("BG 91 (UK)")
+    keypad: FirmwareVersionCheck = version_check_field(
+        "1x6/1x7 Keypad/KBD_Controller",
+        module_aliases=("KBD_CONTROLLER",),
+    )
+    coin_us: FirmwareVersionCheck = version_check_field(
+        "Coin Shutter (US)",
+        module_aliases=("COIN_SHUTTER",),
+    )
+    coin_uk: FirmwareVersionCheck = version_check_field(
+        "Coin Shutter (UK)",
+        module_aliases=("COIN_SHUTTER",),
+    )
+    keypad2: FirmwareVersionCheck = version_check_field(
+        "KEYPAD 2 (ALPHA)",
+        module_aliases=("KEY_PAD_2",),
+    )
+    emvr: FirmwareVersionCheck = version_check_field(
+        "EMV Contact Reader",
+        module_aliases=("EMV_CONTACT",),
+    )
+    rfid: FirmwareVersionCheck = version_check_field(
+        "RFID",
+        module_aliases=("MK7_RFID",),
+    )
+    m7_validator: FirmwareVersionCheck = version_check_field(
+        "M7 Validator (MS3)",
+        module_aliases=("MK7_VALIDATOR",),
+    )
+    reject_validator: FirmwareVersionCheck = version_check_field(
+        "Reject Validator (MS3)"
+    )
+    printer: FirmwareVersionCheck = version_check_field("Printer")
+    contactless: FirmwareVersionCheck = version_check_field(
+        "Contactless Reader (iDtech) Kiosk V",
+        module_aliases=("KIOSK_NFC",),
+    )
+    nfc_neo: FirmwareVersionCheck = version_check_field(
+        "Kiosk V NFC (NEO)",
+        module_aliases=("KIOSK_NEO",),
+    )
+    coin_escrow: FirmwareVersionCheck = version_check_field(
+        "Coin Escrow",
+        module_aliases=("ESCROW_28",),
+    )
+    bna_bus_mei: FirmwareVersionCheck = version_check_field(
+        "BNA Bus MEI",
+        module_aliases=("BNA",),
+    )
 
 
 # ==================================================================
@@ -246,4 +316,8 @@ class Settings(BaseModel):
     operator: OperatorSettings = Field(
         default_factory=OperatorSettings,
         description="parameters for operator-assisted testing",
+    )
+    version_checks: VersionChecks = Field(
+        default_factory=VersionChecks,
+        description="firmware version and MOD requirements",
     )
