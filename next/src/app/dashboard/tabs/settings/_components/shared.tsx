@@ -351,6 +351,124 @@ export const BackEnterOffsetsRow = ({
     )
 }
 
+const OPERATOR_COIN_PRESETS = [
+    { key: "us_penny", group: "US coins", label: "Penny", currency: "USD", value: "1¢", defaultQuantity: 5 },
+    { key: "us_nickel", group: "US coins", label: "Nickel", currency: "USD", value: "5¢", defaultQuantity: 5 },
+    { key: "us_dime", group: "US coins", label: "Dime", currency: "USD", value: "10¢", defaultQuantity: 5 },
+    { key: "us_quarter", group: "US coins", label: "Quarter", currency: "USD", value: "25¢", defaultQuantity: 5 },
+    { key: "us_dollar_coin", group: "US coins", label: "Dollar coin", currency: "USD", value: "$1", defaultQuantity: 5 },
+    { key: "uk_1p", group: "UK coins", label: "1p", currency: "GBP", value: "1p", defaultQuantity: 0 },
+    { key: "uk_2p", group: "UK coins", label: "2p", currency: "GBP", value: "2p", defaultQuantity: 0 },
+    { key: "uk_5p", group: "UK coins", label: "5p", currency: "GBP", value: "5p", defaultQuantity: 0 },
+    { key: "uk_10p", group: "UK coins", label: "10p", currency: "GBP", value: "10p", defaultQuantity: 0 },
+    { key: "uk_20p", group: "UK coins", label: "20p", currency: "GBP", value: "20p", defaultQuantity: 0 },
+    { key: "uk_50p", group: "UK coins", label: "50p", currency: "GBP", value: "50p", defaultQuantity: 0 },
+    { key: "uk_1_pound", group: "UK coins", label: "£1", currency: "GBP", value: "£1", defaultQuantity: 0 },
+    { key: "uk_2_pounds", group: "UK coins", label: "£2", currency: "GBP", value: "£2", defaultQuantity: 0 },
+] as const
+
+type OperatorCoinKey = (typeof OPERATOR_COIN_PRESETS)[number]["key"]
+
+const OPERATOR_COIN_GROUPS = ["US coins", "UK coins"] as const
+
+const asSettingsObject = (value: SettingsValue | undefined): SettingsObject => (
+    value && typeof value === "object" && !Array.isArray(value)
+        ? value as SettingsObject
+        : {}
+)
+
+export const CoinRequirementsRow = ({
+    fieldKey,
+    node,
+    value,
+    path,
+    disabled,
+    onChange,
+}: RowRendererProps) => {
+    const quantities = asSettingsObject(value)
+    const quantityFor = (key: OperatorCoinKey, fallback: number) => {
+        const quantity = quantities[key]
+        return typeof quantity === "number" ? Math.min(10, Math.max(0, quantity)) : fallback
+    }
+    const selectedQuantity = OPERATOR_COIN_PRESETS.reduce(
+        (total, { key, defaultQuantity }) => total + quantityFor(key, defaultQuantity),
+        0,
+    )
+
+    const setQuantity = (key: OperatorCoinKey, nextQuantity: number) => {
+        onChange(path, {
+            ...quantities,
+            [key]: Math.min(10, Math.max(0, nextQuantity)),
+        })
+    }
+
+    return (
+        <div className={TABLE_ROW}>
+            <div className={TABLE_CELL}>
+                <div className="font-medium">{fieldKey}</div>
+            </div>
+            <div className={TABLE_TEXT_CELL}>
+                <div>{node.description ?? "Choose the quantity required for each coin denomination."}</div>
+                <div className="flex flex-wrap gap-2">
+                    {renderBadge("quantity 0–10")}
+                    {renderBadge("region-aware")}
+                </div>
+            </div>
+            <div className={TABLE_CELL}>{renderBadge("US: 5 each · UK: 0")}</div>
+            <div className={TABLE_CONTROL_CELL}>
+                <Accordion type="single" collapsible>
+                    <AccordionItem value={path.join(".")} className="rounded-lg border border-border px-3">
+                        <AccordionTrigger className="py-3 text-sm hover:no-underline">
+                            Configure quantities ({selectedQuantity} coin{selectedQuantity === 1 ? "" : "s"})
+                        </AccordionTrigger>
+                        <AccordionContent className="space-y-4 pb-3">
+                            {OPERATOR_COIN_GROUPS.map((group) => (
+                                <div key={group} className="space-y-2">
+                                    <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                                        {group}
+                                    </div>
+                                    {OPERATOR_COIN_PRESETS.filter((coin) => coin.group === group).map((coin) => {
+                                        const quantity = quantityFor(coin.key, coin.defaultQuantity)
+                                        return (
+                                            <div key={coin.key} className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5">
+                                                <div className="min-w-0 flex-1 text-sm">
+                                                    <div className="font-medium">{coin.label}</div>
+                                                    <div className="text-xs text-muted-foreground">{coin.currency} · {coin.value}</div>
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    disabled={disabled || quantity === 0}
+                                                    className="h-9 w-9 shrink-0 rounded-lg text-lg"
+                                                    onClick={() => setQuantity(coin.key, quantity - 1)}
+                                                >
+                                                    -
+                                                </Button>
+                                                <span className="w-7 text-center font-mono text-base" aria-label={`${coin.label} quantity`}>
+                                                    {quantity}
+                                                </span>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    disabled={disabled || quantity === 10}
+                                                    className="h-9 w-9 shrink-0 rounded-lg text-lg"
+                                                    onClick={() => setQuantity(coin.key, quantity + 1)}
+                                                >
+                                                    +
+                                                </Button>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            ))}
+                        </AccordionContent>
+                    </AccordionItem>
+                </Accordion>
+            </div>
+        </div>
+    )
+}
+
 export const ArrayRow = ({
     fieldKey,
     node,

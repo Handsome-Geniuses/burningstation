@@ -19,17 +19,17 @@ OPERATOR_TESTS = [
         "coins",
         test_operator_coins,
         {
-            "max_duration_s": 60.0,
+            "max_duration_s": 180.0,
             "allow_rejected": True,
         },
     ),
     ("touchscreen", test_operator_touchscreen, {"max_duration_s": 60.0}),
     ("display_brightness", test_operator_display_brightness, {"max_duration_s": 60.0}),
-    ("keypad", test_operator_keypad, {}),
+    ("keypad", test_operator_keypad, {"max_duration_s": 200.0}),
     (
         "contactless",
         test_operator_nfc_tap,
-        {"max_duration_s": 60.0, "poll_s": 0.75},
+        {"max_duration_s": 90.0, "poll_s": 0.75},
     ),
     (
         "card_reader",

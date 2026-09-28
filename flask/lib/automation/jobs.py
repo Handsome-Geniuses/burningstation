@@ -396,7 +396,11 @@ def start_operator_job(meter_ip):
     meter.set_ui_mode("banner")
     meter.setup_custom_display()
 
-    kwargs = build_operator_kwargs(modules, buttons=buttons)
+    kwargs = build_operator_kwargs(
+        modules,
+        buttons=buttons,
+        meter_region=getattr(meter, "meter_region", None),
+    )
     return start_job(meter_ip, "operator_cycle_all", kwargs, verbose=True)
 
 

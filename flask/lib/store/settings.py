@@ -108,10 +108,121 @@ class OperatorJobs(BaseModel):
     card_reader: int = Field(1, ge=0, le=10)
 
 
+class OperatorTouchscreenSettings(BaseModel):
+    expected_touch_count: int = Field(
+        5,
+        ge=1,
+        le=20,
+        description=(
+            "Number of touchscreen presses the operator must make; each press "
+            "records its logical and physical coordinates."
+        ),
+    )
+    max_duration_s: int = Field(
+        60,
+        ge=10,
+        le=600,
+        description="Maximum time allowed to collect all required touchscreen presses.",
+    )
+
+
+class OperatorKeypadSettings(BaseModel):
+    max_duration_s: int = Field(
+        200,
+        ge=30,
+        le=600,
+        description="Maximum time allowed for the operator to complete all keypad presses.",
+    )
+
+
+class OperatorContactlessSettings(BaseModel):
+    max_duration_s: int = Field(
+        90,
+        ge=30,
+        le=600,
+        description="Maximum time allowed to collect all required successful contactless card taps.",
+    )
+
+
+class OperatorCardReaderSettings(BaseModel):
+    require_card_accepted: bool = Field(
+        False,
+        description=(
+            "Require isCardAccepted=true in addition to a valid magnetic read. "
+            "Leave off to test the reader independently of the active card-acceptance configuration."
+        ),
+    )
+    max_duration_s: int = Field(
+        90,
+        ge=30,
+        le=600,
+        description="Maximum time allowed to collect all required successful card reads.",
+    )
+
+
+class OperatorCoinRequirements(BaseModel):
+    us_penny: int = Field(5, ge=0, le=10)
+    us_nickel: int = Field(5, ge=0, le=10)
+    us_dime: int = Field(5, ge=0, le=10)
+    us_quarter: int = Field(5, ge=0, le=10)
+    us_dollar_coin: int = Field(5, ge=0, le=10)
+    uk_1p: int = Field(0, ge=0, le=10)
+    uk_2p: int = Field(0, ge=0, le=10)
+    uk_5p: int = Field(0, ge=0, le=10)
+    uk_10p: int = Field(0, ge=0, le=10)
+    uk_20p: int = Field(0, ge=0, le=10)
+    uk_50p: int = Field(0, ge=0, le=10)
+    uk_1_pound: int = Field(0, ge=0, le=10)
+    uk_2_pounds: int = Field(0, ge=0, le=10)
+
+
+class OperatorCoinsSettings(BaseModel):
+    allow_rejected: bool = Field(
+        True,
+        description=(
+            "Allow a matching coin reported as rejected to count toward its quantity. "
+            "This supports validators that correctly identify a coin before rejecting it."
+        ),
+    )
+    max_duration_s: int = Field(
+        180,
+        ge=30,
+        le=900,
+        description="Maximum time allowed to meet all selected coin quantities.",
+    )
+    coin_requirements: OperatorCoinRequirements = Field(
+        default_factory=OperatorCoinRequirements,
+        description=(
+            "Required quantity for each denomination. Only positive quantities for the meter's "
+            "region are sent to the coin test."
+        ),
+    )
+
+
 class OperatorSettings(BaseModel):
     cycles: int = Field(1, ge=1, le=10, description="number of full test runs")
-    test_delay: int = Field(1, ge=0, le=60, description="delay(s) between test runs")
+    test_delay: int = Field(5, ge=0, le=60, description="delay(s) between test runs")
     job_counts: OperatorJobs = Field(default_factory=OperatorJobs)
+    touchscreen: OperatorTouchscreenSettings = Field(
+        default_factory=OperatorTouchscreenSettings,
+        description="Operator touchscreen test options",
+    )
+    keypad: OperatorKeypadSettings = Field(
+        default_factory=OperatorKeypadSettings,
+        description="Operator keypad test options",
+    )
+    contactless: OperatorContactlessSettings = Field(
+        default_factory=OperatorContactlessSettings,
+        description="Operator contactless-card test options",
+    )
+    card_reader: OperatorCardReaderSettings = Field(
+        default_factory=OperatorCardReaderSettings,
+        description="Operator card-reader test options",
+    )
+    coins: OperatorCoinsSettings = Field(
+        default_factory=OperatorCoinsSettings,
+        description="Operator coin-validator test options",
+    )
 
 
 # ==================================================================
