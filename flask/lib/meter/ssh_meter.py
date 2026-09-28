@@ -1818,22 +1818,40 @@ fclose($myfile);
             self.status = "ready"
 
     def update_display_results(self, shared: SharedState) -> None:
-        """Update the meter's _display_results dict based on the completed job in SharedState."""
-        # TODO: Support operator cycle results
+        """Update the meter display payload for a completed supported cycle."""
         program_name = shared.current_program
-        if program_name not in ["cycle_all", "physical_cycle_all"]:
+        if program_name not in ["cycle_all", "physical_cycle_all", "operator_cycle_all"]:
             shared.log(f"unable to update display results for program_name = '{program_name}'", console=True)
+            return
+
+        meter_info = {
+            "IP": self.host,
+            "Hostname": self.hostname,
+            "Meter Type": self.meter_type,
+            "Meter Region": self.meter_region or "N/A",
+        }
+        dev_res = {k: str(v).lower() for k, v in shared.device_results.items()}
+        other_info = {k: str(v) for k, v in shared.device_meta.items()}
+        other_info["Error"] = shared.last_error or "None"
+
+        if program_name == "operator_cycle_all":
+            operator_results = {
+                "overall_result": "FAIL" if any(v == "fail" for v in dev_res.values()) else "PASS",
+                "meter_info": meter_info,
+                "operator": {
+                    "device_results": dev_res,
+                    "other_info": other_info,
+                },
+            }
+            write_results_json(self, operator_results)
+            self.set_ui_mode("results")
             return
 
         # Initialize _display_results if it doesn't exist yet
         if not hasattr(self, "_display_results") or self._display_results is None:
             self._display_results = {
                 "overall_result": "N/A",
-                "meter_info": {
-                    "IP": self.host,
-                    "Hostname": self.hostname,
-                    "Meter Type": self.meter_type
-                },
+                "meter_info": meter_info,
                 "passive": {
                     "device_results": {},
                     "other_info": {}
@@ -1843,16 +1861,13 @@ fclose($myfile);
                     "other_info": {}
                 }
             }
+        else:
+            self._display_results["meter_info"] = meter_info
 
         section = "passive" if program_name == "cycle_all" else "physical"
 
-        # device_results
-        dev_res = {k: str(v).lower() for k, v in shared.device_results.items()}
         self._display_results[section]["device_results"] = dev_res
 
-        # other_info
-        other_info = {k: str(v) for k, v in shared.device_meta.items()}
-        other_info["Error"] = shared.last_error or "None"
         self._display_results[section]["other_info"] = other_info
 
         # compute overall_result: FAIL if any device result is "fail" (across both sections)
