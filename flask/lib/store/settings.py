@@ -35,8 +35,8 @@ class PassiveSettings(BaseModel):
 # ==================================================================
 class PhyiscalJobs(BaseModel):
     solar: int = Field(1, ge=0, le=10)
-    display_brightness: int = Field(1, ge=0, le=10)
-    coin_shutter: int = Field(1, ge=0, le=10)
+    display_brightness: int = Field(0, ge=0, le=10)
+    coin_shutter: int = Field(0, ge=0, le=10)
     nfc_gui: int = Field(1, ge=0, le=10)
     robot_keypad: int = Field(1, ge=0, le=10)
 
