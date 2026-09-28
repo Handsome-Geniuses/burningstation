@@ -54,7 +54,7 @@ class PhysicalRobotKeypadSettings(BaseModel):
         ),
     )
     max_retries_per_group: int = Field(
-        1,
+        2,
         ge=0,
         le=10,
         description="Retry budget for each job-count/offset keypad scenario",

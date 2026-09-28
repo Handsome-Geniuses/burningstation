@@ -3,6 +3,7 @@
 import React from "react"
 import {
     ArrayRow,
+    BackEnterOffsetsRow,
     BooleanRow,
     IntegerRow,
     ObjectRow,
@@ -83,6 +84,20 @@ export const SettingsTable = ({
                     }
 
                     if (node.type === "array") {
+                        if (fieldKey === "back_enter_offsets_mm") {
+                            return (
+                                <BackEnterOffsetsRow
+                                    key={nextPath.join(".")}
+                                    fieldKey={fieldKey}
+                                    node={node}
+                                    value={value}
+                                    path={nextPath}
+                                    disabled={disabled}
+                                    onChange={onChange}
+                                />
+                            )
+                        }
+
                         return (
                             <ArrayRow
                                 key={nextPath.join(".")}
