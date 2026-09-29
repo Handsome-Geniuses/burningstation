@@ -682,7 +682,11 @@ class SSHMeter(sshkit.Client):
         return False
 
     def in_diagnostics(self):
-        """Returns True if the meter is in diagnostics mode, False otherwise."""
+        """Return whether the latest UIPage HTML indicates Diagnostics mode.
+
+        The meter updates UIPage asynchronously, so a read immediately after a
+        button press may still describe the previous screen.
+        """
         try:
             page_text = self._get_uipage_html(timeout=5).lower()
             for diag_key in ["diagtitle", "diagcontent", "diaginfo"]:
@@ -693,13 +697,19 @@ class SSHMeter(sshkit.Client):
             print(f"[in_diagnostics] Error fetching http://{self.host}:8005/UIPage.php: {e}")
             return False
 
-    def force_diagnostics(self):
+    def force_diagnostics(self, settle_delay=0.4):
+        """Return to Diagnostics and allow its asynchronous UI transition to settle.
+
+        Set ``settle_delay`` to zero only when the caller provides its own wait
+        or feedback loop before relying on the updated UIPage HTML.
+        """
         if self.in_diagnostics():
             self.press('diagnostics')
             time.sleep(0.1)
             self.press('diagnostics')
         else:
             self.press('diagnostics')
+        time.sleep(settle_delay)
 
     def _get_uipage_html(self, timeout: float = 5.0) -> str:
         url = f"http://{self.host}:8005/UIPage.php"
@@ -889,7 +899,7 @@ class SSHMeter(sshkit.Client):
                 steps.append(aliases)
 
         if reset_to_service:
-            self.force_diagnostics()
+            self.force_diagnostics(settle_delay=0)
             time.sleep(settle_delay)
         elif not self.in_diagnostics():
             self.press('diagnostics')
@@ -950,7 +960,7 @@ class SSHMeter(sshkit.Client):
             # CANCEL presses retain the matching prefix.
             if common_depth < len(current_path):
                 if common_depth == 0:
-                    self.force_diagnostics()
+                    self.force_diagnostics(settle_delay=0)
                 else:
                     for _ in range(len(current_path) - common_depth):
                         self.press("cancel", delay=press_delay)
@@ -983,7 +993,7 @@ class SSHMeter(sshkit.Client):
                 if problem_started is None:
                     problem_started = now
                 elif now - problem_started >= page_timeout:
-                    self.force_diagnostics()
+                    self.force_diagnostics(settle_delay=0)
                     problem_started = None
                 time.sleep(settle_delay)
                 continue
@@ -1028,6 +1038,8 @@ class SSHMeter(sshkit.Client):
         """
         Sends a button press using user-friendly string. 
         ** UK meters need a persistent connection for comamnds to work quickly. Otherwise you will see very slow button presses, etc.
+        ``delay`` is a fixed wait after sending the command; it does not verify
+        that the meter has finished rendering the resulting UI page.
         Examples:
             press('plus'), press('cancel'), press('1'), press('A'), press('Enter')
         """

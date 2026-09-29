@@ -142,4 +142,4 @@ def operator_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
             time.sleep(cycle_delay)
 
     if not meter.in_diagnostics():
-        meter.press("diagnostics")
+        meter.press("diagnostics", delay=0.4)

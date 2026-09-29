@@ -129,7 +129,6 @@ class METERMANAGER:
                 # here, has booted + X seconds or was booted already
                 print(f"[{hn}-{ip}] Attempting to enter diagnostics ...", fg="#888800")
                 meter.force_diagnostics()
-                time.sleep(0.1)
                 if not meter.in_diagnostics():
                     raise Exception
 

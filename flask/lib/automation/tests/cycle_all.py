@@ -141,4 +141,4 @@ def test_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
 
     time.sleep(0.5)
     if not meter.in_diagnostics():
-        meter.press("diagnostics")
+        meter.press("diagnostics", delay=0.4)
