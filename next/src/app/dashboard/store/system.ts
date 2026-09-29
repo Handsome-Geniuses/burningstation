@@ -29,6 +29,19 @@ export type OperatorKeypadState = {
     total: number
 }
 
+export type OperatorFeedbackState = {
+    ip: string
+    test: string
+    title: string
+    instruction: string
+    status: string
+    current: number
+    total: number
+    details: Record<string, unknown>
+    active: boolean
+    error: string
+}
+
 type BayGuess = [
     string | null,
     string | null,
@@ -108,6 +121,9 @@ export interface SystemState {
     // operator keypad progress by meter IP
     operatorKeypad: Record<string, OperatorKeypadState>
 
+    // Live, test-specific operator guidance by meter IP.
+    operatorFeedback: Record<string, OperatorFeedbackState>
+
     // current tab
     currentTab: string | undefined
 
@@ -151,6 +167,7 @@ export const initialSystemState: SystemState = {
     connected: false,
     meters: {},
     operatorKeypad: {},
+    operatorFeedback: {},
     currentTab: undefined,
     workOrder: null,
     running: false,
@@ -172,6 +189,7 @@ export type Action =
     | { type: 'meter:status'; ip: string; status: string; msg?: string; current_action?: string }
     | { type: 'meter:progress'; ip: string; current: number; total: number }
     | { type: 'operator-keypad'; state: OperatorKeypadState }
+    | { type: 'operator-feedback'; state: OperatorFeedbackState }
     | { type: 'meters:clear' }
 
 export const BAY_GUESS_BAY_STARTS = [2, 6, 10] as const
@@ -184,20 +202,25 @@ export function reducer(state: SystemState, action: Action): SystemState {
             if (!action.alive) {
                 const nextMeters = { ...state.meters }
                 const nextOperatorKeypad = { ...state.operatorKeypad }
+                const nextOperatorFeedback = { ...state.operatorFeedback }
                 delete nextMeters[action.ip]
                 delete nextOperatorKeypad[action.ip]
-                return { ...state, meters: nextMeters, operatorKeypad: nextOperatorKeypad }
+                delete nextOperatorFeedback[action.ip]
+                return { ...state, meters: nextMeters, operatorKeypad: nextOperatorKeypad, operatorFeedback: nextOperatorFeedback }
             }
 
             if (!action.info) return state
             const nextOperatorKeypad = { ...state.operatorKeypad }
+            const nextOperatorFeedback = { ...state.operatorFeedback }
             if (action.info.status === "ready") {
                 delete nextOperatorKeypad[action.ip]
+                delete nextOperatorFeedback[action.ip]
             }
 
             return {
                 ...state,
                 operatorKeypad: nextOperatorKeypad,
+                operatorFeedback: nextOperatorFeedback,
                 meters: {
                     ...state.meters,
                     [action.ip]: {
@@ -210,19 +233,22 @@ export function reducer(state: SystemState, action: Action): SystemState {
             }
         }
         case 'meters:clear':
-            return { ...state, meters: {}, operatorKeypad: {} }
+            return { ...state, meters: {}, operatorKeypad: {}, operatorFeedback: {} }
 
         case 'meter:status': {
             const meter = state.meters[action.ip]
             if (!meter) return state
             const nextOperatorKeypad = { ...state.operatorKeypad }
+            const nextOperatorFeedback = { ...state.operatorFeedback }
             if (action.status === "ready") {
                 delete nextOperatorKeypad[action.ip]
+                delete nextOperatorFeedback[action.ip]
             }
 
             return {
                 ...state,
                 operatorKeypad: nextOperatorKeypad,
+                operatorFeedback: nextOperatorFeedback,
                 meters: {
                     ...state.meters,
                     [action.ip]: {
@@ -259,6 +285,14 @@ export function reducer(state: SystemState, action: Action): SystemState {
                 ...state,
                 operatorKeypad: {
                     ...state.operatorKeypad,
+                    [action.state.ip]: action.state,
+                },
+            }
+        case 'operator-feedback':
+            return {
+                ...state,
+                operatorFeedback: {
+                    ...state.operatorFeedback,
                     [action.state.ip]: action.state,
                 },
             }

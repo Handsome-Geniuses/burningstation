@@ -44,6 +44,11 @@ def initial_payloads():
                     "operator_keypad",
                     job_state["operator_keypad"],
                 ))
+            if job_state.get("operator_feedback"):
+                yield dump_sse_payload(sse_payload(
+                    "operator_feedback",
+                    job_state["operator_feedback"],
+                ))
         except Exception:
             pass
 

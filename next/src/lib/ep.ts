@@ -39,6 +39,20 @@ export const meterStopOperator = async (meterIp?: string) => meterRunProg(meterI
 export const meterRunPrintFw = async (meterIp?: string) => await meterRunNeutralProg(meterIp, "printfw")
 export const meterRunDummy = async (meterIp?: string) => meterRunNeutralProg(meterIp, "dummy")
 
+export const submitOperatorFeedbackResponse = async (
+    meterIp: string,
+    test: string,
+    value: boolean,
+) => {
+    const res = await flask.post("/operator/response", {
+        body: JSON.stringify({ meter_ip: meterIp, test, value }),
+    })
+    if (!res.ok) {
+        const message = await res.text().catch(() => "")
+        throw new Error(message || "Unable to submit operator response")
+    }
+}
+
 export const meterMockOperatorKeypadPress = async (meterIp?: string, button?: string) => {
     if (!meterIp || !button) return
 

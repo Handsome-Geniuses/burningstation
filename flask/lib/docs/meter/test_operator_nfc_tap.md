@@ -115,3 +115,10 @@ stored in shared metadata.
 5. Repeat until `job_count` reads pass or the overall timeout/stop ends the run.
 6. Verify or restore the contactless page and press `minus` in `finally`.
 7. Write compact metadata, detailed logs, and the final progress broadcast.
+
+## Operator UI feedback
+
+During a run, the selected meter dialog receives `operator_feedback` snapshots
+with success progress, reader state, recent masked-card attempts, retry reasons,
+and the latest safe journal events. This lets the operator see when the reader
+is turning on, ready, reading, timing out, or being shut down.

@@ -187,7 +187,22 @@ def get_frontend_job_state(meter_ip: str):
                 "total": total,
             }
 
+    feedback_state = st.extras.get("operator_feedback_state")
+    if isinstance(feedback_state, dict):
+        state["operator_feedback"] = dict(feedback_state)
+
     return state
+
+
+def submit_operator_response(meter_ip: str, test: str, value: bool) -> bool:
+    """Deliver an answer from an active meter dialog to its running job."""
+    with _registry_lock:
+        st = _states.get(meter_ip)
+        if st is None or st.status != "running":
+            return False
+        from lib.automation.operator_feedback import submit_operator_feedback_response
+        submit_operator_feedback_response(st, test, value)
+        return True
 
 def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     meter = mm.get_meter(meter_ip)

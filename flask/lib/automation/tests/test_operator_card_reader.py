@@ -8,11 +8,10 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from lib.automation.helpers import StopAutomation, check_stop_event
+from lib.automation.operator_feedback import publish_operator_feedback
 from lib.automation.shared_state import SharedState
 from lib.meter.ssh_meter import SSHMeter
 
-
-# TODO: Add some sort of operator feedback on burningstation UI
 
 # Keep flask/lib/docs/meter/test_operator_card_reader.md in sync when changing this test.
 JOURNAL_UNIT = "MS3_Platform.service"
@@ -356,6 +355,44 @@ def _successful_read_count(state: OperatorCardReaderRunState) -> int:
     return sum(read["classification"] == "pass" for read in state.reads)
 
 
+def _publish_card_reader_feedback(
+    meter: SSHMeter,
+    shared: SharedState,
+    state: OperatorCardReaderRunState,
+    *,
+    status: str,
+    active: bool = True,
+    error: str = "",
+) -> None:
+    reads = [
+        {
+            key: read.get(key)
+            for key in (
+                "read_number", "timestamp", "read_type_name", "card_type_name",
+                "card_hash_hex", "is_card_accepted", "classification", "retry_reasons",
+            )
+        }
+        for read in state.reads[-8:]
+    ]
+    publish_operator_feedback(
+        meter,
+        shared,
+        test="card_reader",
+        title="Card reader test",
+        instruction="Insert and remove the QA magnetic-stripe card.",
+        status=status,
+        current=min(_successful_read_count(state), state.required_success_count),
+        total=state.required_success_count,
+        details={
+            "reads": reads,
+            "require_card_accepted": state.require_card_accepted,
+            "processed_read_count": len(state.reads),
+        },
+        active=active,
+        error=error,
+    )
+
+
 def _fail_card_reader(
     shared: SharedState,
     state: OperatorCardReaderRunState,
@@ -447,6 +484,7 @@ def test_operator_card_reader(
             f"journal_unit={JOURNAL_UNIT} | journal_max_lines={JOURNAL_MAX_LINES} | "
             f"starting_cursor={cursor}"
         )
+        _publish_card_reader_feedback(meter, shared, state, status="ready")
 
         while True:
             check_stop_event(shared)
@@ -461,8 +499,12 @@ def test_operator_card_reader(
                 )
 
             previous_success_count = _successful_read_count(state)
+            previous_read_count = len(state.reads)
             _poll_card_reader(meter, shared, state)
             successful_count = _successful_read_count(state)
+
+            if len(state.reads) != previous_read_count:
+                _publish_card_reader_feedback(meter, shared, state, status="running")
 
             if not subtest and successful_count > previous_success_count:
                 shared.broadcast_progress(
@@ -496,6 +538,14 @@ def test_operator_card_reader(
         _write_card_reader_metadata(shared, state)
         meta = shared.device_meta["card_reader"]
         successful_count = _successful_read_count(state)
+        _publish_card_reader_feedback(
+            meter,
+            shared,
+            state,
+            status="pass" if state.success else "fail",
+            active=False,
+            error=state.final_error or ("" if state.success else shared.last_error or ""),
+        )
         retry_count = len(state.reads) - successful_count
         shared.log(
             "operator card reader final summary: "

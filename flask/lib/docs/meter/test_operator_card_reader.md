@@ -135,3 +135,11 @@ This includes partial results when the test stops or fails. Search that line for
 6. Pass once the number of successful summaries reaches `job_count`; otherwise
    continue through retry reads until timeout, stop, or an unexpected error.
 7. Always write final logs and `shared.device_meta` in `finally`.
+
+## Operator UI feedback
+
+While active, the test broadcasts an `operator_feedback` snapshot for the
+selected meter dialog. It includes successful-read progress plus up to eight
+recent processed reads. Each read contains its safe classification fields,
+whether the meter accepted it, and retry reasons, so an operator can distinguish
+a valid swipe from an incomplete or rejected read without exposing card data.
