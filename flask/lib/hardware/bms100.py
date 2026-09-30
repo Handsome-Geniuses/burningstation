@@ -2,6 +2,7 @@ import os
 import struct
 import threading
 import time
+from typing import Any
 
 try:
     import serial
@@ -49,31 +50,70 @@ class BMS100Reader:
     def __init__(self, port: str | None = None):
         self.port = port or os.getenv("BMS_PORT", "/dev/ttyUSB0")
         self._lock = threading.Lock()
+        self._connection: Any | None = None
+        self._debug = os.getenv("BMS_DEBUG", "0") == "1"
 
-    def read_percentage(self) -> float | None:
+    def _log_debug(self, msg: str):
+        if self._debug:
+            print(f"[BMS100] {msg}")
+
+    def _close(self):
+        if self._connection is None:
+            return
+
+        try:
+            self._connection.close()
+        except Exception:
+            pass
+        finally:
+            self._connection = None
+
+    def _connect(self):
         if serial is None:
             return None
 
-        connection = None
+        if self._connection is None:
+            self._connection = serial.Serial(
+                port=self.port,
+                baudrate=9600,
+                timeout=0.2,
+            )
+            self._connection.reset_input_buffer()
+            self._connection.reset_output_buffer()
+            time.sleep(0.5)
+        elif not self._connection.is_open:
+            self._connection.open()
+            self._connection.reset_input_buffer()
+            self._connection.reset_output_buffer()
+            time.sleep(0.5)
+        else:
+            self._connection.reset_input_buffer()
+            self._connection.reset_output_buffer()
+
+        return self._connection
+
+    def read_percentage(self) -> float | None:
+        if serial is None:
+            self._log_debug("pyserial is not installed")
+            return None
+
         with self._lock:
             try:
-                connection = serial.Serial(
-                    port=self.port,
-                    baudrate=9600,
-                    timeout=0.2,
-                )
-                connection.reset_input_buffer()
+                connection = self._connect()
+                if connection is None:
+                    return None
+
                 connection.write(_READ_COMMAND)
                 time.sleep(0.05)
-                return parse_soc_response(connection.read(512))
-            except Exception:
+                response = connection.read(512)
+                percentage = parse_soc_response(response)
+                if percentage is None:
+                    self._log_debug(f"unparsed response len={len(response)} hex={response.hex(' ')}")
+                return percentage
+            except Exception as exc:
+                self._log_debug(f"read failed on {self.port}: {exc}")
+                self._close()
                 return None
-            finally:
-                if connection is not None:
-                    try:
-                        connection.close()
-                    except Exception:
-                        pass
 
 
 _reader = BMS100Reader()
