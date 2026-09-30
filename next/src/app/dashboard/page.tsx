@@ -53,12 +53,13 @@ export default () => {
 
     return (
         <div className="w-screen h-screen bg-neutral-500 overflow-hidden flex justify-center items-center">
-            <div className="bg-background relative w-[1920px] h-[1080px] flex flex-col">
+            {/* <div className="bg-background relative w-[1920px] h-[1080px] flex flex-col"> */}
+            <div className="relative flex h-full min-h-[1080px] max-h-[1200px] w-[1920px] flex-col bg-background">
                 <StoreProvider>
                     <Dashboard />
                 </StoreProvider>
             </div>
-            
+
             <DisableTabKey />
         </div>
     )
