@@ -47,23 +47,31 @@ export const setValueAtPath = (
     path: string[],
     nextValue: SettingsValue | ""
 ): SettingsObject => {
-    if (path.length === 0) return obj
+    const update = (current: SettingsValue, remainingPath: string[]): SettingsValue => {
+        if (remainingPath.length === 0) return nextValue as SettingsValue
 
-    const [head, ...tail] = path
-    if (tail.length === 0) {
-        return { ...obj, [head]: nextValue as SettingsValue }
+        const [head, ...tail] = remainingPath
+        if (Array.isArray(current)) {
+            const index = Number(head)
+            if (!Number.isInteger(index) || index < 0) return current
+
+            const next = [...current]
+            next[index] = update(next[index] ?? null, tail)
+            return next
+        }
+
+        const currentObject =
+            current && typeof current === "object"
+                ? current as SettingsObject
+                : {}
+
+        return {
+            ...currentObject,
+            [head]: update(currentObject[head] ?? null, tail),
+        }
     }
 
-    const currentChild = obj[head]
-    const childObject =
-        currentChild && typeof currentChild === "object" && !Array.isArray(currentChild)
-            ? (currentChild as SettingsObject)
-            : {}
-
-    return {
-        ...obj,
-        [head]: setValueAtPath(childObject, tail, nextValue),
-    }
+    return update(obj, path) as SettingsObject
 }
 
 export const getDefaultText = (node: SchemaNode) => {

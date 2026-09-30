@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from lib.store.settings import (
     MAX_SAFE_INTEGER,
     Settings,
+    VersionCheckSet,
     VersionChecks,
     VersionConstraint,
 )
@@ -38,10 +39,10 @@ EXPECTED_FIRMWARE_KEYS = {
 
 class VersionSettingsTests(unittest.TestCase):
     def test_defaults_include_only_existing_firmware_with_both_constraints_off(self):
-        checks = VersionChecks()
+        checks = VersionCheckSet()
 
-        self.assertEqual(set(VersionChecks.model_fields), EXPECTED_FIRMWARE_KEYS)
-        for firmware in VersionChecks.model_fields:
+        self.assertEqual(set(VersionCheckSet.model_fields), EXPECTED_FIRMWARE_KEYS)
+        for firmware in VersionCheckSet.model_fields:
             requirement = getattr(checks, firmware)
             self.assertEqual(requirement.version.value, 0)
             self.assertIsNone(requirement.version.operator)
@@ -55,7 +56,7 @@ class VersionSettingsTests(unittest.TestCase):
                 self.assertEqual(constraint.operator, operator)
 
     def test_version_and_mod_are_independent(self):
-        checks = VersionChecks.model_validate({
+        checks = VersionCheckSet.model_validate({
             "ms3_via": {
                 "version": {"value": 48_794, "operator": "gte"},
                 "mod": {"value": 2, "operator": None},
@@ -85,8 +86,10 @@ class VersionSettingsTests(unittest.TestCase):
         settings = Settings.model_validate({"flow": {"load_check": False}})
 
         self.assertFalse(settings.flow.load_check)
-        self.assertIsNone(settings.version_checks.ms3_via.version.operator)
-        self.assertIsNone(settings.version_checks.ms3_via.mod.operator)
+        self.assertEqual(settings.version_checks.active_profile, 1)
+        self.assertEqual(len(settings.version_checks.profiles), 5)
+        self.assertIsNone(settings.version_checks.profiles[0].ms3_via.version.operator)
+        self.assertIsNone(settings.version_checks.profiles[0].ms3_via.mod.operator)
 
     def test_off_constraint_retains_value_across_store_reload(self):
         previous_instance = SettingsStore._instance
@@ -99,21 +102,41 @@ class VersionSettingsTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 store = SettingsStore(Path(directory) / "settings.json")
                 payload = Settings().model_dump()
-                payload["version_checks"]["ms3_via"] = {
-                    "version": {"value": 48_794, "operator": "gte"},
-                    "mod": {"value": 2, "operator": None},
+                payload["version_checks"] = {
+                    "ms3_via": {
+                        "version": {"value": 48_794, "operator": "gte"},
+                        "mod": {"value": 2, "operator": None},
+                    }
                 }
 
                 store.set_from_dict(payload)
                 reloaded = store.reload()
 
-                self.assertEqual(reloaded.version_checks.ms3_via.version.value, 48_794)
-                self.assertEqual(reloaded.version_checks.ms3_via.version.operator, "gte")
-                self.assertEqual(reloaded.version_checks.ms3_via.mod.value, 2)
-                self.assertIsNone(reloaded.version_checks.ms3_via.mod.operator)
+                profile = reloaded.version_checks.profiles[0]
+                self.assertEqual(profile.ms3_via.version.value, 48_794)
+                self.assertEqual(profile.ms3_via.version.operator, "gte")
+                self.assertEqual(profile.ms3_via.mod.value, 2)
+                self.assertIsNone(profile.ms3_via.mod.operator)
         finally:
             SettingsStore._instance = previous_instance
             SettingsStore._initialized = previous_initialized
+
+    def test_profiles_are_independent_and_active_profile_is_retained(self):
+        profiles = [VersionCheckSet().model_dump() for _ in range(5)]
+        profiles[2]["printer"] = {
+            "version": {"value": 2208, "operator": "eq"},
+            "mod": {"value": 1, "operator": "gte"},
+        }
+
+        checks = VersionChecks.model_validate({
+            "active_profile": 3,
+            "profiles": profiles,
+        })
+
+        self.assertEqual(checks.active_profile, 3)
+        self.assertEqual(checks.profiles[2].printer.version.value, 2208)
+        self.assertEqual(checks.profiles[2].printer.mod.operator, "gte")
+        self.assertIsNone(checks.profiles[0].printer.version.operator)
 
 
 if __name__ == "__main__":

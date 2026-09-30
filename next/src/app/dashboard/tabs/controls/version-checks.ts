@@ -130,8 +130,17 @@ export function evaluateVersionChecks(
     settings: SettingsObject,
     schema: SchemaNode,
 ): MeterVersionCheckRow[] {
-    const checks = asRecord(settings.version_checks)
-    const checksSchema = resolveSchemaNode(schema.properties?.version_checks, schema)
+    const versionChecks = asRecord(settings.version_checks)
+    const rawProfiles = versionChecks?.profiles
+    const profiles = Array.isArray(rawProfiles) ? rawProfiles : []
+    const rawActiveProfile = versionChecks?.active_profile
+    const activeProfile = typeof rawActiveProfile === "number" && rawActiveProfile >= 1 && rawActiveProfile <= 5
+        ? rawActiveProfile
+        : 1
+    const checks = asRecord(profiles[activeProfile - 1])
+    const versionChecksSchema = resolveSchemaNode(schema.properties?.version_checks, schema)
+    const profilesSchema = resolveSchemaNode(versionChecksSchema?.properties?.profiles, schema)
+    const checksSchema = resolveSchemaNode(profilesSchema?.items, schema)
     if (!checks || !checksSchema?.properties) return []
 
     const inventory = buildInventory(meter)

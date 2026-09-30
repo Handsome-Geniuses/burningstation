@@ -285,6 +285,14 @@ export const VersionChecksSection = ({
 }: VersionChecksSectionProps) => {
     const resolved = resolveSchemaNode(node, rootSchema)
     const currentValue = asSettingsObject(value)
+    const rawActiveProfile = currentValue?.active_profile
+    const activeProfile = typeof rawActiveProfile === "number" && rawActiveProfile >= 1 && rawActiveProfile <= 5
+        ? rawActiveProfile
+        : 1
+    const profiles = Array.isArray(currentValue?.profiles) ? currentValue.profiles : []
+    const activeProfileValue = asSettingsObject(profiles[activeProfile - 1])
+    const profilesNode = resolveSchemaNode(resolved.properties?.profiles ?? {}, rootSchema)
+    const profileNode = resolveSchemaNode(profilesNode.items ?? {}, rootSchema)
 
     return (
         <AccordionItem
@@ -302,6 +310,22 @@ export const VersionChecksSection = ({
                 </div>
             </AccordionTrigger>
             <AccordionContent className="p-0">
+                <div className="flex items-center gap-2 px-4 pb-3">
+                    {[1, 2, 3, 4, 5].map((profile) => (
+                        <Button
+                            key={profile}
+                            type="button"
+                            variant={profile === activeProfile ? "default" : "outline"}
+                            size="icon"
+                            disabled={disabled}
+                            aria-label={`Use Version Checks profile ${profile}`}
+                            aria-pressed={profile === activeProfile}
+                            onClick={() => onChange([sectionKey, "active_profile"], profile)}
+                        >
+                            {profile}
+                        </Button>
+                    ))}
+                </div>
                 <div className="m-1 overflow-hidden rounded-lg border border-border">
                     <div className={cn(VERSION_GRID, "hidden bg-muted/40 px-4 py-3 text-xs font-semibold uppercase text-muted-foreground sm:grid")}>
                         <div>Firmware</div>
@@ -309,14 +333,14 @@ export const VersionChecksSection = ({
                         <div>MOD</div>
                     </div>
 
-                    {Object.entries(resolved.properties ?? {}).map(([firmwareKey, rawNode]) => {
+                    {Object.entries(profileNode.properties ?? {}).map(([firmwareKey, rawNode]) => {
                         const firmwareNode = resolveSchemaNode(rawNode, rootSchema)
-                        const firmwareValue = asSettingsObject(currentValue?.[firmwareKey])
+                        const firmwareValue = asSettingsObject(activeProfileValue?.[firmwareKey])
                         const version = readConstraint(firmwareValue, "version")
                         const mod = readConstraint(firmwareValue, "mod")
                         const firmwareLabel = rawNode.title ?? formatLabel(firmwareKey)
                         const description = rawNode.description ?? firmwareNode.description ?? firmwareLabel
-                        const firmwarePath = [sectionKey, firmwareKey]
+                        const firmwarePath = [sectionKey, "profiles", String(activeProfile - 1), firmwareKey]
 
                         return (
                             <div key={firmwareKey} className={cn(VERSION_GRID, "border-t border-border px-4 py-3 first:border-t-0 sm:first:border-t")}>

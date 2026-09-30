@@ -1,7 +1,8 @@
+from collections.abc import Mapping
 from typing import Any, Literal
 import math
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ==================================================================
@@ -143,7 +144,7 @@ def version_check_field(
     )
 
 
-class VersionChecks(BaseModel):
+class VersionCheckSet(BaseModel):
     ms3_via: FirmwareVersionCheck = version_check_field(
         "MS3 VIA System Version",
         module_aliases=("system_version",),
@@ -207,6 +208,32 @@ class VersionChecks(BaseModel):
         "BNA Bus MEI",
         module_aliases=("BNA",),
     )
+
+
+def default_version_check_profiles() -> list[VersionCheckSet]:
+    return [VersionCheckSet() for _ in range(5)]
+
+
+class VersionChecks(BaseModel):
+    active_profile: int = Field(1, ge=1, le=5)
+    profiles: list[VersionCheckSet] = Field(
+        default_factory=default_version_check_profiles,
+        min_length=5,
+        max_length=5,
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_single_profile(cls, value):
+        if not isinstance(value, Mapping) or "profiles" in value:
+            return value
+        if not any(key in VersionCheckSet.model_fields for key in value):
+            return value
+
+        return {
+            "active_profile": 1,
+            "profiles": [value, *[VersionCheckSet() for _ in range(4)]],
+        }
 
 
 # ==================================================================
