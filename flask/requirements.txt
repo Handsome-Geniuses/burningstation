@@ -8,6 +8,7 @@ python-dotenv
 requests
 psycopg
 pydantic
+pyserial
 
 # GitHub HTTPS
 git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/hardware/i2c/i2c
@@ -23,4 +24,3 @@ git+https://github.com/ElNosnhoj/pythonmodules.git@main#subdirectory=lib/network
 
 # Local path
 # ./pythonmodules/lib/hardware/i2c/i2c
-

@@ -2,8 +2,10 @@
 import { useCountdown } from "@/hooks/useCountdown"
 import NumberFlow, { NumberFlowGroup } from "@number-flow/react"
 import React from "react"
+import { BatteryFull, BatteryLow, BatteryMedium, BatteryWarning } from "lucide-react"
 import { useStoreContext } from "../store"
 import { notify } from "@/lib/notify"
+import { cn } from "@/lib/utils"
 
 
 const Clock = () => {
@@ -45,6 +47,27 @@ const Clock = () => {
     )
 }
 
+const Battery = ({ percentage }: { percentage: number }) => {
+    const rounded = Math.round(percentage)
+    const Icon = rounded < 11
+        ? BatteryWarning
+        : rounded < 34
+            ? BatteryLow
+            : rounded < 67
+                ? BatteryMedium
+                : BatteryFull
+
+    return (
+        <div className={cn(
+            "flex items-center gap-1 text-xs font-mono",
+            rounded < 34 && "text-destructive",
+        )}>
+            <Icon className={cn("size-4", rounded < 11 && "animate-pulse")} />
+            <span>{rounded}%</span>
+        </div>
+    )
+}
+
 export const Header = () => {
     const [clickCount, setClickCount] = React.useState(0)
     const [seconds, setSeconds] = useCountdown(() => { setClickCount(0) })
@@ -74,7 +97,11 @@ export const Header = () => {
             {systemState.emergency && <div className="absolute inset-0 bg-destructive/90 pointer-events-none z-0 animate-[pulse_0.5s_ease-in-out_infinite]" />}
             {!systemState.emergency && systemState.running && <div className="absolute inset-0 bg-primary/90 pointer-events-none z-0 animate-[pulse_0.5s_ease-in-out_infinite]" />}
 
-            <div className="border border-border flex items-center justify-center z-1" onClick={handleSecretClick}></div>
+            <div className="border border-border flex items-center justify-center z-1" onClick={handleSecretClick}>
+                {systemState.hardware.profile === "portable" && systemState.batteryPercent !== null && (
+                    <Battery percentage={systemState.batteryPercent} />
+                )}
+            </div>
             <div className="border border-border flex items-center justify-center z-1">
                 {systemState.emergency?'EMERGENCY':(systemState.running?'RUNNING':systemState.currentTab)}
             </div>

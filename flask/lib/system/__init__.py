@@ -16,6 +16,7 @@ states['lamp'] = lm.get_value_list()
 states['mode'] = 'manual'
 states['dummy'] = {}
 states['workOrder'] = 999999999 if secrets.DEVWO else None
+states['batteryPercent'] = 69 if hardware.has("battery") and secrets.MOCK else None
 
 
 # initialize some values. motors of. tower off. lamps off
