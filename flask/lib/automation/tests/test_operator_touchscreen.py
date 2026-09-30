@@ -8,12 +8,10 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from lib.automation.helpers import StopAutomation, check_stop_event
+from lib.automation.operator_feedback import publish_operator_feedback
 from lib.automation.shared_state import SharedState
 from lib.meter.ssh_meter import SSHMeter
 
-# TODO: Add operator-facing touchscreen-test visuals, either as targets and
-# completed regions on the meter or as instructions and progress feedback in
-# the burningstation UI
 
 JOURNAL_UNIT = "MS3_Platform.service"
 JOURNAL_MAX_LINES = 1000
@@ -211,6 +209,44 @@ def _fail_touchscreen(
     raise StopAutomation(message)
 
 
+def _publish_touchscreen_feedback(
+    meter: SSHMeter,
+    shared: SharedState,
+    state: OperatorTouchscreenRunState,
+    *,
+    status: str,
+    active: bool = True,
+    error: str = "",
+) -> None:
+    touches = [
+        {
+            "number": index,
+            "x": touch["x"],
+            "y": touch["y"],
+            "physical_x": touch["physical_x"],
+            "physical_y": touch["physical_y"],
+        }
+        for index, touch in enumerate(state.touches, start=1)
+    ]
+    publish_operator_feedback(
+        meter,
+        shared,
+        test="touchscreen",
+        title="Touchscreen test",
+        instruction="You may start tapping the touchscreen in different locations.",
+        status=status,
+        current=min(len(state.touches), state.expected_touch_count),
+        total=state.expected_touch_count,
+        details={
+            "touches": touches,
+            "framebuffer_resolution": state.framebuffer_resolution,
+            "logical_size": [LOGICAL_TOUCH_WIDTH, LOGICAL_TOUCH_HEIGHT],
+        },
+        active=active,
+        error=error,
+    )
+
+
 def _write_touchscreen_metadata(
     meter: SSHMeter,
     shared: SharedState,
@@ -291,6 +327,7 @@ def test_operator_touchscreen(
             f"journal_max_lines={JOURNAL_MAX_LINES} | "
             f"cursor={cursor}"
         )
+        _publish_touchscreen_feedback(meter, shared, state, status="ready")
 
         while True:
             check_stop_event(shared)
@@ -323,6 +360,9 @@ def test_operator_touchscreen(
                         expected_touch_count,
                     )
 
+            if new_touches:
+                _publish_touchscreen_feedback(meter, shared, state, status="running")
+
             if len(state.touches) >= expected_touch_count:
                 state.success = True
                 device = getattr(shared, "current_device", None) or "touchscreen"
@@ -345,6 +385,14 @@ def test_operator_touchscreen(
         raise
     finally:
         _write_touchscreen_metadata(meter, shared, state)
+        _publish_touchscreen_feedback(
+            meter,
+            shared,
+            state,
+            status="pass" if state.success else "fail",
+            active=False,
+            error=state.final_error or ("" if state.success else shared.last_error or ""),
+        )
         shared.log(
             f"operator touchscreen final summary: success={state.success} | "
             f"error={state.final_error!r} | touches={len(state.touches)}/"

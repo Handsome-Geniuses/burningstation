@@ -2036,7 +2036,7 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
     per_button_timeout_s = float(kwargs.get("per_button_timeout_s", 5.0))
     max_retries_per_group = max(
         0,
-        int(kwargs.get("max_retries_per_group", kwargs.get("max_retries_per_button", 1))),
+        int(kwargs.get("max_retries_per_group", kwargs.get("max_retries_per_button", 2))),
     )
     retry_command_timeout_s = float(kwargs.get("retry_command_timeout_s", 3.0))
     subtest = bool(kwargs.get("subtest", False))

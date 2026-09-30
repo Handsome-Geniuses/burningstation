@@ -16,7 +16,6 @@ def __print(*args, **kwargs):
 
 if not secrets.VERBOSE:
     print = __print
-import time
 import datetime
 
 
@@ -28,9 +27,9 @@ class METERMANAGER:
     __meters: Set[str] = set()
     __splash: Set[str] = set()
     __attempts: dict[str, int] = {}
-    __booted: dict[str, int] = {}
     __stale_counts: Dict[str, int] = {}
     __STALE_THRESHOLD = 2
+    __MIN_APP_RUNTIME_SECONDS = 70
 
     meters: Dict[str, MeterClass] = {}
 
@@ -70,7 +69,6 @@ class METERMANAGER:
             cls.meters.pop(ip, None)
             cls.__meters.discard(ip)
             cls.__splash.discard(ip)
-            cls.__booted.pop(ip, None)
             cls.__stale_counts.pop(ip, None)
             cls.__attempts.pop(ip, None)
             states["bayGuess"] = clear_meter(states.get("bayGuess", empty_bay_guess()), ip)
@@ -104,36 +102,52 @@ class METERMANAGER:
             # check if booting
             if splash := meter.is_booting():
                 cls.__splash.add(ip)
+                print(
+                    f"[{ip}] Meter is still booting; waiting before retrying ...",
+                    fg="#888800",
+                )
                 raise cls.__FINALLY
             # check if in splash
             elif splash := meter.in_splash():
                 cls.__splash.add(ip)
+                print(
+                    f"[{ip}] Meter UI is still in the splash screen; "
+                    "waiting before retrying ...",
+                    fg="#888800",
+                )
                 raise cls.__FINALLY
             else:
                 hn = meter.hostname
-                # if just booted, give it some time
-                if ip in cls.__splash or ip in cls.__attempts:
-                    t0 = cls.__booted.get(ip, None)
-                    if t0 == None:
-                        print(
-                            f"[{hn}-{ip}]🔧 Just booted? Giving it time to load up ...",
-                            fg="#008800",
-                        )
-                        cls.__booted[ip] = time.time()
-                        raise cls.__FINALLY
-                    elif time.time() - t0 > 30:
-                        pass
-                    else:
-                        raise cls.__FINALLY
-
-                # here, has booted + X seconds or was booted already
-                print(f"[{hn}-{ip}] Attempting to enter diagnostics ...", fg="#888800")
-                meter.force_diagnostics()
-                time.sleep(0.1)
                 if not meter.in_diagnostics():
-                    raise Exception
+                    print(f"[{hn}-{ip}] Attempting to enter diagnostics ...", fg="#888800")
+                    meter.force_diagnostics()
+                try:
+                    runtime_info = meter.get_app_runtime_info()
+                except RuntimeError as e:
+                    print(
+                        f"[{hn}-{ip}] MS3 runtime is not available yet: {e}",
+                        fg="#888800",
+                    )
+                    raise cls.__FINALLY
 
-                # successfully entered diagnostics, add information to database?
+                runtime_seconds = runtime_info["runtime_seconds"]
+                if runtime_seconds <= cls.__MIN_APP_RUNTIME_SECONDS:
+                    print(
+                        f"[{hn}-{ip}]🔧 Waiting for modules to initialize "
+                        f"({runtime_seconds}/{cls.__MIN_APP_RUNTIME_SECONDS} seconds) ...",
+                        fg="#008800",
+                    )
+                    raise cls.__FINALLY
+
+                if not meter.in_diagnostics():
+                    message = (
+                        f"[{hn}-{ip}] Meter did not enter diagnostics; "
+                        "will retry in the background ..."
+                    )
+                    print(message, fg="#880000")
+                    raise RuntimeError(message)
+
+                # add information to database
                 try:
                     res = insert_sshmeter(meter)
                     meter_id = res[0]  # meter row id

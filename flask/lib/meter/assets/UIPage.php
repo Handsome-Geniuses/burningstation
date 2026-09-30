@@ -55,71 +55,12 @@ function overlay_results() {
     $j = is_readable($p) ? @json_decode(file_get_contents($p), true) : null;
 
     echo '<style>
-      #results-overlay {
-        position: fixed; top: 0; right: 0;
-        width: 50vw; height: 100vh;
-        background: rgba(255,255,255,.95);
-        z-index: 2147483647; overflow-y: auto;
-        padding: 0 20px 20px; box-sizing: border-box;
-        font: 14px/1.4 system-ui, sans-serif; color: #000;
-        pointer-events: none;
-      }
-      #results-header {
-        text-align: center; font-size: 42px; font-weight: 700;
-        padding: 16px 12px; margin: 0 -20px 24px -20px;
-        color: #fff; text-shadow: 1px 1px 3px rgba(0,0,0,.4);
-        border-bottom: 4px solid rgba(0,0,0,.2);
-      }
-      #results-header.pass  { background: #006400; }
-      #results-header.fail  { background: #B22222; animation: pulse 2s infinite; }
-      #results-header.na,
-      #results-header.default { background: #555; }
-      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .88; } }
-
-      .main-header {
-        font-size: 20px; font-weight: 700;
-        margin: 24px 0 12px; padding-bottom: 6px;
-        border-bottom: 2px solid #ccc;
-      }
-      .sub-header {
-        font-size: 16px; font-weight: 700;
-        margin: 16px 0 6px; padding-bottom: 4px;
-        border-bottom: 1px solid #eee;
-      }
-
-      .result-item { display: flex; margin: 4px 0; align-items: baseline; }
-      .result-item .key {
-        font-weight: 700; min-width: 160px; flex-shrink: 0;
-        text-align: right; padding-right: 10px;
-      }
-      .result-item .value { flex: 1; color: #333; word-break: break-word; }
-      .value.pass { color: #006400; }
-      .value.fail { color: #B22222; }
-      .value.na   { color: #555; }
-
-      .test-grid {
-        display: grid; grid-template-columns: 1fr 1fr;
-        grid-template-rows: auto auto 1fr; gap: 0 28px; margin-top: 8px;
-      }
-      .test-column { display: contents; }
-      .test-column > .main-header { grid-row: 1; }
-      .test-column > .device-results-section { grid-row: 2; }
-      .test-column > .other-info-section { grid-row: 3; padding-top: 16px; }
-
-      @media (max-width: 900px) {
-        .test-grid { grid-template-columns: 1fr; grid-template-rows: auto; gap: 32px; }
-        .test-column > * { grid-row: auto; }
-      }
-      
-      .other-info-section .result-item {
-        margin-left: 20px;
-      }
-      .other-info-section .result-item .key {
-        text-align: left;
-        min-width: 0;
-        flex: 0 0 auto;
-        padding-right: 5px;
-      }
+      #results-overlay{position:fixed;top:0;right:0;width:50vw;height:100vh;background:rgba(255,255,255,.96);z-index:2147483647;overflow-y:auto;padding:0 16px 14px;box-sizing:border-box;font:13px/1.25 system-ui,sans-serif;color:#000;pointer-events:none}
+      #results-header{text-align:center;font-size:34px;font-weight:700;padding:10px 8px;margin:0 -16px 12px;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,.4);border-bottom:3px solid rgba(0,0,0,.2)}
+      #results-header.pass{background:#006400}#results-header.fail{background:#B22222;animation:pulse 2s infinite}#results-header.na,#results-header.default{background:#555}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.88}}
+      .main-header{font-size:18px;font-weight:700;margin:12px 0 6px;padding-bottom:4px;border-bottom:2px solid #ccc}.sub-header{font-size:14px;font-weight:700;margin:9px 0 3px;padding-bottom:3px;border-bottom:1px solid #ddd}
+      .result-item{display:flex;margin:3px 0;align-items:baseline}.result-item .key{font-weight:700;min-width:116px;flex-shrink:0;text-align:right;padding-right:7px}.result-item .value{flex:1;color:#333;word-break:break-word}.value.pass{color:#006400}.value.fail{color:#B22222}.value.na{color:#555}
+      #meter-info{display:grid;grid-template-columns:1fr 1fr;column-gap:12px}#meter-info .result-item .key{min-width:0;text-align:left}.test-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:6px}.test-panel{min-width:0}.test-panel.operator{grid-column:1/-1}.test-panel .result-item .key{min-width:0;text-align:left;flex:0 0 auto}.device-results-section .result-item,.runtime-section .result-item{margin-left:8px}
     </style>
     <div id="results-overlay">';
 
@@ -136,14 +77,16 @@ function overlay_results() {
        . ($r === 'PASS' ? '✓ ' : ($r === 'FAIL' ? '✗ ' : ''))
        . 'Results: ' . $o . '</div>';
 
-    $l = function($items) {
+    $l = function($items, $limit = 0, $colorize = true) {
         if (empty($items) || !is_array($items)) return;
         foreach ($items as $k => $v) {
+            $v = is_scalar($v) || $v === null ? (string)$v : json_encode($v);
+            if ($limit && strlen($v) > $limit) $v = substr($v, 0, $limit - 3) . '...';
             $cls = '';
             $lv = strtolower($v);
-            if (strpos($lv, 'pass') !== false || $lv === 'ok') $cls = 'pass';
-            elseif (strpos($lv, 'fail') !== false || $lv === 'error') $cls = 'fail';
-            elseif ($lv === 'n/a' || $lv === 'skip') $cls = 'na';
+            if ($colorize && (strpos($lv, 'pass') !== false || $lv === 'ok')) $cls = 'pass';
+            elseif ($colorize && (strpos($lv, 'fail') !== false || $lv === 'error')) $cls = 'fail';
+            elseif ($colorize && ($lv === 'n/a' || $lv === 'skip')) $cls = 'na';
             echo '<div class="result-item"><span class="key">'
                . htmlspecialchars($k) . ':</span><span class="value ' . $cls . '">'
                . htmlspecialchars($v) . '</span></div>';
@@ -151,31 +94,23 @@ function overlay_results() {
     };
 
     if (!empty($j['meter_info'] ?? [])) {
-        echo '<h2 class="main-header">Meter Info</h2>';
+        echo '<h2 class="main-header">Meter Info</h2><div id="meter-info">';
         $l($j['meter_info']);
-    }
-
-    $pa = $j['passive'] ?? []; $ph = $j['physical'] ?? [];
-    if (!empty($pa) || !empty($ph)) {
-        echo '<div class="test-grid">';
-        foreach (['passive' => $pa, 'physical' => $ph] as $type => $data) {
-            if (empty($data)) continue;
-            $title = ucfirst($type) . ' Tests';
-            echo '<div class="test-column"><h2 class="main-header">' . $title . '</h2>';
-            echo '<div class="device-results-section">';
-            if (!empty($data['device_results'] ?? [])) {
-                echo '<h3 class="sub-header">Device Results</h3>';
-                $l($data['device_results']);
-            }
-            echo '</div><div class="other-info-section">';
-            if (!empty($data['other_info'] ?? [])) {
-                echo '<h3 class="sub-header">Other Info</h3>';
-                $l($data['other_info']);
-            }
-            echo '</div></div>';
-        }
         echo '</div>';
     }
+
+    $panel = function($type, $data, $single = false) use ($l) {
+        if (empty($data) || !is_array($data)) return;
+        $other = is_array($data['other_info'] ?? null) ? $data['other_info'] : [];
+        $error = array_key_exists('Error', $other) ? $other['Error'] : 'None'; unset($other['Error']);
+        echo '<div class="test-panel' . ($single ? ' operator' : '') . '"><h2 class="main-header">' . htmlspecialchars($type) . ' Tests</h2>';
+        if (!empty($data['device_results'] ?? [])) { echo '<div class="device-results-section"><h3 class="sub-header">Device Results</h3>'; $l($data['device_results']); echo '</div>'; }
+        echo '<div class="runtime-section"><h3 class="sub-header">Runtime Data</h3>'; $l(['Error' => $error], 400, false); $l($other, 160, false); echo '</div>';
+        echo '</div>';
+    };
+    $op = $j['operator'] ?? []; $pa = $j['passive'] ?? []; $ph = $j['physical'] ?? [];
+    if (!empty($op)) { echo '<div class="test-grid">'; $panel('Operator', $op, true); echo '</div>'; }
+    elseif (!empty($pa) || !empty($ph)) { echo '<div class="test-grid">'; $panel('Passive', $pa); $panel('Physical', $ph); echo '</div>'; }
 
     echo '</div>';
 }

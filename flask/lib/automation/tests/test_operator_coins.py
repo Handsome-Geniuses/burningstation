@@ -9,13 +9,11 @@ from types import TracebackType
 from typing import Any, Dict, List, Optional, Tuple
 
 from lib.automation.helpers import StopAutomation, check_stop_event
+from lib.automation.operator_feedback import publish_operator_feedback
 from lib.automation.shared_state import SharedState
 from lib.meter.ssh_meter import SSHMeter
 from lib.sse.sse_queue_manager import SSEQM
 
-# TODO (Johnson): Add a way for them to select the type of coins they want to use in the test. And a bool for if they want to allow rejected coins to count or not
-# Ex of ALL US coin options: "us": {"penny": {"currency_code": "USD", "value_minor": 1, "quantity": 3}, "nickel": {"currency_code": "USD", "value_minor": 5, "quantity": 3}, "dime": {"currency_code": "USD", "value_minor": 10, "quantity": 3}, "quarter": {"currency_code": "USD", "value_minor": 25, "quantity": 3}, "dollar_coin": {"currency_code": "USD", "value_minor": 100, "quantity": 1}}
-# Ex of ALL UK coin options: "uk": {"1p":   {"currency_code": "GBP", "value_minor": 1,   "quantity": 3}, "2p":   {"currency_code": "GBP", "value_minor": 2,   "quantity": 3}, "5p":   {"currency_code": "GBP", "value_minor": 5,   "quantity": 3}, "10p":  {"currency_code": "GBP", "value_minor": 10,  "quantity": 3}, "20p":  {"currency_code": "GBP", "value_minor": 20,  "quantity": 3}, "50p":  {"currency_code": "GBP", "value_minor": 50,  "quantity": 3}, "£1":   {"currency_code": "GBP", "value_minor": 100, "quantity": 3}, "£2":   {"currency_code": "GBP", "value_minor": 200, "quantity": 3}}
 
 # Keep flask/lib/docs/meter/test_operator_coins.md in sync when changing this test.
 JOURNAL_UNIT = "MS3_Platform.service"
@@ -516,7 +514,33 @@ def _broadcast_coin_state(
             "error": error,
         },
     )
-    # TODO (Johnson): Use this to update the station's UI to show how many coins are still required and what type(s). "detections" holds a dict of "<coin_name>" being tested and then you can grab and display each ones "accepted" and "required"
+    cleanup = {
+        "attempted": state.cleanup_attempted,
+        "success": state.cleanup_success,
+        "error": state.cleanup_error,
+    }
+    publish_operator_feedback(
+        meter,
+        shared,
+        test="coins",
+        title="Coin validator test",
+        instruction=(
+            "Coin requirements are complete. Stop inserting coins while tallies are cleared."
+            if status == "cleaning"
+            else "Insert the requested physical coins."
+        ),
+        status=status,
+        current=current,
+        total=total,
+        details={
+            "allow_rejected": state.allow_rejected,
+            "detections": _detections_dict(state),
+            "cleanup": cleanup,
+            "latest_attempt": dict(state.attempts[-1]) if state.attempts else None,
+        },
+        active=status in {"running", "ready", "cleaning"},
+        error=error,
+    )
 
 
 def _missing_requirements(state: OperatorCoinsRunState) -> Dict[str, int]:
@@ -790,6 +814,7 @@ def test_operator_coins(
         shared.last_error = state.final_error
         shared.stop_event.set()
     finally:
+        _broadcast_coin_state(meter, shared, state, status="cleaning")
         _cleanup_coin_tallies(meter, shared, state)
         if not state.cleanup_success:
             state.success = False

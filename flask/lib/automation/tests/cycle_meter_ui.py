@@ -1363,6 +1363,6 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
 
     time.sleep(1)
     if not meter.in_diagnostics():
-        meter.press("diagnostics")
+        meter.press("diagnostics", delay=0.4)
 
     #! Excpect the modem to be left ON after this test finishes. The meter's session agent will eventually turn it off

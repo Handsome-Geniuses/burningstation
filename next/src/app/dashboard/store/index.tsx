@@ -1,6 +1,6 @@
 'use client'
 import React, { useRef, useEffect, useState, useReducer } from "react"
-import { Action, initialSystemState, MeterInfo, OperatorKeypadState, reducer, SystemState } from "./system"
+import { Action, initialSystemState, MeterInfo, OperatorFeedbackState, OperatorKeypadState, reducer, SystemState } from "./system"
 import { notify } from "@/lib/notify"
 import { Question, QuestionProps } from "./question"
 import { LoadingGif } from "@/components/ui/loading-gif"
@@ -180,6 +180,28 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             },
         })
     }
+    const onOperatorFeedback = (payload: any) => {
+        const { ip, test, title, instruction, status, current, total, details, active, error } = payload ?? {}
+        if (
+            typeof ip !== "string" ||
+            typeof test !== "string" ||
+            typeof title !== "string" ||
+            typeof instruction !== "string" ||
+            typeof status !== "string" ||
+            typeof current !== "number" ||
+            typeof total !== "number" ||
+            !details || typeof details !== "object" || Array.isArray(details) ||
+            typeof active !== "boolean" ||
+            typeof error !== "string"
+        ) return
+        systemDispatch({
+            type: "operator-feedback",
+            state: {
+                ip, test, title, instruction, status, current, total,
+                details: details as OperatorFeedbackState["details"], active, error,
+            },
+        })
+    }
     const onStatus = (payload: any) => {
         const { ip, msg, status, current_action } = payload ?? {}
         if (typeof ip !== "string" || typeof status !== "string") return
@@ -214,6 +236,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             else if (event === 'progress') onProgress(payload)
             else if (event === 'status') onStatus(payload)
             else if (event === 'operator_keypad') onOperatorKeypad(payload)
+            else if (event === 'operator_feedback') onOperatorFeedback(payload)
             else if (event === 'settings') broadcastServerSettingsChange(payload)
         }
         flasksse.current.onerror = () => {

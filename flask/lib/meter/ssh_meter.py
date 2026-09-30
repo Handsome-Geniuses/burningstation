@@ -144,6 +144,12 @@ class SystemVersions(TypedDict):
     system_version: str
     system_sub_version: str
 
+
+class AppRuntimeInfo(TypedDict):
+    start_time: str
+    runtime_seconds: int
+
+
 MeterType = Literal["","msx","ms3","ms2.5"]
 MeterRegion = Literal["","us","uk"]
 
@@ -483,9 +489,21 @@ class SSHMeter(sshkit.Client):
     def _send_udp_packet_hex_detached(self, packet_hex: str, *, port: int) -> None:
         self._fire_and_forget(self._udp_packet_hex_command(packet_hex, port=port))
 
-    def _send_rtsc_command(self, command: str, port: int = 8008) -> str:
+    def _send_rtsc_command(
+        self,
+        command: str,
+        port: int = 8008,
+        timeout: Optional[float] = None,
+    ) -> str:
+        timeout_arg = ""
+        if timeout is not None:
+            if not math.isfinite(timeout) or timeout <= 0:
+                raise ValueError(f"Invalid RTSC timeout: {timeout!r}")
+            timeout_arg = f"-T {timeout:g} "
+
         out, err = self._cli_full(
-            f"printf %s {shlex.quote(command)} | socat - UDP:127.0.0.1:{port}"
+            f"printf %s {shlex.quote(command)} | "
+            f"socat {timeout_arg}- UDP:127.0.0.1:{port}"
         )
         if err and not out:
             raise RuntimeError(err)
@@ -677,12 +695,21 @@ class SSHMeter(sshkit.Client):
     def in_splash(self):
         """ Checks if the meter is in splash screen """
         page_text = self._get_uipage_html(timeout=0.2).lower()
-        if 'unable to open file' in page_text:
-            return True
-        return False
+        _in_splash = (
+            "unable to open file" in page_text
+            or (
+                "ui_0.html" in page_text
+                and "no such file or directory" in page_text
+            )
+        )
+        return _in_splash
 
     def in_diagnostics(self):
-        """Returns True if the meter is in diagnostics mode, False otherwise."""
+        """Return whether the latest UIPage HTML indicates Diagnostics mode.
+
+        The meter updates UIPage asynchronously, so a read immediately after a
+        button press may still describe the previous screen.
+        """
         try:
             page_text = self._get_uipage_html(timeout=5).lower()
             for diag_key in ["diagtitle", "diagcontent", "diaginfo"]:
@@ -693,13 +720,19 @@ class SSHMeter(sshkit.Client):
             print(f"[in_diagnostics] Error fetching http://{self.host}:8005/UIPage.php: {e}")
             return False
 
-    def force_diagnostics(self):
+    def force_diagnostics(self, settle_delay=0.4):
+        """Return to Diagnostics and allow its asynchronous UI transition to settle.
+
+        Set ``settle_delay`` to zero only when the caller provides its own wait
+        or feedback loop before relying on the updated UIPage HTML.
+        """
         if self.in_diagnostics():
             self.press('diagnostics')
             time.sleep(0.1)
             self.press('diagnostics')
         else:
             self.press('diagnostics')
+        time.sleep(settle_delay)
 
     def _get_uipage_html(self, timeout: float = 5.0) -> str:
         url = f"http://{self.host}:8005/UIPage.php"
@@ -729,6 +762,59 @@ class SSHMeter(sshkit.Client):
 
     def get_meter_status_text(self) -> str:
         return self.cli("echo 'cmd.main.meter:status' | socat - UDP:127.0.0.1:8008")
+
+    def get_linux_uptime_seconds(self) -> float:
+        """Return elapsed seconds since Linux boot from ``/proc/uptime``."""
+        output = self.cli("cat /proc/uptime")
+        fields = output.split()
+        if not fields:
+            raise RuntimeError("Unable to read Linux uptime from /proc/uptime")
+
+        try:
+            uptime_seconds = float(fields[0])
+        except ValueError as exc:
+            raise RuntimeError(f"Unable to parse Linux uptime: {output!r}") from exc
+
+        if not math.isfinite(uptime_seconds) or uptime_seconds < 0:
+            raise RuntimeError(f"Invalid Linux uptime: {uptime_seconds!r}")
+        return uptime_seconds
+
+    def get_app_runtime_info(self) -> AppRuntimeInfo:
+        """Return validated MS3 application start time and runtime.
+
+        Raises ``RuntimeError`` while the application status endpoint is
+        unavailable or returns an incomplete/uninitialized response.
+        """
+        try:
+            output = self._send_rtsc_command("cmd.status", timeout=2.0)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Unable to read MS3 application runtime: {exc}"
+            ) from exc
+
+        start_match = re.search(
+            r"^[ \t]*Start_time:[ \t]*(.*?)[ \t]*$",
+            output,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        runtime_match = re.search(
+            r"^[ \t]*Runtime_sec:[ \t]*(\d+)[ \t]*$",
+            output,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        if start_match is None or runtime_match is None:
+            raise RuntimeError(f"Unable to parse MS3 application runtime: {output!r}")
+
+        start_time = start_match.group(1).strip()
+        if not start_time or start_time.upper() == "NEVER":
+            raise RuntimeError(
+                f"MS3 application runtime is not initialized: {output!r}"
+            )
+
+        return {
+            "start_time": start_time,
+            "runtime_seconds": int(runtime_match.group(1)),
+        }
 
     def get_modem_state(self) -> Optional[str]:
         return self._parse_modem_state(self.get_meter_status_text())
@@ -889,7 +975,7 @@ class SSHMeter(sshkit.Client):
                 steps.append(aliases)
 
         if reset_to_service:
-            self.force_diagnostics()
+            self.force_diagnostics(settle_delay=0)
             time.sleep(settle_delay)
         elif not self.in_diagnostics():
             self.press('diagnostics')
@@ -950,7 +1036,7 @@ class SSHMeter(sshkit.Client):
             # CANCEL presses retain the matching prefix.
             if common_depth < len(current_path):
                 if common_depth == 0:
-                    self.force_diagnostics()
+                    self.force_diagnostics(settle_delay=0)
                 else:
                     for _ in range(len(current_path) - common_depth):
                         self.press("cancel", delay=press_delay)
@@ -983,7 +1069,7 @@ class SSHMeter(sshkit.Client):
                 if problem_started is None:
                     problem_started = now
                 elif now - problem_started >= page_timeout:
-                    self.force_diagnostics()
+                    self.force_diagnostics(settle_delay=0)
                     problem_started = None
                 time.sleep(settle_delay)
                 continue
@@ -1028,6 +1114,8 @@ class SSHMeter(sshkit.Client):
         """
         Sends a button press using user-friendly string. 
         ** UK meters need a persistent connection for comamnds to work quickly. Otherwise you will see very slow button presses, etc.
+        ``delay`` is a fixed wait after sending the command; it does not verify
+        that the meter has finished rendering the resulting UI page.
         Examples:
             press('plus'), press('cancel'), press('1'), press('A'), press('Enter')
         """
@@ -1818,22 +1906,40 @@ fclose($myfile);
             self.status = "ready"
 
     def update_display_results(self, shared: SharedState) -> None:
-        """Update the meter's _display_results dict based on the completed job in SharedState."""
-        # TODO: Support operator cycle results
+        """Update the meter display payload for a completed supported cycle."""
         program_name = shared.current_program
-        if program_name not in ["cycle_all", "physical_cycle_all"]:
+        if program_name not in ["cycle_all", "physical_cycle_all", "operator_cycle_all"]:
             shared.log(f"unable to update display results for program_name = '{program_name}'", console=True)
+            return
+
+        meter_info = {
+            "IP": self.host,
+            "Hostname": self.hostname,
+            "Meter Type": self.meter_type,
+            "Meter Region": self.meter_region or "N/A",
+        }
+        dev_res = {k: str(v).lower() for k, v in shared.device_results.items()}
+        other_info = {k: str(v) for k, v in shared.device_meta.items()}
+        other_info["Error"] = shared.last_error or "None"
+
+        if program_name == "operator_cycle_all":
+            operator_results = {
+                "overall_result": "FAIL" if any(v == "fail" for v in dev_res.values()) else "PASS",
+                "meter_info": meter_info,
+                "operator": {
+                    "device_results": dev_res,
+                    "other_info": other_info,
+                },
+            }
+            write_results_json(self, operator_results)
+            self.set_ui_mode("results")
             return
 
         # Initialize _display_results if it doesn't exist yet
         if not hasattr(self, "_display_results") or self._display_results is None:
             self._display_results = {
                 "overall_result": "N/A",
-                "meter_info": {
-                    "IP": self.host,
-                    "Hostname": self.hostname,
-                    "Meter Type": self.meter_type
-                },
+                "meter_info": meter_info,
                 "passive": {
                     "device_results": {},
                     "other_info": {}
@@ -1843,16 +1949,13 @@ fclose($myfile);
                     "other_info": {}
                 }
             }
+        else:
+            self._display_results["meter_info"] = meter_info
 
         section = "passive" if program_name == "cycle_all" else "physical"
 
-        # device_results
-        dev_res = {k: str(v).lower() for k, v in shared.device_results.items()}
         self._display_results[section]["device_results"] = dev_res
 
-        # other_info
-        other_info = {k: str(v) for k, v in shared.device_meta.items()}
-        other_info["Error"] = shared.last_error or "None"
         self._display_results[section]["other_info"] = other_info
 
         # compute overall_result: FAIL if any device result is "fail" (across both sections)

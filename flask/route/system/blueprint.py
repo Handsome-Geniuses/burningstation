@@ -7,7 +7,7 @@ import os
 import signal
 import socket
 import struct
-from lib.automation.jobs import start_job
+from lib.automation.jobs import start_job, submit_operator_response
 from lib.sse.question import setResponse
 from lib.utils import secrets
 from lib.hardware import HardwareCapabilityUnavailable, hardware
@@ -151,6 +151,24 @@ def __request_response():
     if not valid:
         return "invalid/incorrect type", 400
 
+    return "", 200
+
+
+@bp.post("/operator/response")
+def __operator_response():
+    """Receive an answer from an operator-test meter dialog."""
+    args = flask.request.get_json(silent=True) or {}
+    meter_ip = args.get("meter_ip")
+    test = args.get("test")
+    value = args.get("value")
+    if not isinstance(meter_ip, str) or not meter_ip:
+        return "meter_ip is required", 400
+    if not isinstance(test, str) or not test:
+        return "test is required", 400
+    if not isinstance(value, bool):
+        return "value must be a boolean", 400
+    if not submit_operator_response(meter_ip, test, value):
+        return "operator test is no longer running", 409
     return "", 200
 
 

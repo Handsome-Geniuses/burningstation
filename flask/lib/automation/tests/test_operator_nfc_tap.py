@@ -10,6 +10,7 @@ from types import TracebackType
 from typing import Any, Dict, List, Optional, Tuple
 
 from lib.automation.helpers import StopAutomation, check_stop_event
+from lib.automation.operator_feedback import publish_operator_feedback
 from lib.automation.shared_state import SharedState
 from lib.meter.ssh_meter import SSHMeter
 
@@ -255,6 +256,46 @@ def _current_attempt(state: OperatorNFCTapRunState) -> Optional[Dict[str, Any]]:
     return state.attempts[-1]
 
 
+def _publish_nfc_feedback(
+    meter: SSHMeter,
+    shared: SharedState,
+    state: OperatorNFCTapRunState,
+    *,
+    status: str,
+    active: bool = True,
+    error: str = "",
+) -> None:
+    attempts = [
+        {
+            key: attempt.get(key)
+            for key in ("attempt_number", "status", "card_masked", "card_last4", "retry_reason")
+        }
+        for attempt in state.attempts[-6:]
+    ]
+    publish_operator_feedback(
+        meter,
+        shared,
+        test="contactless",
+        title="Contactless card test",
+        instruction=(
+            "Present a contactless QA card when the reader is on."
+            if state.reader_state in {"on", "turning_on", "off"}
+            else "Wait while the contactless reader changes state."
+        ),
+        status=status,
+        current=min(len(state.card_last4s), state.required_success_count),
+        total=state.required_success_count,
+        details={
+            "reader_state": state.reader_state,
+            "card_last4s": state.card_last4s[-8:],
+            "attempts": attempts,
+            "recent_events": state.journal_events[-5:],
+        },
+        active=active,
+        error=error,
+    )
+
+
 def _record_journal_event(
     shared: SharedState,
     state: OperatorNFCTapRunState,
@@ -355,6 +396,7 @@ def _poll_nfc_journal(
     # Advance only after the complete JSON batch parses and processes successfully.
     state.current_journal_cursor = entries[-1]["cursor"]
     state.journal_entries_processed += len(entries)
+    _publish_nfc_feedback(meter, shared, state, status="running")
 
 
 def _fetch_nfc_page(
@@ -414,6 +456,7 @@ def _start_attempt(
         f"operator NFC attempt {attempt_number} started with plus; "
         f"progress={len(state.card_last4s)}/{state.required_success_count}"
     )
+    _publish_nfc_feedback(meter, shared, state, status="running")
 
 
 def _finish_attempt_from_page(
@@ -458,10 +501,11 @@ def _finish_attempt_from_page(
         completed,
         state.required_success_count,
     )
-    # TODO (Johnson): Update something on the UI for the operator to see
+    _publish_nfc_feedback(meter, shared, state, status="running")
 
 
 def _interrupt_active_attempt(
+    meter: SSHMeter,
     shared: SharedState,
     state: OperatorNFCTapRunState,
     reason: str,
@@ -478,6 +522,7 @@ def _interrupt_active_attempt(
     shared.log(
         f"operator NFC attempt {attempt['attempt_number']} interrupted: {reason}"
     )
+    _publish_nfc_feedback(meter, shared, state, status="running")
 
 
 def _recover_contactless_page(
@@ -489,7 +534,7 @@ def _recover_contactless_page(
     shared.log(
         f"operator NFC left the contactless page ({previous_title!r}); recovering"
     )
-    _interrupt_active_attempt(shared, state, "contactless_page_lost")
+    _interrupt_active_attempt(meter, shared, state, "contactless_page_lost")
     meter.goto_nfc()
     page_html = meter.get_ui_page_html(timeout=PAGE_FETCH_TIMEOUT_S)
     snapshot = _parse_nfc_page(page_html)
@@ -544,6 +589,7 @@ def _cleanup_nfc(
         state.cleanup_success = False
         state.cleanup_error = str(exc)
         shared.log(f"operator NFC cleanup failed: {state.cleanup_error}")
+    _publish_nfc_feedback(meter, shared, state, status="cleaning")
 
 
 def _combine_errors(primary_error: str, cleanup_error: str) -> str:
@@ -650,6 +696,7 @@ def test_operator_nfc_tap(
             "operator NFC ready; present a contactless card after the reader "
             f"starts | page_title={initial_snapshot.title!r}"
         )
+        _publish_nfc_feedback(meter, shared, state, status="ready")
 
         while True:
             check_stop_event(shared)
@@ -778,6 +825,14 @@ def test_operator_nfc_tap(
             PROGRESS_PROGRAM,
             min(len(state.card_last4s), state.required_success_count),
             state.required_success_count,
+        )
+        _publish_nfc_feedback(
+            meter,
+            shared,
+            state,
+            status="pass" if state.success else "fail",
+            active=False,
+            error=state.final_error,
         )
 
     if caught_exception is not None:

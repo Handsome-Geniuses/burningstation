@@ -249,4 +249,4 @@ def physical_cycle_all(
 
     # shared.log(f"Final results: {shared.device_results}")
     if not meter.in_diagnostics():
-        meter.press("diagnostics")
+        meter.press("diagnostics", delay=0.4)

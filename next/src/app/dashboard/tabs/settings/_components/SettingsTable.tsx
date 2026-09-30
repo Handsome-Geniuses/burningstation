@@ -3,7 +3,9 @@
 import React from "react"
 import {
     ArrayRow,
+    BackEnterOffsetsRow,
     BooleanRow,
+    CoinRequirementsRow,
     IntegerRow,
     ObjectRow,
     registerSettingsTable,
@@ -38,6 +40,20 @@ export const SettingsTable = ({
                     const node = resolveSchemaNode(rawNode, rootSchema)
                     const value = currentValue?.[fieldKey]
                     const nextPath = [...path, fieldKey]
+
+                    if (nextPath.join(".") === "operator.coins.coin_requirements") {
+                        return (
+                            <CoinRequirementsRow
+                                key={nextPath.join(".")}
+                                fieldKey={fieldKey}
+                                node={node}
+                                value={value}
+                                path={nextPath}
+                                disabled={disabled}
+                                onChange={onChange}
+                            />
+                        )
+                    }
 
                     if (node.type === "object" || node.properties) {
                         return (
@@ -83,6 +99,20 @@ export const SettingsTable = ({
                     }
 
                     if (node.type === "array") {
+                        if (fieldKey === "back_enter_offsets_mm") {
+                            return (
+                                <BackEnterOffsetsRow
+                                    key={nextPath.join(".")}
+                                    fieldKey={fieldKey}
+                                    node={node}
+                                    value={value}
+                                    path={nextPath}
+                                    disabled={disabled}
+                                    onChange={onChange}
+                                />
+                            )
+                        }
+
                         return (
                             <ArrayRow
                                 key={nextPath.join(".")}

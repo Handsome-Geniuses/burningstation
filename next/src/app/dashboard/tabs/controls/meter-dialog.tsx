@@ -27,6 +27,7 @@ import {
 import { MeterState, SystemState } from "../../store/system"
 import type { SchemaNode, SettingsObject } from "../settings/_components/types"
 import { OperatorKeypadPanel } from "./operator-keypad-panel"
+import { OperatorFeedbackPanel } from "./operator-feedback-panel"
 import { VersionChecksPanel } from "./version-checks-panel"
 
 const BAY_GUESS_LABELS: Record<string, string> = {
@@ -82,10 +83,12 @@ export const MeterDialog = ({
     const isOperatorKeypadRunning = meter?.current_action === "operator_keypad"
     const isBlinking = meter?.current_action === "blinking"
     const keypadState = meter ? systemState.operatorKeypad[meter.ip] : undefined
+    const operatorFeedback = meter ? systemState.operatorFeedback[meter.ip] : undefined
     const keypadIncomplete = keypadState ? keypadState.total <= 0 || keypadState.current < keypadState.total : false
     const isOperatorCycleKeypadActive = Boolean(isOperatorRunning && keypadIncomplete)
     const showOperatorKeypad = Boolean(isOperatorKeypadRunning || isOperatorCycleKeypadActive)
-    const showVersionChecks = Boolean(meter && !showOperatorKeypad && view === "version-checks")
+    const showOperatorFeedback = Boolean(isOperatorRunning && operatorFeedback?.active && !showOperatorKeypad)
+    const showVersionChecks = Boolean(meter && !showOperatorKeypad && !showOperatorFeedback && view === "version-checks")
 
     React.useEffect(() => {
         setView("actions")
@@ -126,7 +129,7 @@ export const MeterDialog = ({
                     </div>
                 </DialogHeader>
 
-                {!showOperatorKeypad && view === "actions" &&
+                {!showOperatorKeypad && !showOperatorFeedback && view === "actions" &&
                     <div className="p-4 grid grid-cols-3 gap-2">
                         {systemState.playground &&
                             <Button
@@ -194,6 +197,13 @@ export const MeterDialog = ({
                         keypadState={keypadState}
                         mock={systemState.hardware.mock}
                         running={Boolean(isOperatorKeypadRunning || isOperatorCycleKeypadActive)}
+                    />
+                }
+
+                {meter && showOperatorFeedback && operatorFeedback &&
+                    <OperatorFeedbackPanel
+                        meterIp={meter.ip}
+                        feedback={operatorFeedback}
                     />
                 }
 

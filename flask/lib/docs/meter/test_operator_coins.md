@@ -143,3 +143,10 @@ also retain the complete attempt list and journal acquisition statistics.
 7. Always clear meter coin tallies.
 8. Write final metadata and logs, broadcast the final state, and propagate any
    failure so the grouped operator cycle stops.
+
+## Operator UI feedback
+
+The active meter dialog receives `operator_feedback` snapshots containing the
+same per-denomination `detections` counts used by the test. When requirements
+are met or the test exits, it first enters a `cleaning` state that tells the
+operator to stop inserting coins while `clear_coin_tallies()` completes.

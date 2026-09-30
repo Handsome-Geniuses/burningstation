@@ -13,7 +13,6 @@ from lib.automation.shared_state import SharedState
 from lib.meter.ssh_meter import SSHMeter
 from lib.sse.sse_queue_manager import SSEQM
 
-# TODO: Add keypad press visuals on burningstation UI. Potentially require buttons to be pressed in a specific order
 
 # Keep flask/lib/docs/meter/test_operator_keypad.md in sync when changing this test.
 KEYPAD_PAGE = "Service:Utilities:Peripherals:Keyboard"
