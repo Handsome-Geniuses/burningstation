@@ -73,8 +73,16 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         if (typeof key !== 'string' || !(key in initialSystemState)) return
         const typedKey = key as keyof typeof initialSystemState
 
-        if (typedKey === "workOrder") {
-            if (value !== null && typeof value !== "number") {
+        if (typedKey === "workOrder" || typedKey === "batteryPercent") {
+            if (
+                value !== null
+                && (typeof value !== "number" || !Number.isFinite(value))
+            ) {
+                notify.warn(`>[bad state] ${key} : ${value} `)
+                return
+            }
+
+            if (typedKey === "batteryPercent" && value !== null && (value < 0 || value > 100)) {
                 notify.warn(`>[bad state] ${key} : ${value} `)
                 return
             }

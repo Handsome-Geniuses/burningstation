@@ -6,9 +6,13 @@
 import threading
 import time
 from lib.automation.jobs import start_passive_job
+from lib.hardware import hardware
+from lib.hardware.bms100 import read_battery_percentage
 from lib.meter.meter_manager import METERMANAGER as mm
+from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.system.states import states
 from lib.system.station import load_R_to_M, load_M_to_L, load_L, load_M, load_R
+from lib.utils import secrets
 
 def __temporary_overnight_runner():
     from lib.automation.jobs import start_job
@@ -88,6 +92,23 @@ def task_refresh_meters(count):
                 # start_passive_job(ip)
 
 
+def refresh_battery_state():
+    if not hardware.has("battery"):
+        return
+
+    percentage = 69 if secrets.MOCK else read_battery_percentage()
+    if states.get("batteryPercent") == percentage:
+        return
+
+    states["batteryPercent"] = percentage
+    SSEQM.broadcast("state", key_payload("batteryPercent", percentage))
+
+
+def task_refresh_battery(count):
+    if count % 5 == 0:
+        refresh_battery_state()
+
+
 
 def __interval_task():
     count = -5     # start this earlier to trigger
@@ -100,6 +121,7 @@ def __interval_task():
             # temporary_belt_burner(count)
             # temporary_overnight_runner(count)
             task_refresh_meters(count)
+            task_refresh_battery(count)
 
         except:
             pass

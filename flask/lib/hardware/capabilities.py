@@ -28,12 +28,13 @@ CAPABILITIES = (
     "emergency_gpio",
     "robot_remote_power",
     "auto_mode",
+    "battery",
 )
 
 
 PROFILE_CAPABILITIES: dict[str, dict[str, bool]] = {
-    "full": {capability: True for capability in CAPABILITIES},
-    "portable": {capability: False for capability in CAPABILITIES},
+    "full": {capability: capability != "battery" for capability in CAPABILITIES},
+    "portable": {capability: capability == "battery" for capability in CAPABILITIES},
 }
 
 

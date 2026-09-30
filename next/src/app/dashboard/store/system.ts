@@ -11,6 +11,7 @@ export type HardwareCapability =
     | "emergency_gpio"
     | "robot_remote_power"
     | "auto_mode"
+    | "battery"
 
 export type HardwareState = {
     profile: string
@@ -114,6 +115,9 @@ export interface SystemState {
     // work order
     workOrder: number | null
 
+    // portable BMS state; null means unavailable
+    batteryPercent: number | null
+
     // running
     running: boolean
 
@@ -140,6 +144,7 @@ export const initialSystemState: SystemState = {
             emergency_gpio: true,
             robot_remote_power: true,
             auto_mode: true,
+            battery: false,
         },
     },
     motors: [0, 0, 0],
@@ -153,6 +158,7 @@ export const initialSystemState: SystemState = {
     operatorKeypad: {},
     currentTab: undefined,
     workOrder: null,
+    batteryPercent: null,
     running: false,
     tower: [false, false, false, false],
     lamp: [0, 0, 0, 0],
