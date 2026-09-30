@@ -144,6 +144,12 @@ class SystemVersions(TypedDict):
     system_version: str
     system_sub_version: str
 
+
+class AppRuntimeInfo(TypedDict):
+    start_time: str
+    runtime_seconds: int
+
+
 MeterType = Literal["","msx","ms3","ms2.5"]
 MeterRegion = Literal["","us","uk"]
 
@@ -483,9 +489,21 @@ class SSHMeter(sshkit.Client):
     def _send_udp_packet_hex_detached(self, packet_hex: str, *, port: int) -> None:
         self._fire_and_forget(self._udp_packet_hex_command(packet_hex, port=port))
 
-    def _send_rtsc_command(self, command: str, port: int = 8008) -> str:
+    def _send_rtsc_command(
+        self,
+        command: str,
+        port: int = 8008,
+        timeout: Optional[float] = None,
+    ) -> str:
+        timeout_arg = ""
+        if timeout is not None:
+            if not math.isfinite(timeout) or timeout <= 0:
+                raise ValueError(f"Invalid RTSC timeout: {timeout!r}")
+            timeout_arg = f"-T {timeout:g} "
+
         out, err = self._cli_full(
-            f"printf %s {shlex.quote(command)} | socat - UDP:127.0.0.1:{port}"
+            f"printf %s {shlex.quote(command)} | "
+            f"socat {timeout_arg}- UDP:127.0.0.1:{port}"
         )
         if err and not out:
             raise RuntimeError(err)
@@ -677,9 +695,14 @@ class SSHMeter(sshkit.Client):
     def in_splash(self):
         """ Checks if the meter is in splash screen """
         page_text = self._get_uipage_html(timeout=0.2).lower()
-        if 'unable to open file' in page_text:
-            return True
-        return False
+        _in_splash = (
+            "unable to open file" in page_text
+            or (
+                "ui_0.html" in page_text
+                and "no such file or directory" in page_text
+            )
+        )
+        return _in_splash
 
     def in_diagnostics(self):
         """Return whether the latest UIPage HTML indicates Diagnostics mode.
@@ -739,6 +762,59 @@ class SSHMeter(sshkit.Client):
 
     def get_meter_status_text(self) -> str:
         return self.cli("echo 'cmd.main.meter:status' | socat - UDP:127.0.0.1:8008")
+
+    def get_linux_uptime_seconds(self) -> float:
+        """Return elapsed seconds since Linux boot from ``/proc/uptime``."""
+        output = self.cli("cat /proc/uptime")
+        fields = output.split()
+        if not fields:
+            raise RuntimeError("Unable to read Linux uptime from /proc/uptime")
+
+        try:
+            uptime_seconds = float(fields[0])
+        except ValueError as exc:
+            raise RuntimeError(f"Unable to parse Linux uptime: {output!r}") from exc
+
+        if not math.isfinite(uptime_seconds) or uptime_seconds < 0:
+            raise RuntimeError(f"Invalid Linux uptime: {uptime_seconds!r}")
+        return uptime_seconds
+
+    def get_app_runtime_info(self) -> AppRuntimeInfo:
+        """Return validated MS3 application start time and runtime.
+
+        Raises ``RuntimeError`` while the application status endpoint is
+        unavailable or returns an incomplete/uninitialized response.
+        """
+        try:
+            output = self._send_rtsc_command("cmd.status", timeout=2.0)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Unable to read MS3 application runtime: {exc}"
+            ) from exc
+
+        start_match = re.search(
+            r"^[ \t]*Start_time:[ \t]*(.*?)[ \t]*$",
+            output,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        runtime_match = re.search(
+            r"^[ \t]*Runtime_sec:[ \t]*(\d+)[ \t]*$",
+            output,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        if start_match is None or runtime_match is None:
+            raise RuntimeError(f"Unable to parse MS3 application runtime: {output!r}")
+
+        start_time = start_match.group(1).strip()
+        if not start_time or start_time.upper() == "NEVER":
+            raise RuntimeError(
+                f"MS3 application runtime is not initialized: {output!r}"
+            )
+
+        return {
+            "start_time": start_time,
+            "runtime_seconds": int(runtime_match.group(1)),
+        }
 
     def get_modem_state(self) -> Optional[str]:
         return self._parse_modem_state(self.get_meter_status_text())

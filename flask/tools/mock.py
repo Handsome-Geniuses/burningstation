@@ -276,7 +276,6 @@ def _register_mock_meter(host: str):
     mm._METERMANAGER__meters.add(host)
     mm._METERMANAGER__stale_counts.pop(host, None)
     mm._METERMANAGER__attempts.pop(host, None)
-    mm._METERMANAGER__booted.pop(host, None)
     mm._METERMANAGER__splash.discard(host)
     master.broadcast(
         "meter",
