@@ -144,6 +144,10 @@ def _apply_meter_runtime_mocks(meter: SSHMeter):
     meter.setup_custom_display = lambda: None
     meter.beep = lambda count=1, interval=0: None
     meter.get_meter_status_text = lambda: MOCK_STATUS_TEXT
+    meter.get_app_runtime_info = lambda: {
+        "start_time": "2025-01-01 00:00:00",
+        "runtime_seconds": 3600,
+    }
     meter.connected = True
     meter.status = "ready"
     meter.results = {}

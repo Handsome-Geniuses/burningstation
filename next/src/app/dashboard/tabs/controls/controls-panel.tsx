@@ -415,24 +415,63 @@ export function WorkOrder({
     )
 }
 
-export function ControlsPanel({
-    systemState,
-    serverSettings,
-    className,
-}: {
+type ControlsPanelProps = {
     systemState: SystemState
     serverSettings: SettingsObject | null
-} & React.ComponentProps<"div">) {
+} & React.ComponentProps<"div">
+
+const PANELS = [
+    { id: "controls", title: "Control Panel", Content: ControlsPanelContent },
+    { id: "status", title: "Status Panel", Content: StatusPanelContent },
+]
+
+function StatusPanelContent() {
+    return null
+}
+
+export function ControlsPanel({ systemState, serverSettings, className }: ControlsPanelProps) {
+    const [panelIndex, setPanelIndex] = React.useState(0)
+    const activePanel = PANELS[panelIndex]
+    const nextPanel = PANELS[(panelIndex + 1) % PANELS.length]
+
+    return (
+        <div className={cn(PANEL, className)}>
+            <button
+                type="button"
+                className={cn(PANEL_HEADER, "w-full cursor-pointer focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2")}
+                onClick={() => setPanelIndex(index => (index + 1) % PANELS.length)}
+                aria-label={`${activePanel.title}. Switch to ${nextPanel.title}`}
+                title={`Switch to ${nextPanel.title}`}
+            >
+                {activePanel.title}
+            </button>
+            {/* Overlapping panels retain their state and keep the shared space stable. */}
+            <div className="grid">
+                {PANELS.map(({ id, Content }, index) => (
+                    <div
+                        key={id}
+                        className={cn("col-start-1 row-start-1", index !== panelIndex && "invisible")}
+                        inert={index !== panelIndex}
+                        aria-hidden={index !== panelIndex}
+                    >
+                        <Content systemState={systemState} serverSettings={serverSettings} />
+                    </div>
+                ))}
+            </div>
+        </div>
+    )
+}
+
+function ControlsPanelContent({
+    systemState,
+    serverSettings,
+}: ControlsPanelProps) {
     const isManual = systemState.mode == "manual"
     const loadCheck = getBooleanOption(serverSettings, "flow", "load_check", true)
     const physicalCheck = getBooleanOption(serverSettings, "flow", "physical_check", true)
     const beltAvailable = hasHardwareCapability(systemState, "belt")
 
     return (
-        <div className={cn(PANEL, className)}>
-            <div className={PANEL_HEADER}>
-                Control Panel
-            </div>
             <div className="flex flex-col px-4">
                 <SectionDivider label="work order" className="pt-2" />
                 <WorkOrder systemState={systemState}/>
@@ -453,6 +492,5 @@ export function ControlsPanel({
                     </>
                 )}
             </div>
-        </div>
     )
 }
