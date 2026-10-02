@@ -170,5 +170,33 @@ class HardwareProfileSmokeTests(unittest.TestCase):
                 self.assertIn(f"devwo-wipe-ok-mock-{mock}", result.stdout)
 
 
+    def test_mock_job_cleanup_targets_reserved_hostnames(self):
+        source = """
+        from unittest.mock import MagicMock
+        from lib import database
+        from lib.system import sim
+        import os
+        if os.environ["MOCK"] == "1":
+            import tools.mock
+
+        connection = MagicMock()
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.rowcount = 3
+        assert database.delete_mock_meter_jobs(conn=connection) == 3
+        sql, params = cursor.execute.call_args.args
+        assert "DELETE FROM meter_job" in sql
+        assert "mj.meter_id = m.id" in sql
+        assert "m.hostname = ANY(%s)" in sql
+        assert params == ([f"9009009{i}" for i in range(10)],)
+        database.delete_mock_meter_jobs = lambda: 3
+        payload, status = sim.on_action("wipe_mock_jobs")
+        assert status == 200
+        assert payload == {"status": "deleted", "count": 3}
+        """
+        for mock in ("0", "1"):
+            with self.subTest(mock=mock):
+                self.run_python(source, profile="portable", mock=mock)
+
+
 if __name__ == "__main__":
     unittest.main()

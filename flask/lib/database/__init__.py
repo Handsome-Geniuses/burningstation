@@ -313,6 +313,27 @@ def delete_meter_jobs_for_meter_identifier(identifier: int | str, conn: None | p
             return cur.rowcount
 
 
+def delete_mock_meter_jobs(conn: None | psycopg.Connection = None):
+    """Delete jobs belonging to the ten reserved mock meter hostnames."""
+    hostnames = [f"9009009{index}" for index in range(10)]
+    sql = """
+        DELETE FROM meter_job mj
+        USING meter m
+        WHERE mj.meter_id = m.id
+          AND m.hostname = ANY(%s);
+    """
+
+    if conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (hostnames,))
+            return cur.rowcount
+
+    with psycopg.connect(dbcs) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (hostnames,))
+            return cur.rowcount
+
+
 def delete_meter_jobs_for_work_order(work_order: int, conn: None | psycopg.Connection = None):
     """
     Delete meter_job rows whose joined meter row has the given work_order.

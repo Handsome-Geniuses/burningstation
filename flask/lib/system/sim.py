@@ -265,6 +265,11 @@ def on_action(action, **kwargs):
 
         count = database.delete_meter_jobs_for_work_order(999999999)
         res = {"status": "deleted", "work_order": 999999999, "count": count}, 200
+    elif action == "wipe_mock_jobs":
+        from lib import database
+
+        count = database.delete_mock_meter_jobs()
+        res = {"status": "deleted", "count": count}, 200
     elif not secrets.MOCK:
         print("🕯️ [sim] not mock so not safe to sim", fg="#ffaa00")
     elif action == "roller":

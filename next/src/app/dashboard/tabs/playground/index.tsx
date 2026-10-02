@@ -247,34 +247,35 @@ const LogMeters = () => {
     )
 }
 
-const DevWorkOrderCleanup = () => {
+const DevDataCleanup = () => {
     const { run, running } = useAsyncAction()
-    const onWipe = run(async () => {
+    const onWipe = (target: "WO" | "MOCK") => run(async () => {
         try {
-            const res = await flask.handleAction("sim", "wipe_devwo_jobs")
+            const action = target === "WO" ? "wipe_devwo_jobs" : "wipe_mock_jobs"
+            const res = await flask.handleAction("sim", action)
             const payload = await res.json().catch(() => ({}))
 
             if (!res.ok) {
-                throw new Error(payload?.error ?? `Failed to wipe DEVWO jobs (${res.status})`)
+                throw new Error(payload?.error ?? `Failed to wipe ${target} jobs (${res.status})`)
             }
 
-            notify.success(`deleted ${payload?.count ?? 0} DEVWO job rows`)
+            notify.success(`deleted ${payload?.count ?? 0} ${target} job rows`)
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to wipe DEVWO jobs"
+            const msg = err instanceof Error ? err.message : `Failed to wipe ${target} jobs`
             notify.error(msg)
         }
     })
 
     return (
-        <PGCard label="Dev Work Order" desc="delete WO999999999 job rows">
-            <Button
-                variant="outline"
-                className="w-full"
-                onClick={onWipe}
-                disabled={running}
-            >
-                wipe WO999999999
-            </Button>
+        <PGCard label="Wipe Dev Data">
+            <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={onWipe("WO")} disabled={running}>
+                    wipe WO
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={onWipe("MOCK")} disabled={running}>
+                    wipe MOCK
+                </Button>
+            </div>
         </PGCard>
     )
 }
@@ -324,7 +325,7 @@ export const PlaygroundTab = () => {
             <RandomMeterSim />
             <AddFakeMeterSim />
             <LogMeters />
-            <DevWorkOrderCleanup />
+            <DevDataCleanup />
             <NumpadPromptPlayground />
             <MeterBayToggleSim />
             <LoadingMeter />

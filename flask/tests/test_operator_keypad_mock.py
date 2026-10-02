@@ -33,6 +33,46 @@ class OperatorKeypadMockTests(unittest.TestCase):
             )
         return result
 
+    def test_mock_runner_skips_ssh_listener_and_preserves_logs(self):
+        result = self.run_python(
+            """
+            from pathlib import Path
+            from tempfile import TemporaryDirectory
+            from types import SimpleNamespace
+            from unittest.mock import patch
+            from lib.automation import runner
+            from lib.automation.shared_state import SharedState
+
+            def test_job(meter, shared, **kwargs):
+                shared.log("test completed")
+
+            for is_mock in (True, False):
+                shared = SharedState()
+                shared.current_program = "dummy"
+                meter = SimpleNamespace(
+                    is_mock=is_mock, host="192.168.69.900" if is_mock else "192.168.69.10",
+                    hostname="90090090", pswd="", user="root",
+                    clear_banner_text=lambda: None,
+                )
+                with TemporaryDirectory() as directory:
+                    logfile = Path(directory) / "job.log"
+                    shared.set_logfile(str(logfile))
+                    with patch.dict(runner.PROGRAM_REGISTRY, {"dummy": test_job}), \
+                         patch.object(runner, "start_listener_thread") as listener:
+                        runner.run_test_job(meter, "dummy", {"monitors": []}, shared)
+                    shared.flush_logs()
+                    assert "test completed" in logfile.read_text()
+                    assert not shared.stop_event.is_set()
+                    if is_mock:
+                        listener.assert_not_called()
+                    else:
+                        listener.assert_called_once()
+                        listener.return_value.join.assert_called_once_with(timeout=5)
+            print("mock-listener-skipped-real-listener-preserved")
+            """
+        )
+        self.assertIn("mock-listener-skipped-real-listener-preserved", result.stdout)
+
     def test_operator_keypad_sse_payload_contains_layout_fields(self):
         result = self.run_python(
             """
@@ -370,14 +410,28 @@ class OperatorKeypadMockTests(unittest.TestCase):
             import tools.mock as mock
             from lib.meter.meter_manager import METERMANAGER as mm
 
-            payload = mock.add_mock_meter("192.168.9.245")
+            from unittest.mock import patch
+
+            def register(meter):
+                meter.db_id = 42
+                return (42,)
+
+            with patch.object(mock.database, "insert_sshmeter", side_effect=register) as insert, \
+                 patch.object(mock.database, "update_meter_work_order"):
+                payload = mock.add_mock_meter("192.168.9.245")
+            insert.assert_called_once()
+            assert mm.meters["192.168.9.245"].db_id == 42
+            with patch.object(mock.database, "insert_meter_jobs") as save:
+                mock._insert_mock_job("192.168.9.245", "operator_cycle_all")
+            assert save.call_args.args[0] == 42
+            assert save.call_args.args[1][0]["data"]["kwargs"]["mock"] is True
             meters = mock.list_mock_meters()
 
             assert payload["status"] == "added", payload
             assert payload["ip"] == "192.168.9.245", payload
             assert "192.168.9.245" in mm.meters
             assert len(meters) == 1, meters
-            assert meters[0]["hostname"] == "30000245", meters
+            assert meters[0]["hostname"] == "90090095", meters
             print("portable-mock-add-meter-ok")
             """,
             profile="portable",

@@ -54,7 +54,9 @@ def run_test_job(
         logfile_name=f'[{meter.hostname}]{datetime.now().strftime("d%y%m%dt%H%M%S")}'
         if shared.current_program: logfile_name+=f"-{shared.current_program}"
 
-    if devices or log or verbose:
+    if getattr(meter, "is_mock", False):
+        shared.log("Mock meter: SSH journal listener skipped")
+    elif devices or log or verbose:
         listener_thread = start_listener_thread(
             shared=shared,
             host=meter.host,
