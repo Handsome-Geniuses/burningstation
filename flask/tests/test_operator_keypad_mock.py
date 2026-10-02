@@ -73,6 +73,83 @@ class OperatorKeypadMockTests(unittest.TestCase):
         )
         self.assertIn("mock-listener-skipped-real-listener-preserved", result.stdout)
 
+    def test_standalone_operator_mock_jobs_save_results_and_duration(self):
+        self.run_python(
+            """
+            from unittest.mock import patch
+            import tools.mock as mock
+            from lib.automation import jobs
+            from lib.automation.tests.operator_standalone import OPERATOR_PROGRAMS
+            from lib.meter.meter_manager import METERMANAGER as mm
+
+            host = "192.168.69.900"
+            meter = mock.SSHMeter(host)
+            meter.db_id = 42
+            mm.meters[host] = meter
+            configs = {device: {"job_count": 1} for device in OPERATOR_PROGRAMS.values()}
+            with patch.object(jobs, "build_operator_kwargs", return_value=configs), \
+                 patch.object(jobs, "insert_meter_jobs") as save:
+                for program, device in OPERATOR_PROGRAMS.items():
+                    if device == "keypad":
+                        continue
+                    ok, message = jobs.start_operator_test_job(host, program)
+                    assert ok, message
+                    jobs._threads[host].join(timeout=3)
+                    assert not jobs._threads[host].is_alive()
+                    meter_id, rows, log = save.call_args.args
+                    row = rows[0]
+                    assert meter_id == 42
+                    assert row["name"] == program
+                    assert row["status"] == "pass", row
+                    assert row["data"]["results"][device]["status"] == "pass"
+                    assert row["data"]["duration_s"] > 0
+                    assert row["data"]["device_meta"][device]["duration_s"] > 0
+                    assert row["data"]["device_meta"][device]["mock"] is True
+                    assert "duration_s=" in log
+                assert save.call_count == 6
+
+                ok, message = jobs.start_operator_test_job(host, "operator_coins")
+                assert ok, message
+                jobs.stop_job(host)
+                jobs._threads[host].join(timeout=3)
+                row = save.call_args.args[1][0]
+                assert row["status"] == "fail", row
+                assert row["data"]["failure_reason"], row
+                assert "duration_s" in row["data"]
+            """,
+            profile="portable",
+        )
+
+    def test_standalone_real_dispatch_and_failure_timing(self):
+        self.run_python(
+            """
+            from types import SimpleNamespace
+            from unittest.mock import patch, Mock
+            from lib.automation.jobs import JobState
+            from lib.automation.tests import PROGRAM_REGISTRY
+            from lib.automation.tests import operator_standalone as standalone
+
+            meter = SimpleNamespace(is_mock=False, set_ui_mode=lambda *args: None)
+            for program, device in standalone.OPERATOR_PROGRAMS.items():
+                for fail in (False, True):
+                    shared = JobState("192.168.69.10")
+                    shared.current_program = program
+                    test = Mock(side_effect=ValueError("test failed") if fail else None)
+                    with patch.object(standalone, "OPERATOR_TESTS", [(device, test, {})]):
+                        try:
+                            PROGRAM_REGISTRY[program](meter, shared, job_count=2)
+                        except ValueError:
+                            assert fail
+                    test.assert_called_once()
+                    assert test.call_args.kwargs["job_count"] == 2
+                    meta = shared.device_meta[device]
+                    assert meta["duration_s"] >= 0
+                    assert meta["result"] == ("fail" if fail else "pass")
+                    if fail:
+                        assert meta["error"] == "test failed"
+            """
+        )
+
     def test_operator_keypad_sse_payload_contains_layout_fields(self):
         result = self.run_python(
             """
