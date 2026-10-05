@@ -175,21 +175,6 @@ export const MeterDialog = ({
                                 {label}
                             </Button>
                         ))}
-                        <Button
-                            variant="outline"
-                            onClick={run(() => meterRunPrintFw(meter?.ip))}
-                            disabled={running || !isMeterReady}
-                        >
-                            Print Info
-                        </Button>
-                        <Button
-                            variant="outline"
-                            className="gap-1 px-2 text-xs has-[>svg]:px-2"
-                            onClick={() => setView("version-checks")}
-                        >
-                            <ListChecks />
-                            Version Checks
-                        </Button>
                     </div>
                 }
 
@@ -232,7 +217,7 @@ export const MeterDialog = ({
                         </Button>
                     </DialogFooter>
                 ) : (
-                    <DialogFooter className="border-t p-4">
+                    <DialogFooter className="border-t p-4 sm:flex-wrap">
                         {systemState.playground && isPassiveRunning &&
                             <Button
                                 variant="destructive"
@@ -260,6 +245,25 @@ export const MeterDialog = ({
                                 {isStandaloneOperatorRunning ? "stop test" : "stop operator"}
                             </Button>
                         }
+                        {!showOperatorKeypad && !showOperatorFeedback && (
+                            <>
+                                <Button
+                                    variant="outline"
+                                    onClick={run(() => meterRunPrintFw(meter?.ip))}
+                                    disabled={running || !isMeterReady}
+                                >
+                                    Print Info
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    className="gap-1 px-2 text-xs has-[>svg]:px-2"
+                                    onClick={() => setView("version-checks")}
+                                >
+                                    <ListChecks />
+                                    Version Checks
+                                </Button>
+                            </>
+                        )}
                         <Button
                             variant={isBlinking ? "destructive" : "outline"}
                             className={cn("border border-border", isBlinking && "animate-pulse [animation-duration:0.5s]")}

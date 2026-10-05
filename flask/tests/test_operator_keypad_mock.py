@@ -73,6 +73,44 @@ class OperatorKeypadMockTests(unittest.TestCase):
         )
         self.assertIn("mock-listener-skipped-real-listener-preserved", result.stdout)
 
+    def test_individual_operator_buttons_override_only_job_count(self):
+        self.run_python(
+            """
+            from copy import deepcopy
+            from types import SimpleNamespace
+            from unittest.mock import Mock, patch
+            from lib.automation import jobs
+            from lib.automation.tests.operator_standalone import OPERATOR_PROGRAMS
+
+            meter = SimpleNamespace(
+                status="ready", module_info={}, meter_type="ms3", meter_region="US",
+                set_ui_mode=Mock(), setup_custom_display=Mock(),
+            )
+            for count in (0, 4):
+                configs = {
+                    device: {"job_count": count, "max_duration_s": 123}
+                    for device in OPERATOR_PROGRAMS.values()
+                }
+                configs["coins"].update(
+                    coin_requirements={"quarter": 3}, allow_rejected=False,
+                )
+                configs["keypad"]["buttons"] = ["1", "2"]
+                original = deepcopy(configs)
+                with patch.object(jobs.mm, "get_meter", return_value=meter), \
+                     patch.object(jobs, "get_default_buttons", return_value=["1", "2"]), \
+                     patch.object(jobs, "build_operator_kwargs", return_value=configs), \
+                     patch.object(jobs, "start_job", return_value=(True, "started")) as start:
+                    for program, device in OPERATOR_PROGRAMS.items():
+                        assert jobs.start_operator_test_job("host", program)[0]
+                        start.assert_called_with(
+                            "host", program, {**original[device], "job_count": 1}, verbose=True,
+                        )
+                    jobs.start_operator_job("host")
+                    start.assert_called_with("host", "operator_cycle_all", original, verbose=True)
+                assert configs == original, "Stored settings must not be mutated"
+            """
+        )
+
     def test_standalone_operator_mock_jobs_save_results_and_duration(self):
         self.run_python(
             """

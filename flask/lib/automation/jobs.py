@@ -434,13 +434,12 @@ def start_operator_test_job(meter_ip, test):
     config = build_operator_kwargs(
         modules, buttons=buttons, meter_region=getattr(meter, "meter_region", None),
     )[device]
-    if int(config.get("job_count", 0)) <= 0:
-        return False, "operator test is disabled or its hardware is unavailable"
     if device == "keypad" and not buttons:
         return False, "operator keypad has no buttons to test"
     meter.set_ui_mode("banner")
     meter.setup_custom_display()
-    return start_job(meter_ip, test, dict(config), verbose=True)
+    # Individual OP buttons always run once, retaining the test's other options.
+    return start_job(meter_ip, test, {**config, "job_count": 1}, verbose=True)
 
 
 def start_operator_keypad_job(meter_ip):
