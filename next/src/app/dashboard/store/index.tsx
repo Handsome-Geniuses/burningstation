@@ -7,8 +7,10 @@ import { LoadingGif } from "@/components/ui/loading-gif"
 import { useCountdown } from "@/hooks/useCountdown"
 import { useClientSettings } from "../tabs/settings/client/store"
 import { broadcastServerSettingsChange } from "../tabs/settings/server-store"
+import type { ActivityEntry } from "./activity"
 
 export interface StoreContextProps {
+    activity: ActivityEntry[]
     systemState: SystemState
     systemDispatch: React.Dispatch<Action>
 }
@@ -47,6 +49,7 @@ function emitAutoBayEvent(payload: unknown) {
 }
 
 export const StoreProvider = ({ children }: StoreProviderProps) => {
+    const [activity, setActivity] = useState<ActivityEntry[]>([])
     const [systemState, systemDispatch] = useReducer(reducer, initialSystemState)
     const [question, setQuestion] = useState<QuestionProps | undefined>(undefined)
     const { values: clientSettings } = useClientSettings()
@@ -236,6 +239,11 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
             const { event, payload } = data
             console.log(data)
             if (event === 'keep-alive') return
+            else if (event === 'activity_snapshot') setActivity(payload.slice(0, 20))
+            else if (event === 'activity') setActivity(previous => [
+                { ...payload, receivedAt: Date.now() },
+                ...previous.filter(entry => entry.id !== payload.id),
+            ].slice(0, 20))
             else if (event === 'state') onState(payload)
             else if (event === 'meter') onMeter(payload)
             else if (event === 'question') onQuestion(payload)
@@ -266,7 +274,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
     }, [])
 
     return (
-        <StoreContext.Provider value={{ systemState, systemDispatch }}>
+        <StoreContext.Provider value={{ systemState, systemDispatch, activity }}>
             {!systemState.connected &&
                 <LoadingGif
                     variant="fill"

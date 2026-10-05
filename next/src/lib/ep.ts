@@ -35,6 +35,8 @@ export const meterStopPassive = async (meterIp?: string) => meterRunProg(meterIp
 export const meterStopPhysical = async (meterIp?: string) => meterRunProg(meterIp, "stop_physical_job")
 export const meterRunOperator = async (meterIp?: string) => meterRunProg(meterIp, "start_operator_job")
 export const meterRunOperatorKeypad = async (meterIp?: string) => meterRunProg(meterIp, "start_operator_keypad_job")
+export const meterRunOperatorTest = async (meterIp: string | undefined, test: string) =>
+    meterRunProg(meterIp, "start_operator_test_job", { test })
 export const meterStopOperator = async (meterIp?: string) => meterRunProg(meterIp, "stop_operator_job")
 export const meterRunPrintFw = async (meterIp?: string) => await meterRunNeutralProg(meterIp, "printfw")
 export const meterRunDummy = async (meterIp?: string) => meterRunNeutralProg(meterIp, "dummy")

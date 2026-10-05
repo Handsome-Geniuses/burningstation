@@ -83,6 +83,31 @@
     display: none;
 }
 
+.scrollbar-hide {
+    scrollbar-width: none;
+}
+
+@keyframes status-entry-flash {
+    0%, 100% { opacity: 0; }
+    50% { opacity: 0.3; }
+}
+
+.status-entry-new::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: var(--status-flash-color, var(--primary));
+    opacity: 0;
+    animation: status-entry-flash 240ms ease-in-out 3;
+}
+
+.status-entry-failed { --status-flash-color: var(--destructive); }
+
+@media (prefers-reduced-motion: reduce) {
+    .status-entry-new::after { animation: none; }
+}
+
 /* @keyframes meter-shake {
     0%, 100% {
         transform: translateX(0);

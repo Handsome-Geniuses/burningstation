@@ -27,6 +27,7 @@ Commands:
     restart <target>            target: cockpit | engine | all
     stop <target>               target: cockpit | engine | all
     logs <target>               target: cockpit | engine | all
+    scan                        scan BASE/RANGE from flask/.env
     pull                        git pulls
     help                        show this help
 
@@ -37,6 +38,7 @@ Examples:
     ./bs.sh restart engine
     ./bs.sh stop engine
     ./bs.sh logs cockpit
+    ./bs.sh scan
 EOF
 }
 
@@ -53,6 +55,62 @@ load_env_file() {
         echo "Missing env file: $env_file" >&2
         exit 1
     fi
+}
+
+scan_ips() {
+    local -a scan_cmd
+    local container=""
+    if command -v docker >/dev/null 2>&1; then
+        container="$(docker compose -f "$COMPOSE_FILE" ps --status running -q burn-station-flask 2>/dev/null || true)"
+    fi
+
+    if [[ -n "$container" ]]; then
+        scan_cmd=(docker compose -f "$COMPOSE_FILE" exec -T
+            -e "BASE=${BASE:-192.168.169.}" -e "RANGE=${RANGE:-2-254}"
+            burn-station-flask python)
+    elif [[ -x flask/.venv/bin/python3 ]]; then
+        scan_cmd=(flask/.venv/bin/python3)
+    else
+        log "Scan requires the running engine container or flask/.venv. Start it with ./bs.sh start engine."
+        return 1
+    fi
+
+    "${scan_cmd[@]}" - <<'PYSCAN'
+import ipaddress
+import os
+import sys
+import time
+
+base = os.environ.get("BASE", "192.168.169.").strip()
+scan_range = os.environ.get("RANGE", "2-254").strip()
+try:
+    start, end = map(int, scan_range.split("-"))
+    if not base.endswith(".") or len(base.split(".")) != 4:
+        raise ValueError("BASE must be an IPv4 prefix such as 192.168.69.")
+    ipaddress.IPv4Address(f"{base}1")
+    if not 1 <= start <= end <= 254:
+        raise ValueError("RANGE must be an inclusive range within 1-254")
+except ValueError as exc:
+    sys.exit(f"Invalid BASE/RANGE in flask/.env: {exc}")
+
+try:
+    from ip_scanner import get_ips
+except ImportError:
+    sys.exit("ip_scanner is missing; install the Flask requirements or rebuild the engine.")
+
+print(f"Scanning {base}{start} through {base}{end} ...", flush=True)
+started = time.monotonic()
+try:
+    addresses = get_ips(base=base, start=start, end=end, timeout=1, concurrency=500)
+except PermissionError:
+    sys.exit("Scan needs raw-socket permission. Use the engine container or sudo ./bs.sh scan.")
+except Exception as exc:
+    sys.exit(f"Scan failed: {exc}")
+
+for address in sorted(addresses, key=ipaddress.IPv4Address):
+    print(address)
+print(f"{len(addresses)} responding host(s) in {time.monotonic() - started:.2f}s")
+PYSCAN
 }
 
 resolve_services() {
@@ -182,6 +240,9 @@ main() {
                 exit 1
             fi
             run_local_dev_mode "${1:-all}"
+            ;;
+        scan)
+            scan_ips
             ;;
         pull)
             pull_updates "${1:-all}"

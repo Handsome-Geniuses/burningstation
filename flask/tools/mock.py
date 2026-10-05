@@ -114,7 +114,7 @@ _MOCK_KBD_CONTROLLER_RAW_BUTTONS = {
 # ================================================================
 def _mock_hostname(host: str):
     suffix = host.split(".")[-1]
-    return f"3000{int(suffix):04d}"
+    return f"9009009{int(suffix) % 10}"
 
 
 def _mock_meter_init(self, host, **kwargs):
@@ -144,10 +144,13 @@ def _apply_meter_runtime_mocks(meter: SSHMeter):
     meter.setup_custom_display = lambda: None
     meter.beep = lambda count=1, interval=0: None
     meter.get_meter_status_text = lambda: MOCK_STATUS_TEXT
+    meter.get_app_runtime_info = lambda: {
+        "start_time": "2025-01-01 00:00:00",
+        "runtime_seconds": 3600,
+    }
     meter.connected = True
     meter.status = "ready"
     meter.results = {}
-    meter.db_id = MOCK_DB_ID
     meter.is_mock = True
     return meter
 
@@ -252,8 +255,7 @@ def _mock_get_ui_page_html(self, timeout: float = 5.0):
 
 
 def _next_mock_meter_ip():
-    start, end = mm.address_range
-    for suffix in range(end, start - 1, -1):
+    for suffix in range(900, 910):
         host = f"{mm.base}{suffix}"
         if host not in mm.meters and host not in _mock_meter_ips:
             return host
@@ -272,6 +274,10 @@ def _build_meter_payload(host: str, meter: SSHMeter, status: str):
 def _register_mock_meter(host: str):
     meter = SSHMeter(host)
     _apply_meter_runtime_mocks(meter)
+    database.insert_sshmeter(meter)
+    work_order = states.get("workOrder")
+    if work_order is not None:
+        database.update_meter_work_order(meter.db_id, int(work_order))
     mm.meters[host] = meter
     mm._METERMANAGER__meters.add(host)
     mm._METERMANAGER__stale_counts.pop(host, None)
@@ -342,7 +348,7 @@ def _build_mock_jobs():
 
         status = _mock_job_status(index)
         job_name = names[index % len(names)]
-        hostname = f"3000{meter_id:04d}"
+        hostname = _mock_hostname(f"{mm.base}{900 + meter_id - 1}")
 
         jobs.append({
             "id": MOCK_JOB_COUNT - index,
@@ -417,8 +423,8 @@ def add_mock_meter(host: str | None = None):
         _mock_meter_ips.add(host)
         return _build_meter_payload(host, meter, "exists")
 
-    _mock_meter_ips.add(host)
     meter = _register_mock_meter(host)
+    _mock_meter_ips.add(host)
     return _build_meter_payload(host, meter, "added")
 
 

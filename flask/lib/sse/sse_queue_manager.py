@@ -1,8 +1,10 @@
-from lib.utils import secrets
 from typing import Any, Optional, TypedDict, List
 from collections import deque
 import json
 import threading
+from copy import deepcopy
+from datetime import datetime, timezone
+from uuid import uuid4
 
 
 # Typed payload
@@ -50,18 +52,36 @@ class SSEQueue:
 class SSEQM:
     queues: list["SSEQueue"] = []
     verbose: bool = False
+    # Station activity is ephemeral; durable job history remains in the database.
+    activity = deque(maxlen=20)
+    activity_lock = threading.RLock()
 
     @classmethod
     def append(cls, q: SSEQueue):
-        cls.queues.append(q)
+        with cls.activity_lock:
+            q.add_payload(sse_payload("activity_snapshot", list(cls.activity)))
+            cls.queues.append(q)
 
     @classmethod
     def remove(cls, q: SSEQueue):
-        cls.queues.remove(q)
+        with cls.activity_lock:
+            cls.queues.remove(q)
+
+    @classmethod
+    def publish_activity(cls, kind: str, **details):
+        with cls.activity_lock:
+            entry = {
+                **deepcopy(details),
+                "id": str(uuid4()),
+                "kind": kind,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            cls.activity.appendleft(entry)
+            cls.broadcast("activity", entry)
 
     @classmethod
     def broadcast_payload(cls, payload: SSEPayload):
-        for q in cls.queues:
+        for q in tuple(cls.queues):
             q.add_payload(payload)
 
     @classmethod

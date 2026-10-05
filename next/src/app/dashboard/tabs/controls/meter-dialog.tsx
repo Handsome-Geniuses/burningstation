@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils"
 import {
     meterRunBlinkUntil,
     meterRunDummy,
-    meterRunOperatorKeypad,
+    meterRunOperatorTest,
     meterRunPassive,
     meterRunOperator,
     meterRunPrintFw,
@@ -81,13 +81,14 @@ export const MeterDialog = ({
     const isPhysicalRunning = meter?.current_action === "physical_cycle_all"
     const isOperatorRunning = meter?.current_action === "operator_cycle_all"
     const isOperatorKeypadRunning = meter?.current_action === "operator_keypad"
+    const isStandaloneOperatorRunning = Boolean(meter?.current_action?.startsWith("operator_") && !isOperatorRunning)
     const isBlinking = meter?.current_action === "blinking"
     const keypadState = meter ? systemState.operatorKeypad[meter.ip] : undefined
     const operatorFeedback = meter ? systemState.operatorFeedback[meter.ip] : undefined
     const keypadIncomplete = keypadState ? keypadState.total <= 0 || keypadState.current < keypadState.total : false
     const isOperatorCycleKeypadActive = Boolean(isOperatorRunning && keypadIncomplete)
     const showOperatorKeypad = Boolean(isOperatorKeypadRunning || isOperatorCycleKeypadActive)
-    const showOperatorFeedback = Boolean(isOperatorRunning && operatorFeedback?.active && !showOperatorKeypad)
+    const showOperatorFeedback = Boolean((isOperatorRunning || isStandaloneOperatorRunning) && operatorFeedback?.active && !showOperatorKeypad)
     const showVersionChecks = Boolean(meter && !showOperatorKeypad && !showOperatorFeedback && view === "version-checks")
 
     React.useEffect(() => {
@@ -155,13 +156,25 @@ export const MeterDialog = ({
                         >
                             run operator
                         </Button>
-                        <Button
-                            variant="outline"
-                            onClick={run(() => meterRunOperatorKeypad(meter?.ip))}
-                            disabled={running || systemState.mode !== "manual" || !isMeterReady}
-                        >
-                            run keypad test
-                        </Button>
+                        {[
+                            ["operator_keypad", "OP Keypad"],
+                            ["operator_screen_cycle", "OP Screen Cycle"],
+                            ["operator_coins", "OP Coins"],
+                            ["operator_touchscreen", "OP Touch"],
+                            ["operator_display_brightness", "OP Brightness"],
+                            ["operator_nfc_tap", "OP NFC"],
+                            ["operator_card_reader", "OP Card"],
+                        ].map(([test, label]) => (
+                            <Button
+                                key={test}
+                                variant="outline"
+                                className="h-10 whitespace-normal px-2 text-xs"
+                                onClick={run(() => meterRunOperatorTest(meter?.ip, test))}
+                                disabled={running || systemState.mode !== "manual" || !isMeterReady}
+                            >
+                                {label}
+                            </Button>
+                        ))}
                         <Button
                             variant="outline"
                             onClick={run(() => meterRunPrintFw(meter?.ip))}
@@ -238,13 +251,13 @@ export const MeterDialog = ({
                                 physical
                             </Button>
                         }
-                        {(isOperatorRunning || isOperatorKeypadRunning) &&
+                        {(isOperatorRunning || isStandaloneOperatorRunning) &&
                             <Button
                                 variant="destructive"
                                 onClick={run(() => meterStopOperator(meter?.ip))}
                                 disabled={running}
                             >
-                                {isOperatorKeypadRunning ? "stop test" : "stop operator"}
+                                {isStandaloneOperatorRunning ? "stop test" : "stop operator"}
                             </Button>
                         }
                         <Button

@@ -111,6 +111,11 @@ _PROGRAM_MONITORS = {
     "operator_cycle_all":   [],
 }
 
+from .operator_standalone import STANDALONE_TESTS
+
+PROGRAM_REGISTRY.update(STANDALONE_TESTS)
+
+
 def _build_alias_index(registry):
     func_to_canon = {}
     for name, fn in registry.items():

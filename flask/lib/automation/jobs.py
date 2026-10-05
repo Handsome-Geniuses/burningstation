@@ -6,6 +6,7 @@ from collections import deque
 from typing import Dict, Optional
 from datetime import datetime
 from lib.automation.tests import get_monitors
+from lib.automation.tests.operator_standalone import OPERATOR_PROGRAMS
 from lib.automation.shared_state import SharedState
 from lib.automation.runner import run_test_job
 # from lib.database import insertJobs
@@ -243,6 +244,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     broadcast_job = kwargs.pop('broadcast_job', True)
 
     def target():
+        started_at = time.monotonic()
         try:
             run_test_job(
                 meter=meter,
@@ -284,6 +286,7 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
         meter.results[program_name] = st.result
         master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': '', 'current_action': ''})
 
+        st.extras['duration_s'] = round(time.monotonic() - started_at, 3)
         st.extras['kwargs'] = kwargs
         job_done(meter_ip)
         if os.name != "nt": meter.beep(3) # leave uncommented for production
@@ -419,26 +422,29 @@ def start_operator_job(meter_ip):
     return start_job(meter_ip, "operator_cycle_all", kwargs, verbose=True)
 
 
-def start_operator_keypad_job(meter_ip):
+def start_operator_test_job(meter_ip, test):
+    if test not in OPERATOR_PROGRAMS:
+        return False, "unknown operator test"
     meter = mm.get_meter(meter_ip)
+    if meter.status != "ready":
+        return False, "job already running"
     modules = meter.module_info
     buttons = get_default_buttons(modules, meter.meter_type)
-    store.load()
-    job_count = int(store.settings.operator.job_counts.keypad)
-
-    if not buttons:
+    device = OPERATOR_PROGRAMS[test]
+    config = build_operator_kwargs(
+        modules, buttons=buttons, meter_region=getattr(meter, "meter_region", None),
+    )[device]
+    if int(config.get("job_count", 0)) <= 0:
+        return False, "operator test is disabled or its hardware is unavailable"
+    if device == "keypad" and not buttons:
         return False, "operator keypad has no buttons to test"
-    if job_count <= 0:
-        return False, "operator keypad job count is disabled"
-
     meter.set_ui_mode("banner")
     meter.setup_custom_display()
+    return start_job(meter_ip, test, dict(config), verbose=True)
 
-    kwargs = {
-        "job_count": job_count,
-        "buttons": buttons,
-    }
-    return start_job(meter_ip, "operator_keypad", kwargs, verbose=True)
+
+def start_operator_keypad_job(meter_ip):
+    return start_operator_test_job(meter_ip, "operator_keypad")
 
 
 def _handle_auto_job_done(meter_ip, current_program):
@@ -569,7 +575,6 @@ def job_done(meter_ip):
 
     _handle_auto_job_done(meter_ip, current_program)
 
-    if meter.db_id==None: return
     meter.results.pop(current_program, None)
 
     # initial 
@@ -659,22 +664,45 @@ def job_done(meter_ip):
             data["device_meta"] = st.device_meta
 
     # insertion time!
-    elif current_program == "operator_keypad":
+    elif current_program in OPERATOR_PROGRAMS:
+        device = OPERATOR_PROGRAMS[current_program]
         failed = _job_has_failure(st)
         overall_status = "fail" if failed else "pass"
-        failure_reason = _job_failure_reason(st, "keypad") if failed else None
-        keypad_status = _normalize_device_status(
-            st.device_results.get("keypad"),
+        failure_reason = _job_failure_reason(st, device) if failed else None
+        device_status = _normalize_device_status(
+            st.device_results.get(device),
             overall_status,
         )
 
-        data["results"] = _build_keypad_job_results(meter, keypad_status, failure_reason)
+        if device == "keypad":
+            data["results"] = _build_keypad_job_results(meter, device_status, failure_reason)
+        else:
+            info = _module_info_for_program(meter, device, {"ver": -1, "id": -1})
+            data["results"] = {device: {
+                "status": device_status, "fw": info.get("ver", -1), "id": info.get("id", -1),
+            }}
+            if failure_reason:
+                data["results"][device]["error"] = failure_reason
+        data["duration_s"] = st.extras.get("duration_s", 0)
         if st.last_error:
             data["last_error"] = st.last_error
         if failure_reason:
             data["failure_reason"] = failure_reason
         if st.device_meta:
             data["device_meta"] = st.device_meta
+
+    # Publish before database I/O so station activity survives database outages.
+    if _job_has_failure(st):
+        overall_status = "fail"
+    data["duration_s"] = st.extras.get("duration_s")
+    if overall_status == "fail":
+        data["failure_reason"] = _job_failure_reason(st)
+    master.publish_activity(
+        "job", hostname=meter.hostname, name=current_program,
+        status=overall_status, data=data,
+    )
+    if meter.db_id is None:
+        return
 
     # insertion time!
     job_data = {

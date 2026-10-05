@@ -41,8 +41,8 @@ export const ControlsTab = () => {
     };
 
     return (
-        <div className="p-2 grid grid-cols-[1fr_25%] gap-2 ">
-            <div>
+        <div className="h-full min-h-0 p-2 grid grid-cols-[minmax(0,1fr)_25%] grid-rows-[minmax(0,1fr)] gap-2 overflow-hidden">
+            <div className="min-h-0 overflow-y-auto scrollbar-hide">
                 <Accordion type="multiple" className={cn(PANEL, "p-0 rounded-lg overflow-hidden")} value={openItems} onValueChange={handleValueChange}>
                     {beltAvailable && <StationVisualizer systemState={systemState} onMeterSelected={setSelectedMeter} />}
                     <MeterManager systemState={systemState} onMeterSelected={setSelectedMeter} />
