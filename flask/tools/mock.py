@@ -1,5 +1,4 @@
 from unittest.mock import patch
-import ip_scanner
 import json
 import re
 import time
@@ -13,6 +12,7 @@ from lib.sse.sse_queue_manager import SSEQM as master
 from lib.system.belt_logic import boxes_to_sensors, sensors_to_boxes, step_boxes
 from lib.system.states import states
 from lib import database
+from lib.automation.mock_meter import VirtualMeter
 
 from lib.gpio import rm, mdm
 
@@ -86,9 +86,9 @@ MOCK_JOB_COUNT = 30
 _mock_meter_ips: set[str] = set()
 _original_meter_init = SSHMeter.__init__
 _original_exec_parse = SSHMeter.exec_parse
-_original_get_ips = ip_scanner.get_ips
 _original_sim_on_action = sim.on_action
 _original_stop_operator_job = program.stop_operator_job
+_original_start_operator_job = program.start_operator_job
 
 _mock_keypad_journals: dict[str, list[dict]] = {}
 _mock_keypad_page_hosts: set[str] = set()
@@ -132,13 +132,17 @@ def _mock_meter_init(self, host, **kwargs):
 
 
 def _apply_meter_runtime_mocks(meter: SSHMeter):
+    meter.virtual_meter = VirtualMeter()
+    meter._meter_region_cache = "us"
     meter.connect = lambda: None
     meter.close = lambda: None
     meter.force_diagnostics = lambda: None
     meter.in_diagnostics = lambda: True
     meter.is_booting = lambda: False
     meter.in_splash = lambda: False
-    meter.set_brightness = lambda val: None
+    meter.set_brightness = lambda val: meter.virtual_meter.update(brightness=val)
+    meter.get_brightness = lambda: meter.virtual_meter.snapshot()["brightness"]
+    meter.custom_print = lambda: meter.virtual_meter.update(printed=meter.virtual_meter.snapshot()["printed"] + 1)
     meter.set_ui_mode = lambda mode, banner_text=None: None
     meter.clear_banner_text = lambda: None
     meter.setup_custom_display = lambda: None
@@ -434,6 +438,7 @@ def wipe_mock_meters():
     _mock_meter_ips.clear()
 
     for host in hosts:
+        _stop_interactive_job(host)
         _mock_keypad_journals.pop(host, None)
         _mock_keypad_cursor_seq.pop(host, None)
         _mock_keypad_page_hosts.discard(host)
@@ -470,6 +475,7 @@ def disconnect_mock_meter(host: str | None = None):
     if not host:
         return {"status": "not_found", "ip": None}
 
+    _stop_interactive_job(host)
     _mock_meter_ips.discard(host)
     _mock_keypad_journals.pop(host, None)
     _mock_keypad_cursor_seq.pop(host, None)
@@ -500,9 +506,8 @@ def unload_mock_meter(host: str | None = None):
 # Sim / scanner hooks
 # ================================================================
 def _mock_get_ips(*args, **kwargs):
-    ips = set(_original_get_ips(*args, **kwargs))
-    ips.update(_mock_meter_ips)
-    return list(ips)
+    # Mock mode must never discover or register real network devices.
+    return list(_mock_meter_ips)
 
 
 def _mock_sim_on_action(action, **kwargs):
@@ -668,48 +673,17 @@ def _cancel_mock_operator_timer(meter_ip: str):
     return False
 
 
+def _stop_interactive_job(meter_ip: str):
+    from lib.automation import jobs
+    thread = jobs._threads.get(meter_ip)
+    if thread and thread.is_alive():
+        jobs.stop_job(meter_ip)
+        thread.join(timeout=3)
+
+
 def _mock_start_operator_job(*args, **kwargs):
-    duration = 6
-    _mock_null_fn_msg("start_operator_job", args, kwargs)
-    meter_ip = args[0] if args else kwargs.get("meter_ip")
-    if not meter_ip:
-        return False, "Missing meter_ip"
-
-    _cancel_mock_operator_timer(meter_ip)
-    meter = mm.get_meter(meter_ip)
-    if meter.status != "ready":
-        return False, "job already running"
-
-    meter.status = "busy"
-    meter.results = {}
-    master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': 'operator_cycle_all'})
-    _broadcast_mock_progress(meter_ip, 'operator_cycle', 0, duration)
-
-    def tick_operator(current_cycle: int = 1):
-        if meter_ip not in _mock_operator_timers:
-            return
-
-        _broadcast_mock_progress(meter_ip, 'operator_cycle', current_cycle, duration)
-        if current_cycle < duration:
-            timer = threading.Timer(1.0, tick_operator, args=(current_cycle + 1,))
-            timer.daemon = True
-            _mock_operator_timers[meter_ip] = timer
-            timer.start()
-            return
-
-        _mock_operator_timers.pop(meter_ip, None)
-        results = _mock_operator_device_results("pass")
-        meter.results.update(results)
-        meter.status = "ready"
-        master.broadcast('devices', {'ip': meter_ip, 'results': results})
-        master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': ''})
-        _insert_mock_job(meter_ip, "operator_cycle_all")
-
-    timer = threading.Timer(1.0, tick_operator)
-    timer.daemon = True
-    _mock_operator_timers[meter_ip] = timer
-    timer.start()
-    return True, "started"
+    # Use the real sequence and settings, with interactive virtual peripherals.
+    return _original_start_operator_job(*args, **kwargs)
 
 
 def _mock_stop_operator_job(meter_ip):

@@ -264,6 +264,11 @@ export const MeterDialog = ({
                                 </Button>
                             </>
                         )}
+                        {systemState.hardware.mock && meter && (
+                            <Button variant="outline" onClick={() => window.open(`/mockmeter?meter=${encodeURIComponent(meter.ip)}`, "_blank", "noopener,noreferrer")}>
+                                MOCK
+                            </Button>
+                        )}
                         <Button
                             variant={isBlinking ? "destructive" : "outline"}
                             className={cn("border border-border", isBlinking && "animate-pulse [animation-duration:0.5s]")}

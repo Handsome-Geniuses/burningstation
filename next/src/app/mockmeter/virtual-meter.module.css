@@ -1,0 +1,91 @@
+.page { height: 100dvh; overflow: auto; background: var(--background); color: var(--foreground); font-size: 16px; line-height: 1.4; }
+.page * { box-sizing: border-box; }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 32px; border-bottom: 1px solid var(--border); background: var(--card); }
+.eyebrow { font-size: 10px; letter-spacing: 2px; color: var(--muted-foreground); font-weight: 700; }
+.header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 650; letter-spacing: -0.8px; }
+.header h1 span { color: var(--muted-foreground); font-weight: 400; }
+.connection { display: flex; align-items: center; gap: 8px; font-size: 12px; flex-wrap: wrap; }
+.connection a { padding: 8px 12px; margin-left: 12px; border: 1px solid var(--border); border-radius: 6px; }
+.online, .offline { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
+.offline { background: var(--destructive); }
+.workspace { display: grid; grid-template-columns: minmax(390px, 1fr) minmax(390px, 1fr); max-width: 1440px; margin: auto; }
+.meterSide { display: flex; flex-direction: column; align-items: center; padding: 30px; background: radial-gradient(ellipse at 50% 25%, var(--secondary), transparent 70%); }
+.meter { width: 100%; max-width: 440px; border: 2px solid #9aabb8; border-radius: 26px 26px 14px 14px; background: linear-gradient(115deg, #f3f6f8, #c5d0d8 55%, #e8edf1); padding: 19px; box-shadow: 0 18px 40px #1b30421c, inset 0 0 0 4px #ffffff75; color: #263e4e; }
+.meterTop { display: flex; justify-content: space-between; align-items: center; font-size: 11px; letter-spacing: 1px; font-weight: 700; padding: 0 5px 12px; }
+.mockBadge { border: 1px solid #688490; padding: 2px 7px; border-radius: 4px; font-size: 9px; }
+.screen { display: flex; flex-direction: column; position: relative; width: 100%; aspect-ratio: 5/3; background: #172f3c; color: #e8f5ee; border: 8px solid #324653; border-radius: 9px; overflow: hidden; padding: 13px; box-shadow: 0 2px 0 #ffffff90, inset 0 2px 10px #0004; transition: filter 180ms, background 100ms; text-align: left; }
+.screenTop, .screenBottom { font-size: 8px; letter-spacing: 1px; opacity: .8; display: flex; justify-content: space-between; }
+.screenMain { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 8px; max-width: 90%; }
+.screenMain strong { font-size: 21px; font-weight: 600; line-height: 1.15; }
+.screenMain > span { font-size: 11px; }
+.touchMarker { position: absolute; transform: translate(-50%, -50%); border: 1px solid #72edbc; border-radius: 50%; padding: 0 7px; background: #00a76d80; }
+.readers { display: grid; grid-template-columns: .8fr 1fr 1.2fr; gap: 8px; margin-top: 17px; }
+.reader { border: 1px solid #94a8b5; background: #e3eaf0; border-radius: 8px; min-width: 0; min-height: 100px; display: flex; align-items: center; justify-content: flex-end; flex-direction: column; gap: 7px; padding: 12px 4px; transition: background .15s, box-shadow .15s; }
+.reader strong { font-size: 9px; letter-spacing: .7px; }
+.reader small { font-size: 8px; color: #536975; }
+.reader.over { background: #b4ebd0; box-shadow: 0 0 0 3px var(--primary); }
+.coinSlot { height: 31px; width: 9px; background: #182a35; border: 3px solid #7b909d; border-radius: 4px; }
+.cardSlot { height: 9px; width: 80%; background: #182a35; border: 2px solid #7b909d; border-radius: 3px; margin: 12px 0; position: relative; }
+.insertedCard { position: absolute; background: linear-gradient(120deg,#315479,#172939); color: #fff; font-size: 9px; padding: 5px; width: 90%; height: 31px; left: 5%; top: -22px; border-radius: 4px 4px 0 0; box-shadow: 0 2px 4px #0005; }
+.eject { display: block; margin: 5px 0 0 auto; font-size: 10px; text-decoration: underline; }
+.keypad { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 5px; margin-top: 17px; padding: 10px; background: #acbcc7; border-radius: 9px; border: 1px solid #99aeba; }
+.key { display: flex; align-items: center; justify-content: center; gap: 2px; flex-wrap: wrap; height: 30px; font-size: 11px; font-weight: 700; border: 1px solid #a4b6c1; border-radius: 4px; background: linear-gradient(#fff, #e1e9ee); color: #294452; box-shadow: 0 2px 0 #718998; }
+.key:active { transform: translateY(1px); box-shadow: none; }
+.key:disabled { cursor: default; }
+.key small { font-size: 8px; font-weight: 400; }
+.keyExpected { outline: 1px solid #e2a54c; background: #fff4d9; }
+.keyDone { background: #c7f4dc; outline: 1px solid #3eab78; }
+.printer { position: relative; padding: 12px 14px 16px; background: #ced9e1; border: 1px solid #98afbe; border-radius: 8px; margin-top: 15px; }
+.printer > div { display: flex; align-items: center; gap: 7px; font-size: 9px; letter-spacing: .8px; }
+.printer small { margin-left: auto; font-size: 9px; letter-spacing: 0; }
+.printSlot { display: block; height: 6px; border-radius: 4px; background: #2f4654; margin-top: 9px; }
+.receipt { display: block; width: 65%; background: white; color: #263e4e; margin: 0 auto -6px; padding: 8px; font-family: monospace; font-size: 9px; text-align: center; box-shadow: 0 3px 6px #0002; animation: print .6s ease-out; }
+.liveNotice { padding: 15px; max-width: 440px; width: 100%; font-size: 12px; text-align: center; color: var(--muted-foreground); }
+.inventory { padding: 30px 32px; border-left: 1px solid var(--border); min-width: 0; }
+.inventoryHeader { display: flex; justify-content: space-between; align-items: center; }
+.inventoryHeader h2 { font-size: 26px; margin-top: 3px; font-weight: 600; letter-spacing: -.8px; }
+.infinity { font-size: 42px; color: var(--primary); line-height: 1; }
+.hint { font-size: 12px; line-height: 1.6; color: var(--muted-foreground); margin: 9px 0 20px; }
+.inventory h3 { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; margin: 23px 0 13px; border-bottom: 1px solid var(--border); padding-bottom: 9px; }
+.inventory h3 span { font-size: 10px; color: var(--muted-foreground); font-weight: 400; }
+.coins { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px 6px; }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.supplyItem { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 5px; border: 1px solid transparent; border-radius: 10px; touch-action: none; background: transparent; min-width: 0; }
+.supplyItem * { touch-action: none; }
+.supplyItem:hover { background: var(--secondary); }
+.supplyItem.selected { border-color: var(--primary); background: var(--accent); }
+.supplyItem:disabled { opacity: .45; }
+.supplyItem:focus-visible, .reader:focus-visible, .key:focus-visible, .screen:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.itemCaption { font-size: 9px; color: var(--muted-foreground); }
+.coin { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 57px; height: 57px; border-radius: 50%; border: 3px double #fff9; box-shadow: 0 3px 0 #68717d, 0 5px 8px #0002, inset 0 0 0 2px #0002; flex-shrink: 0; color: #35434e; }
+.coin small { font-size: 7px; letter-spacing: 1px; line-height: 1; }
+.coin strong { font-size: 15px; line-height: 1.4; }
+.coin > span { font-size: 8px; line-height: 1; }
+.silver { background: linear-gradient(130deg, #fff, #a8b4bf 55%, #eef3f7); }
+.copper { background: linear-gradient(130deg, #f5cfaa, #bf855c 55%, #e7b590); color: #603820; box-shadow: 0 3px 0 #8f5f3c, 0 5px 8px #0002, inset 0 0 0 2px #0002; }
+.gold { background: linear-gradient(130deg, #fcf0bd, #c5a351 55%, #f0dfa2); color: #62501c; box-shadow: 0 3px 0 #9f812c, 0 5px 8px #0002, inset 0 0 0 2px #0002; }
+.card { position: relative; display: flex; flex-direction: column; text-align: left; width: 174px; max-width: 100%; height: 105px; border-radius: 9px; padding: 11px; overflow: hidden; color: white; box-shadow: 0 4px 9px #0002; }
+.card > strong { font-size: 12px; font-weight: 700; }
+.visa { background: linear-gradient(135deg, #173d79, #4277a5); }
+.mastercard { background: linear-gradient(135deg, #374353, #17222e); }
+.amex { background: linear-gradient(135deg, #256b63, #488e84); }
+.discover { background: linear-gradient(135deg, #704b3d, #cb8349); }
+.cardChip { color: #edda9d; font-size: 20px; line-height: 22px; }
+.cardNumber { font-size: 9px; letter-spacing: 1px; }
+.cardBottom { display: flex; justify-content: space-between; align-items: center; font-size: 7px; letter-spacing: 1px; margin-top: 4px; }
+.stripe { position: absolute; right: 0; top: 0; height: 100%; width: 5px; background: #0007; }
+.selectionNotice { display: flex; justify-content: space-between; background: var(--accent); border-radius: 6px; padding: 8px 12px; font-size: 12px; }
+.selectionNotice button { text-decoration: underline; }
+.dragLayer { position: fixed; z-index: 100; pointer-events: none; transform: translate(-50%, -50%); perspective: 600px; }
+.drag { animation: spin 1s linear infinite; }
+.consume { animation: consume .5s ease-in forwards; }
+.toss { animation: toss .5s ease-out forwards; }
+.error { background: var(--destructive); color: white; padding: 12px 30px; font-size: 14px; }
+.loading { padding: 20px; }
+@keyframes spin { from { transform: rotateY(0deg) rotate(-8deg); } to { transform: rotateY(360deg) rotate(-8deg); } }
+@keyframes consume { to { transform: scale(.05) rotate(180deg); opacity: 0; } }
+@keyframes toss { to { transform: scale(7) rotate(30deg); opacity: 0; } }
+@keyframes print { from { max-height: 0; opacity: 0; transform: translateY(-5px); } to { max-height: 150px; opacity: 1; transform: translateY(0); } }
+@media (min-width: 1000px) { .page { display: flex; flex-direction: column; overflow: hidden; } .header { flex-shrink: 0; } .workspace { width: 100%; flex: 1; min-height: 0; } .inventory, .meterSide { overflow-y: auto; scrollbar-width: thin; } }
+@media (max-width: 820px) { .workspace { grid-template-columns: 1fr; } .inventory { border-left: 0; border-top: 1px solid var(--border); } .header { align-items: flex-start; flex-direction: column; padding: 16px; } .meterSide { padding: 20px; } }
+@media (prefers-reduced-motion: reduce) { .drag, .consume, .toss, .receipt { animation: none; } .consume, .toss { opacity: 0; } .screen { transition: none; } }

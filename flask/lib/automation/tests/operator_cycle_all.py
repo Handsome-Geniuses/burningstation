@@ -95,7 +95,11 @@ def _run_operator_test(meter, shared, device, test_func, subtest_kwargs):
         subtest_kwargs["subtest"] = True
         subtest_kwargs["banner_text"] = banner_text
         meter.set_ui_mode("banner", banner_text)
-        test_func(meter, shared=shared, **subtest_kwargs)
+        if getattr(meter, "is_mock", False):
+            from lib.automation.mock_meter import run_virtual_test
+            run_virtual_test(meter, shared, device, test_func, subtest_kwargs)
+        else:
+            test_func(meter, shared=shared, **subtest_kwargs)
         if not shared.stop_event.is_set():
             shared.device_results[device] = "pass"
     except StopAutomation:

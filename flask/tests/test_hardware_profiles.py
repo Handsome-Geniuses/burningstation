@@ -26,6 +26,48 @@ class HardwareProfileSmokeTests(unittest.TestCase):
             check=True,
         )
 
+    def test_mock_discovery_only_returns_registered_mock_meters(self):
+        for profile in ("full", "portable"):
+            with self.subTest(profile=profile):
+                self.run_python(
+                    """
+                    from unittest.mock import patch
+                    import ip_scanner
+
+                    with patch.object(ip_scanner, "get_ips", return_value=["192.168.69.10"]) as scan:
+                        import tools.mock as mock
+                        from lib.meter.meter_manager import METERMANAGER as mm
+
+                        mock._mock_meter_ips.clear()
+                        assert ip_scanner.get_ips() == []
+                        hosts = {"192.168.69.900", "192.168.69.901"}
+                        mock._mock_meter_ips.update(hosts)
+                        assert set(ip_scanner.get_ips(base="192.168.69", start=1, end=254)) == hosts
+                        with patch.object(mm, "_METERMANAGER__on_fresh", return_value=False) as fresh:
+                            mm.refresh()
+                            assert {call.args[0] for call in fresh.call_args_list} == hosts
+                        mock._mock_meter_ips.remove("192.168.69.900")
+                        assert ip_scanner.get_ips() == ["192.168.69.901"]
+                        mock._mock_meter_ips.clear()
+                        assert ip_scanner.get_ips() == []
+                        scan.assert_not_called()
+                    """,
+                    profile=profile,
+                    mock="1",
+                )
+
+    def test_virtual_meter_requires_mock_mode(self):
+        self.run_python(
+            """
+            from app import app
+            client = app.test_client()
+            assert client.get("/api/system/mockmeter/192.168.69.900").status_code == 403
+            assert client.post("/api/system/mockmeter/192.168.69.900", json={"kind": "touch"}).status_code == 403
+            """,
+            profile="portable",
+            mock="0",
+        )
+
     def test_portable_imports_app_without_station_io(self):
         result = self.run_python(
             """

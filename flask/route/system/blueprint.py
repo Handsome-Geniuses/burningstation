@@ -21,6 +21,41 @@ from lib.store import store
 from lib.sse.sse_queue_manager import SSEQM
 bp = flask.Blueprint("hello", __name__)
 
+
+@bp.route("/mockmeter/<meter_ip>", methods=["GET", "POST"])
+def virtual_meter(meter_ip):
+    if not secrets.MOCK:
+        return {"error": "Virtual meters require MOCK=1"}, 403
+    from lib.meter.meter_manager import METERMANAGER
+    from lib.automation.jobs import get_frontend_job_state
+    from lib.automation.mock_meter import COINS, CARDS
+    meter = METERMANAGER.meters.get(meter_ip)
+    if meter is None or not getattr(meter, "is_mock", False) or not hasattr(meter, "virtual_meter"):
+        return {"error": "This mock meter is no longer connected"}, 404
+    if flask.request.method == "POST":
+        payload = flask.request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return {"error": "Expected an interaction object"}, 400
+        try:
+            if payload.get("kind") == "keypad":
+                from tools.mock import append_mock_operator_keypad_press, _MAIN_KEYPAD_BUTTONS, _FUNCTION_KEYPAD_BUTTONS
+                state = meter.virtual_meter.snapshot()
+                if state["device"] != "keypad" or payload.get("session") != state["session"]:
+                    return {"error": "No active keypad test"}, 409
+                button = payload.get("button")
+                if button not in _MAIN_KEYPAD_BUTTONS | _FUNCTION_KEYPAD_BUTTONS:
+                    return {"error": "Unknown keypad button"}, 400
+                return append_mock_operator_keypad_press(meter_ip, button)
+            return meter.virtual_meter.interact(payload)
+        except (ValueError, TypeError) as exc:
+            return {"error": str(exc)}, 400
+    return {
+        "ip": meter_ip, "hostname": meter.hostname, "status": meter.status,
+        "virtual": meter.virtual_meter.snapshot(),
+        "job": get_frontend_job_state(meter_ip),
+        "coins": COINS, "cards": CARDS,
+    }
+
 try:
     import fcntl
 except ImportError:

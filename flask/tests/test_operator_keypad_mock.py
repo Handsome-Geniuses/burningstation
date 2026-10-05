@@ -114,6 +114,7 @@ class OperatorKeypadMockTests(unittest.TestCase):
     def test_standalone_operator_mock_jobs_save_results_and_duration(self):
         self.run_python(
             """
+            import time
             from unittest.mock import patch
             import tools.mock as mock
             from lib.automation import jobs
@@ -125,6 +126,8 @@ class OperatorKeypadMockTests(unittest.TestCase):
             meter.db_id = 42
             mm.meters[host] = meter
             configs = {device: {"job_count": 1} for device in OPERATOR_PROGRAMS.values()}
+            configs["coins"]["coin_requirements"] = {"quarter": {"currency_code": "USD", "value_minor": 25, "quantity": 2}}
+            configs["touchscreen"]["expected_touch_count"] = 2
             with patch.object(jobs, "build_operator_kwargs", return_value=configs), \
                  patch.object(jobs, "insert_meter_jobs") as save:
                 for program, device in OPERATOR_PROGRAMS.items():
@@ -132,7 +135,43 @@ class OperatorKeypadMockTests(unittest.TestCase):
                         continue
                     ok, message = jobs.start_operator_test_job(host, program)
                     assert ok, message
-                    jobs._threads[host].join(timeout=3)
+                    deadline = time.monotonic() + 2
+                    while jobs._state(host).extras.get("operator_feedback_state", {}).get("test") != device:
+                        assert time.monotonic() < deadline
+                        time.sleep(.01)
+                    session = meter.virtual_meter.snapshot()["session"]
+                    assert jobs._threads[host].is_alive(), "Tests must wait for input"
+                    if device == "display_brightness":
+                        jobs.submit_operator_response(host, device, True)
+                    elif device == "coins":
+                        for _ in range(2):
+                            meter.virtual_meter.interact({"kind": "drop", "target": "coin", "item": "USD-25", "session": session})
+                    elif device == "touchscreen":
+                        for _ in range(2):
+                            meter.virtual_meter.interact({"kind": "touch", "x": .2, "y": .4, "session": session})
+                    elif device in ("contactless", "card_reader"):
+                        target = "nfc" if device == "contactless" else "stripe"
+                        if device == "contactless":
+                            result = meter.virtual_meter.interact({"kind": "drop", "target": target, "item": "visa-0", "session": session})
+                            assert not result["consumed"]
+                        meter.virtual_meter.interact({"kind": "drop", "target": target, "item": "amex-1", "session": session})
+                        if device == "card_reader":
+                            time.sleep(.1)
+                            assert jobs._state(host).extras["operator_feedback_state"]["details"]["reads"] == []
+                            meter.virtual_meter.interact({"kind": "remove_card", "session": session})
+                        time.sleep(.1)
+                        assert jobs._state(host).extras["operator_feedback_state"]["current"] == 0
+                        assert jobs._threads[host].is_alive()
+                        meter.virtual_meter.interact({"kind": "drop", "target": target, "item": "visa-1", "session": session})
+                        if device == "card_reader":
+                            time.sleep(.1)
+                            feedback = jobs._state(host).extras["operator_feedback_state"]
+                            assert feedback["current"] == 0, "Insertion must not count as a read"
+                            assert len(feedback["details"]["reads"]) == 1
+                            assert jobs._threads[host].is_alive()
+                            meter.virtual_meter.interact({"kind": "remove_card", "session": session})
+                            assert not meter.virtual_meter.interact({"kind": "remove_card", "session": session})["consumed"]
+                    jobs._threads[host].join(timeout=5)
                     assert not jobs._threads[host].is_alive()
                     meter_id, rows, log = save.call_args.args
                     row = rows[0]
@@ -143,6 +182,7 @@ class OperatorKeypadMockTests(unittest.TestCase):
                     assert row["data"]["duration_s"] > 0
                     assert row["data"]["device_meta"][device]["duration_s"] > 0
                     assert row["data"]["device_meta"][device]["mock"] is True
+                    assert meter.virtual_meter.snapshot()["session"] is None
                     assert "duration_s=" in log
                 assert save.call_count == 6
 
@@ -153,7 +193,106 @@ class OperatorKeypadMockTests(unittest.TestCase):
                 row = save.call_args.args[1][0]
                 assert row["status"] == "fail", row
                 assert row["data"]["failure_reason"], row
-                assert "duration_s" in row["data"]
+            """,
+            profile="portable",
+        )
+
+    def test_virtual_meter_routes_isolate_inputs_and_reject_invalid_targets(self):
+        self.run_python(
+            """
+            import time
+            from unittest.mock import patch
+            from app import app
+            import tools.mock as mock
+            from lib.automation import jobs
+            from lib.meter.meter_manager import METERMANAGER as mm
+
+            hosts = ["192.168.69.900", "192.168.69.901"]
+            for host in hosts:
+                mm.meters[host] = mock.SSHMeter(host)
+            client = app.test_client()
+            def post(host, **payload):
+                return client.post(f"/api/system/mockmeter/{host}", json=payload)
+            assert client.get("/api/system/mockmeter/missing").status_code == 404
+            assert post(hosts[0], kind="touch", x=-1, y=0).status_code == 400
+            assert post(hosts[0], kind="drop", item="bogus", target="coin").status_code == 400
+            config = {"coins": {"job_count": 0, "max_duration_s": 3, "coin_requirements": {
+                "quarter": {"currency_code": "USD", "value_minor": 25, "quantity": 1},
+            }}}
+            with patch.object(jobs, "build_operator_kwargs", return_value=config), patch.object(jobs, "insert_meter_jobs"):
+                for host in hosts:
+                    assert jobs.start_operator_test_job(host, "operator_coins")[0]
+                deadline = time.monotonic() + 2
+                while not all(jobs._state(host).extras.get("operator_feedback_state") for host in hosts):
+                    assert time.monotonic() < deadline
+                    time.sleep(.01)
+                snapshots = [client.get(f"/api/system/mockmeter/{host}").json for host in hosts]
+                first, second = [snapshot["virtual"]["session"] for snapshot in snapshots]
+                assert first != second
+                assert len(snapshots[0]["coins"]) == 24
+                assert len(snapshots[0]["cards"]) == 8
+                # A token for a different meter or previous test cannot count.
+                post(hosts[0], kind="drop", target="coin", item="USD-25", session=second)
+                post(hosts[0], kind="drop", target="coin", item="GBP-100", session=first)
+                time.sleep(.1)
+                assert jobs._state(hosts[0]).extras["operator_feedback_state"]["current"] == 0
+                assert jobs._state(hosts[0]).extras["operator_feedback_state"]["details"]["unknown"] == 1
+                post(hosts[0], kind="drop", target="coin", item="USD-25", session=first)
+                jobs._threads[hosts[0]].join(2)
+                assert not jobs._threads[hosts[0]].is_alive()
+                assert jobs._threads[hosts[1]].is_alive()
+                assert jobs._state(hosts[1]).extras["operator_feedback_state"]["current"] == 0
+                jobs.stop_job(hosts[1])
+                jobs._threads[hosts[1]].join(2)
+            # Reader behavior is independent of whether a test is running.
+            assert post(hosts[0], kind="drop", target="nfc", item="visa-0").json["consumed"] is False
+            assert post(hosts[0], kind="drop", target="nfc", item="amex-1").json["consumed"] is True
+            assert post(hosts[0], kind="drop", target="stripe", item="discover-0").json["consumed"] is True
+            assert client.get(f"/api/system/mockmeter/{hosts[1]}").json["virtual"]["inserted_card"] is None
+            assert post(hosts[0], kind="drop", target="stripe", item="visa-1").json["consumed"] is False
+            post(hosts[0], kind="remove_card")
+            assert client.get(f"/api/system/mockmeter/{hosts[0]}").json["virtual"]["inserted_card"] is None
+            """,
+            profile="portable",
+        )
+
+    def test_virtual_meter_failure_timeout_and_disconnect_cleanup(self):
+        self.run_python(
+            """
+            import time
+            from unittest.mock import patch
+            import tools.mock as mock
+            from lib.automation import jobs
+            from lib.meter.meter_manager import METERMANAGER as mm
+
+            host = "192.168.69.900"
+            meter = mock.SSHMeter(host)
+            mm.meters[host] = meter
+            configs = {
+                "coins": {"job_count": 1, "max_duration_s": .15},
+                "display_brightness": {"job_count": 1, "max_duration_s": 2},
+            }
+            with patch.object(jobs, "build_operator_kwargs", return_value=configs), patch.object(jobs, "insert_meter_jobs"):
+                jobs.start_operator_test_job(host, "operator_coins")
+                jobs._threads[host].join(2)
+                assert jobs._state(host).device_results["coins"] == "fail"
+                assert "timed out" in jobs._state(host).last_error
+                jobs.start_operator_test_job(host, "operator_display_brightness")
+                deadline = time.monotonic() + 1
+                while jobs._state(host).extras.get("operator_feedback_state", {}).get("status") != "awaiting_response":
+                    assert time.monotonic() < deadline
+                    time.sleep(.01)
+                jobs.submit_operator_response(host, "display_brightness", False)
+                jobs._threads[host].join(2)
+                assert jobs._state(host).device_results["display_brightness"] == "fail"
+                assert meter.virtual_meter.snapshot()["brightness"] == 99
+                assert meter.virtual_meter.snapshot()["session"] is None
+                configs["coins"]["max_duration_s"] = 60
+                jobs.start_operator_test_job(host, "operator_coins")
+                with patch.object(mm, "stale_meter"):
+                    mock.disconnect_mock_meter(host)
+                assert not jobs._threads[host].is_alive()
+                assert meter.virtual_meter.snapshot()["session"] is None
             """,
             profile="portable",
         )
@@ -470,7 +609,7 @@ class OperatorKeypadMockTests(unittest.TestCase):
         )
         self.assertIn("mock-job-ok", result.stdout)
 
-    def test_portable_mock_full_operator_job_is_simulated_and_stoppable(self):
+    def test_portable_mock_full_operator_job_is_interactive_and_stoppable(self):
         result = self.run_python(
             """
             import time
@@ -485,6 +624,12 @@ class OperatorKeypadMockTests(unittest.TestCase):
             mm.meters[host] = meter
             mock._mock_meter_ips.add(host)
             client = app.test_client()
+            from unittest.mock import patch
+            from lib.automation import jobs
+            from lib.automation.tests.operator_cycle_all import OPERATOR_TESTS
+            configs = {name: {"job_count": 0} for name, _, _ in OPERATOR_TESTS}
+            configs["coins"] = {"job_count": 1, "max_duration_s": 60}
+            patch.object(jobs, "build_operator_kwargs", return_value=configs).start()
 
             response = client.post(
                 "/api/system/program/manual",
@@ -497,9 +642,11 @@ class OperatorKeypadMockTests(unittest.TestCase):
                     raise AssertionError(f"operator did not start: {meter.status}")
                 time.sleep(0.01)
             assert meter.status == "busy", meter.status
-            assert host in mock._mock_operator_timers
-            assert host not in mock._mock_keypad_page_hosts
-            time.sleep(0.1)
+            deadline = time.time() + 2
+            while not jobs._state(host).extras.get("operator_feedback_state"):
+                assert time.time() < deadline
+                time.sleep(.01)
+            assert jobs._threads[host].is_alive()
 
             response = client.post(
                 "/api/system/program/manual",
