@@ -50,6 +50,16 @@ INSTRUCTIONS = {
     "screen_test": "Watch the screen cycle through the test colors.",
 }
 
+PASSIVE_STAGE_SECONDS = 0.5
+PASSIVE_STAGES = {
+    "coin shutter": (("opening", "Opening coin shutter"), ("closing", "Closing coin shutter")),
+    "nfc": (("on", "NFC reader on"), ("off", "NFC reader off")),
+    "modem": (("connecting", "Modem connecting"), ("connected", "Modem connected"), ("disconnected", "Modem disconnected")),
+    "printer": (("printing", "Printing test receipt"), ("complete", "Test receipt printed")),
+    "screen test": (("ready", "Ready to park"), ("payment", "Simulating payment"), ("confirmation", "Payment confirmed"), ("neutral", "Returning to diagnostics")),
+    "call in": (("connecting", "Call-in connecting"), ("sending", "Sending call-in data"), ("complete", "Call-in complete"), ("disconnected", "Call-in disconnected")),
+}
+
 
 class VirtualMeter:
     def __init__(self):
@@ -57,7 +67,7 @@ class VirtualMeter:
         self.events = deque(maxlen=100)
         self.state = {"session": None, "device": None, "screen_color": None,
                       "brightness": 99, "inserted_card": None, "message": "Ready for testing",
-                      "printed": 0}
+                      "printed": 0, "passive_phase": None, "failure_reason": None}
 
     def snapshot(self):
         with self.lock:
@@ -67,17 +77,34 @@ class VirtualMeter:
         with self.lock:
             self.state.update(kwargs)
 
-    def begin(self, device):
+    def begin(self, device, title=None):
         with self.lock:
             self.events.clear()
             self.state.update(session=str(uuid4()), device=device, screen_color=None,
-                              message=TITLES[device])
+                              passive_phase=None, failure_reason=None,
+                              message=title or TITLES[device])
+
+    def fail_current(self, session, shared):
+        """Fail only the test represented by this meter's current session."""
+        with self.lock:
+            device = self.state["device"]
+            if not device or not session or session != self.state["session"]:
+                return False
+            reason = f"Mock failure injected for {device.replace('_', ' ')}"
+            with shared.lock:
+                if shared.abort_event.is_set() or shared.stop_event.is_set():
+                    return False
+                self.state["failure_reason"] = reason
+                self.state["message"] = reason
+                shared.extras["mock_failure"] = reason
+                shared.stop_event.set()
+            return True
 
     def finish(self, success):
         with self.lock:
             self.events.clear()
-            self.state.update(session=None, device=None, screen_color=None,
-                              message="Test passed" if success else "Test stopped or failed")
+            self.state.update(session=None, device=None, screen_color=None, passive_phase=None,
+                              message="Test passed" if success else self.state["failure_reason"] or "Test stopped or failed")
 
     def pop(self):
         with self.lock:
@@ -121,9 +148,64 @@ class VirtualMeter:
             else:
                 raise ValueError("Unknown interaction")
             # Inputs from a stale tab/test can animate but never credit a new test.
-            if event and self.state["session"] and payload.get("session") == self.state["session"]:
+            if event and not self.state["passive_phase"] and self.state["session"] and payload.get("session") == self.state["session"]:
                 self.events.append(event)
             return {"consumed": True, "message": self.state["message"]}
+
+
+def run_virtual_passive_test(meter, shared, device, kwargs):
+    """Automatic peripheral simulation inside the normal passive subtest runner."""
+    virtual = meter.virtual_meter
+    count = int(kwargs["job_count"])
+    title = f"Passive {device.removesuffix(' test')} test"
+    test = f"passive_{device.replace(' ', '_')}"
+    started = time.monotonic()
+    completed = 0
+    success = False
+    error = ""
+    virtual.begin(device, title=title)
+
+    def publish(instruction, status="running", active=True, **details):
+        publish_operator_feedback(
+            meter, shared, test=test, title=title, instruction=instruction,
+            status=status, current=completed, total=count, active=active,
+            details={"passive": True, **details}, error=error,
+        )
+
+    try:
+        for repetition in range(1, count + 1):
+            for phase, message in PASSIVE_STAGES[device]:
+                check_stop_event(shared)
+                virtual.update(passive_phase=phase, message=message)
+                if device == "printer" and phase == "printing":
+                    meter.custom_print()
+                if device == "screen test":
+                    virtual.update(screen_color={
+                        "ready": None, "payment": "#234e70",
+                        "confirmation": "#166548", "neutral": None,
+                    }[phase])
+                publish(f"{message} · repetition {repetition}/{count}. Runs automatically.",
+                        phase=phase, repetition=repetition)
+                shared.log(f"Mock passive {device}: {message}; repetition {repetition}/{count}")
+                if shared.stop_event.wait(PASSIVE_STAGE_SECONDS):
+                    check_stop_event(shared)
+            completed = repetition
+        check_stop_event(shared)
+        success = True
+        publish("Subtest complete.", status="pass", active=False)
+    except Exception as exc:
+        error = shared.extras.get("mock_failure") or str(exc)
+        shared.last_error = error
+        publish("Passive test stopped or failed.", status="fail", active=False)
+        if error != str(exc):
+            raise StopAutomation(error) from exc
+        raise
+    finally:
+        virtual.finish(success)
+        shared.device_meta.setdefault(device, {}).update(
+            mock=True, completed=completed, job_count=count,
+            duration_s=round(time.monotonic() - started, 3), error=error,
+        )
 
 
 def run_virtual_test(meter, shared, device, test_func, kwargs):
@@ -140,11 +222,13 @@ def run_virtual_test(meter, shared, device, test_func, kwargs):
         check_stop_event(shared)
         success = True
     except Exception as exc:
-        error = str(exc)
+        error = shared.extras.get("mock_failure") or str(exc)
         shared.last_error = error
         if device not in {"keypad", "display_brightness"}:
             publish_operator_feedback(meter, shared, test=device, title=TITLES[device],
                 instruction="Test stopped or failed.", status="fail", active=False, error=error)
+        if error != str(exc):
+            raise StopAutomation(error) from exc
         raise
     finally:
         virtual.finish(success)

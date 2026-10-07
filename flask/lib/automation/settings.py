@@ -56,6 +56,7 @@ def build_passive_kwargs(modules: dict):
     kwargs = {
         "numBurnCycles": s.cycles,
         "numBurnDelay": s.test_delay,
+        "stop_on_fail": store.settings.flow.stop_on_fail,
         "nfc": {
             "job_count": (j.nfc if has_nfc else 0)
         },
@@ -96,6 +97,7 @@ def build_physical_kwargs(modules: dict, buttons=None):
     kwargs = {
         "numBurnCycles": s.cycles,
         "numBurnDelay": s.test_delay,
+        "stop_on_fail": store.settings.flow.stop_on_fail,
         "solar": {
             "job_count": (j.solar if has_solar else 0)
         },
@@ -149,6 +151,7 @@ def build_operator_kwargs(modules: dict, buttons=None, meter_region=None):
     return {
         "numBurnCycles": s.cycles,
         "numBurnDelay": s.test_delay,
+        "stop_on_fail": store.settings.flow.stop_on_fail,
         "screen_test": {"job_count": j.screen_test},
         "coins": coin_kwargs,
         "touchscreen": {

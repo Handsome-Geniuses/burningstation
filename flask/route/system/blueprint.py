@@ -7,7 +7,7 @@ import os
 import signal
 import socket
 import struct
-from lib.automation.jobs import start_job, submit_operator_response
+from lib.automation.jobs import start_job, submit_operator_response, fail_operator_subtest
 from lib.sse.question import setResponse
 from lib.utils import secrets
 from lib.hardware import HardwareCapabilityUnavailable, hardware
@@ -27,7 +27,7 @@ def virtual_meter(meter_ip):
     if not secrets.MOCK:
         return {"error": "Virtual meters require MOCK=1"}, 403
     from lib.meter.meter_manager import METERMANAGER
-    from lib.automation.jobs import get_frontend_job_state
+    from lib.automation.jobs import get_frontend_job_state, _state
     from lib.automation.mock_meter import COINS, CARDS
     meter = METERMANAGER.meters.get(meter_ip)
     if meter is None or not getattr(meter, "is_mock", False) or not hasattr(meter, "virtual_meter"):
@@ -37,6 +37,11 @@ def virtual_meter(meter_ip):
         if not isinstance(payload, dict):
             return {"error": "Expected an interaction object"}, 400
         try:
+            if payload.get("kind") == "fail":
+                state = _state(meter_ip)
+                if state.status != "running" or not meter.virtual_meter.fail_current(payload.get("session"), state):
+                    return {"error": "No active test for this mock meter session"}, 409
+                return {"consumed": True, "message": "Failing the current test"}
             if payload.get("kind") == "keypad":
                 from tools.mock import append_mock_operator_keypad_press, _MAIN_KEYPAD_BUTTONS, _FUNCTION_KEYPAD_BUTTONS
                 state = meter.virtual_meter.snapshot()
@@ -204,6 +209,21 @@ def __operator_response():
         return "value must be a boolean", 400
     if not submit_operator_response(meter_ip, test, value):
         return "operator test is no longer running", 409
+    return "", 200
+
+
+@bp.post("/operator/fail")
+def __operator_fail():
+    """Mark the current subtest of a full operator run as failed."""
+    args = flask.request.get_json(silent=True)
+    if not isinstance(args, dict):
+        return "Expected a request object", 400
+    meter_ip = args.get("meter_ip")
+    test = args.get("test")
+    if not isinstance(meter_ip, str) or not meter_ip or not isinstance(test, str) or not test:
+        return "meter_ip and test are required", 400
+    if not fail_operator_subtest(meter_ip, test):
+        return "operator subtest is no longer active", 409
     return "", 200
 
 

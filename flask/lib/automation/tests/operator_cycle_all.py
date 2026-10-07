@@ -2,6 +2,7 @@ import inspect
 import time
 
 from lib.automation.helpers import StopAutomation
+from lib.automation.operator_feedback import publish_operator_feedback
 from lib.automation.shared_state import SharedState
 from lib.automation.tests.cycle_meter_ui import test_cycle_meter_ui
 from lib.automation.tests.test_operator_card_reader import test_operator_card_reader
@@ -45,6 +46,7 @@ OPERATOR_TESTS = [
 OPERATOR_CYCLE_GLOBAL_KEYS = {
     "numBurnCycles",
     "numBurnDelay",
+    "stop_on_fail",
     "monitors",
     "broadcast_job",
 }
@@ -85,9 +87,15 @@ def _resolve_subtest_kwargs(device, kwargs, default_cfg=None):
 
 
 def _run_operator_test(meter, shared, device, test_func, subtest_kwargs):
-    shared.current_device = device
+    with shared.lock:
+        shared.current_device = device
     shared.device_results[device] = "running"
     shared.set_allowed(set(), reason=f"Running monitor-free {device} subtest")
+    if getattr(shared, "current_program", None) == "operator_cycle_all":
+        publish_operator_feedback(
+            meter, shared, test=device, title=device.replace("_", " ").title(),
+            instruction="Follow the meter prompts for this test.", status="running",
+        )
 
     try:
         subtest_kwargs = dict(subtest_kwargs)
@@ -109,8 +117,39 @@ def _run_operator_test(meter, shared, device, test_func, subtest_kwargs):
         shared.device_results[device] = "fail"
         raise
     finally:
-        shared.current_device = None
+        if getattr(shared, "current_program", None) == "operator_cycle_all":
+            feedback = shared.extras.get("operator_feedback_state")
+            if isinstance(feedback, dict) and feedback.get("test") == device and feedback.get("active"):
+                publish_operator_feedback(
+                    meter, shared, test=device, title=feedback["title"],
+                    instruction=feedback["instruction"], status=feedback["status"],
+                    current=feedback["current"], total=feedback["total"],
+                    details=feedback["details"], active=False, error=feedback["error"],
+                )
+        with shared.lock:
+            shared.current_device = None
         shared.set_allowed(set(), reason=f"Finished {device} subtest")
+
+
+def _record_requested_failure(meter, shared, device):
+    failure = shared.extras.get("operator_failure")
+    if not isinstance(failure, dict) or failure.get("device") != device:
+        return False
+    reason = failure["reason"]
+    shared.last_error = reason
+    shared.device_results[device] = "fail"
+    shared.device_meta.setdefault(device, {})["error"] = reason
+    feedback = shared.extras.get("operator_feedback_state")
+    if not isinstance(feedback, dict) or feedback.get("test") != device:
+        feedback = {}
+    publish_operator_feedback(
+        meter, shared, test=device,
+        title=feedback.get("title", f"{device.replace('_', ' ').title()} test"),
+        instruction=reason, status="fail", current=feedback.get("current", 0),
+        total=feedback.get("total", 0), details=feedback.get("details", {}),
+        active=False, error=reason,
+    )
+    return True
 
 
 def operator_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
@@ -118,6 +157,8 @@ def operator_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
     func_name = inspect.currentframe().f_code.co_name
     cycle_count = int(kwargs.get("numBurnCycles", 1))
     cycle_delay = float(kwargs.get("numBurnDelay", 1))
+    stop_on_fail = kwargs.get("stop_on_fail", True)
+    failed_devices = set()
 
     shared.device_results.update({name: "pending" for name, _, _ in OPERATOR_TESTS})
 
@@ -137,9 +178,24 @@ def operator_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
                 shared.device_results[device] = "n/a"
                 continue
 
-            _run_operator_test(
-                meter, shared, device, test_func, subtest_kwargs=subtest_kwargs
-            )
+            try:
+                _run_operator_test(
+                    meter, shared, device, test_func, subtest_kwargs=subtest_kwargs
+                )
+                if shared.device_results.get(device) == "fail" or shared.stop_event.is_set():
+                    failed_devices.add(device)
+                    _record_requested_failure(meter, shared, device)
+                    if shared.stop_event.is_set() and not shared.abort_event.is_set():
+                        shared.continue_after_failure(stop_on_fail)
+            except Exception as exc:
+                failed_devices.add(device)
+                shared.last_error = str(exc)
+                _record_requested_failure(meter, shared, device)
+                if not shared.continue_after_failure(stop_on_fail):
+                    raise
+            finally:
+                if device in failed_devices:
+                    shared.device_results[device] = "fail"
             time.sleep(0.5)
 
         if cycle_num < cycle_count:

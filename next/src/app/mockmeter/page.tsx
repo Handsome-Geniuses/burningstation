@@ -12,7 +12,7 @@ type Card = { id: string; kind: "card"; brand: string; label: string; nfc: boole
 type Item = Coin | Card
 type Snapshot = {
     ip: string; hostname: string; status: string; coins: Coin[]; cards: Card[]
-    virtual: { session: string | null; device: string | null; screen_color: string | null; brightness: number; inserted_card: string | null; message: string; printed: number }
+    virtual: { session: string | null; device: string | null; screen_color: string | null; brightness: number; inserted_card: string | null; message: string; printed: number; passive_phase?: string | null }
     job: { current_action?: string; operator_feedback?: OperatorFeedbackState; operator_keypad?: OperatorKeypadState }
 }
 type Drag = { item: Item; x: number; y: number; phase: "drag" | "consume" | "toss" }
@@ -130,7 +130,11 @@ export default function MockMeterPage() {
     const keypad = snapshot?.job.operator_keypad
     const inserted = snapshot?.cards.find(card => card.id === state?.inserted_card)
     const device = state?.device
-    const activeTitle = feedback?.active ? feedback.title : device === "keypad" ? "Keypad test" : "Ready for testing"
+    const passiveRunning = snapshot?.job.current_action === "cycle_all"
+    const passivePhase = state?.passive_phase
+    const canFail = ready && !!state?.session && !!device && snapshot?.status === "busy"
+    const showFeedback = feedback?.active || (passiveRunning && feedback?.test.startsWith("passive_"))
+    const activeTitle = showFeedback ? feedback?.title : device === "keypad" ? "Keypad test" : "Ready for testing"
 
     return <main className={styles.page}>
         <header className={styles.header}>
@@ -142,7 +146,7 @@ export default function MockMeterPage() {
         <div className={styles.workspace}>
             <section className={styles.meterSide} aria-label="Virtual meter">
                 <div className={styles.meter}>
-                    <div className={styles.meterTop}><span>BS / {snapshot?.hostname ?? "MOCK"}</span><span className={styles.mockBadge}>MOCK</span></div>
+                    <div className={styles.meterTop}><span>BS / {snapshot?.hostname ?? "MOCK"}</span><div className={styles.meterActions}><span className={styles.mockBadge}>MOCK</span><button type="button" className={styles.failButton} disabled={!canFail} onClick={() => void interact({ kind: "fail" })} title="Fail the current mock test">FAIL</button></div></div>
                     <button type="button" disabled={!ready} className={styles.screen}
                         aria-label="Touch the meter screen"
                         style={{ background: state?.screen_color || undefined, filter: device === "display_brightness" ? `brightness(${Math.max(0.15, (state?.brightness ?? 99) / 99)})` : undefined }}
@@ -153,14 +157,15 @@ export default function MockMeterPage() {
                             const y = event.detail === 0 ? 0.5 : (event.clientY - rect.top) / rect.height
                             setTouch({ x, y }); void interact({ kind: "touch", x, y })
                         }}>
-                        <span className={styles.screenTop}>UNITED STATES <span>{device ? "TEST IN PROGRESS" : "DIAGNOSTICS"}</span></span>
-                        <span className={styles.screenMain}><strong>{activeTitle}</strong><span>{device === "display_brightness" ? "Testing screen brightness. Confirm on the dashboard." : device === "keypad" ? "Press each highlighted key." : feedback?.active ? feedback.instruction : state?.message ?? "Waiting for meter"}</span></span>
-                        <span className={styles.screenBottom}>{feedback?.active && feedback.total > 0 ? `${feedback.current} / ${feedback.total}` : device === "keypad" ? `${keypad?.current ?? 0} / ${keypad?.total ?? 0} keys` : "Start an OP test from the dashboard"}</span>
+                        <span className={styles.screenTop}>UNITED STATES <span>{passiveRunning ? "AUTOMATIC PASSIVE TEST" : device ? "TEST IN PROGRESS" : "DIAGNOSTICS"}</span></span>
+                        <span className={styles.screenMain}><strong>{activeTitle}</strong><span>{device === "display_brightness" ? "Testing screen brightness. Confirm on the dashboard." : device === "keypad" ? "Press each highlighted key." : showFeedback ? feedback?.instruction : state?.message ?? "Waiting for meter"}</span></span>
+                        <span className={styles.screenBottom}>{showFeedback && feedback && feedback.total > 0 ? `${feedback.current} / ${feedback.total} ${passiveRunning ? "repetitions complete" : ""}` : device === "keypad" ? `${keypad?.current ?? 0} / ${keypad?.total ?? 0} keys` : "Start a test from the dashboard"}</span>
+                        {passivePhase && (device === "modem" || device === "call in") && <span className={styles.networkActivity} data-phase={passivePhase}><Radio size={15} />{passivePhase}</span>}
                         {touch && device === "touchscreen" && <span className={styles.touchMarker} style={{ left: `${touch.x * 100}%`, top: `${touch.y * 100}%` }}>+</span>}
                     </button>
                     <div className={styles.readers}>
-                        <button type="button" data-reader="coin" className={`${styles.reader} ${hover === "coin" ? styles.over : ""}`} disabled={!ready} onClick={e => placeSelectedItem(e, "coin")}><span className={styles.coinSlot} /><strong>COINS</strong><small>US coins accepted</small></button>
-                        <button type="button" data-reader="nfc" className={`${styles.reader} ${hover === "nfc" ? styles.over : ""}`} disabled={!ready} onClick={e => placeSelectedItem(e, "nfc")}><Radio size={32} /><strong>TAP CARD</strong><small>Visa · Mastercard</small></button>
+                        <button type="button" data-reader="coin" data-passive-phase={device === "coin shutter" ? passivePhase : undefined} className={`${styles.reader} ${hover === "coin" ? styles.over : ""}`} disabled={!ready} onClick={e => placeSelectedItem(e, "coin")}><span className={styles.coinSlot} /><strong>COINS</strong><small>{device === "coin shutter" ? `Shutter ${passivePhase}` : "US coins accepted"}</small></button>
+                        <button type="button" data-reader="nfc" data-passive-phase={device === "nfc" ? passivePhase : undefined} className={`${styles.reader} ${hover === "nfc" ? styles.over : ""}`} disabled={!ready} onClick={e => placeSelectedItem(e, "nfc")}><Radio size={32} /><strong>TAP CARD</strong><small>{device === "nfc" ? `Reader ${passivePhase}` : "Visa · Mastercard"}</small></button>
                         <button type="button" data-reader="stripe" className={`${styles.reader} ${hover === "stripe" ? styles.over : ""}`} disabled={!ready} onClick={e => placeSelectedItem(e, "stripe")} onDoubleClick={() => void interact({ kind: "remove_card" })}>
                             <span className={styles.cardSlot}>{inserted && <span className={styles.insertedCard}>{inserted.label}</span>}</span><strong>CARD READER</strong><small>{inserted ? "Double-click to remove & read" : "Insert magnetic stripe"}</small>
                         </button>
@@ -178,9 +183,9 @@ export default function MockMeterPage() {
                             </button>
                         })}
                     </div>
-                    <div className={styles.printer}><div><Printer size={17} /><span>LASER PRINTER</span><small>{state?.printed ? `${state.printed} printed` : "Ready"}</small></div><span className={styles.printSlot} />{(state?.printed ?? 0) > 0 && <span key={state?.printed} className={styles.receipt}>BURNING STATION<br />{snapshot?.hostname}<br />MOCK METER · US<br />────────────<br />Test information</span>}</div>
+                    <div className={styles.printer} data-passive-phase={device === "printer" ? passivePhase : undefined}><div><Printer size={17} /><span>LASER PRINTER</span><small>{device === "printer" && passivePhase === "printing" ? "Printing…" : state?.printed ? `${state.printed} printed` : "Ready"}</small></div><span className={styles.printSlot} />{(state?.printed ?? 0) > 0 && <span key={state?.printed} className={styles.receipt}>BURNING STATION<br />{snapshot?.hostname}<br />MOCK METER · US<br />────────────<br />Test information</span>}</div>
                 </div>
-                <div className={styles.liveNotice} role="status">{notice || state?.message || "Waiting for connection"}</div>
+                <div className={styles.liveNotice} role="status">{passiveRunning ? feedback?.instruction || state?.message : notice || state?.message || "Waiting for connection"}</div>
             </section>
             <aside className={styles.inventory} aria-label="Reusable test items">
                 <div className={styles.inventoryHeader}><div><span className={styles.eyebrow}>INFINITE SUPPLY</span><h2>Test items</h2></div><span className={styles.infinity}>∞</span></div>

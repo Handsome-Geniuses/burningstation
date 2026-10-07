@@ -38,6 +38,17 @@ export const meterRunOperatorKeypad = async (meterIp?: string) => meterRunProg(m
 export const meterRunOperatorTest = async (meterIp: string | undefined, test: string) =>
     meterRunProg(meterIp, "start_operator_test_job", { test })
 export const meterStopOperator = async (meterIp?: string) => meterRunProg(meterIp, "stop_operator_job")
+export const meterFailOperatorSubtest = async (meterIp?: string, test?: string) => {
+    if (!meterIp || !test) return
+    try {
+        const res = await flask.post("/operator/fail", {
+            body: JSON.stringify({ meter_ip: meterIp, test }),
+        })
+        if (!res.ok) throw new Error((await res.text()) || "Unable to fail operator subtest")
+    } catch (err) {
+        notify.error(err instanceof Error ? err.message : "Unable to fail operator subtest")
+    }
+}
 export const meterRunPrintFw = async (meterIp?: string) => await meterRunNeutralProg(meterIp, "printfw")
 export const meterRunDummy = async (meterIp?: string) => meterRunNeutralProg(meterIp, "dummy")
 

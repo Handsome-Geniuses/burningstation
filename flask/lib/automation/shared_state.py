@@ -14,6 +14,7 @@ from lib.automation.actions import ClearWatches
 class SharedState:
     def __init__(self):
         self.stop_event = threading.Event()
+        self.abort_event = threading.Event()
         self.end_listener = threading.Event()
         self.success_event = threading.Event()
 
@@ -32,6 +33,16 @@ class SharedState:
         self._last_flush = time.time()
         self._flush_interval = 2.0              # seconds
         self._flush_threshold = 50              # msg lines
+
+    def continue_after_failure(self, stop_on_fail: bool) -> bool:
+        """Clear a subtest's stop signal only when no external abort was requested."""
+        with self.lock:
+            if stop_on_fail or self.abort_event.is_set():
+                return False
+            self.stop_event.clear()
+            self.extras.pop("mock_failure", None)
+            self.extras.pop("operator_failure", None)
+            return True
 
     def set_allowed(self, devices: set[str], reason: str = "", clear_watchdogs: bool = True):
         if clear_watchdogs:

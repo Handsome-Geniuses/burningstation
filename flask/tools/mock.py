@@ -21,7 +21,6 @@ motor_thread = None
 stop_event = threading.Event()
 _original_rm_set_value_list = rm.set_value_list
 _mock_motor_values = [rm.COAST, rm.COAST, rm.COAST]
-_mock_passive_timers: dict[str, threading.Timer] = {}
 _mock_physical_timers: dict[str, threading.Timer] = {}
 
 
@@ -89,6 +88,8 @@ _original_exec_parse = SSHMeter.exec_parse
 _original_sim_on_action = sim.on_action
 _original_stop_operator_job = program.stop_operator_job
 _original_start_operator_job = program.start_operator_job
+_original_start_passive_job = program.start_passive_job
+_original_stop_passive_job = program.stop_passive_job
 
 _mock_keypad_journals: dict[str, list[dict]] = {}
 _mock_keypad_page_hosts: set[str] = set()
@@ -700,51 +701,16 @@ def _mock_stop_operator_job(meter_ip):
     return True, "stopped"
 
 
-def _mock_start_passive_job(*args, **kwargs): 
-    duration = 3
-    _mock_null_fn_msg("start_passive_job", args, kwargs)
-    meter_ip = args[0] if args else kwargs.get("meter_ip")
-    if not meter_ip:
-        return False, "Missing meter_ip"
-
-    _mock_stop_passive_job(meter_ip)
-    meter = mm.get_meter(meter_ip)
-    meter.status = "busy"
-    master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': 'cycle_all'})
-    _broadcast_mock_progress(meter_ip, 'burn-in', 0, duration)
-
-    def tick_passive(current_cycle: int = 1):
-        if meter_ip not in _mock_passive_timers:
-            return
-
-        _broadcast_mock_progress(meter_ip, 'burn-in', current_cycle, duration)
-        if current_cycle < duration:
-            timer = threading.Timer(1.0, tick_passive, args=(current_cycle + 1,))
-            _mock_passive_timers[meter_ip] = timer
-            timer.start()
-            return
-
-        _mock_passive_timers.pop(meter_ip, None)
-        meter.status = "ready"
-        master.broadcast('status', {'ip': meter_ip, 'status': meter.status, 'current_action': ''})
-        _insert_mock_job(meter_ip, "cycle_all")
-        _handle_auto_job_done(meter_ip, "cycle_all")
-
-    timer = threading.Timer(1.0, tick_passive)
-    _mock_passive_timers[meter_ip] = timer
-    timer.start()
-    return True, "started"
+def _mock_start_passive_job(*args, **kwargs):
+    # Keep settings, subtest order, results, and completion on the normal path.
+    return _original_start_passive_job(*args, **kwargs)
 
 
 def _mock_stop_passive_job(meter_ip):
-    _mock_null_fn_msg("stop_passive_job", (meter_ip,), {})
-    timer = _mock_passive_timers.pop(meter_ip, None)
-    if timer:
-        timer.cancel()
-    meter = mm.meters.get(meter_ip)
-    if meter:
-        meter.status = "ready"
-    master.broadcast('status', {'ip': meter_ip, 'status': 'ready', 'current_action': ''})
+    from lib.automation import jobs
+    state = jobs._states.get(meter_ip)
+    if state is not None and state.status == "running" and state.current_program == "cycle_all":
+        return _original_stop_passive_job(meter_ip)
     return True, "stopped"
 
 # ================================================================

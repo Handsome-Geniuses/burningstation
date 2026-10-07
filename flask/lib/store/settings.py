@@ -367,6 +367,9 @@ class FlowSettings(BaseModel):
     physical_check: bool = Field(
         True, description="blink meters to confirm middle meter for physical test"
     )
+    stop_on_fail: bool = Field(
+        True, description="for multi-tests, stop full test if 1 fails."
+    )
 
 
 # ==================================================================

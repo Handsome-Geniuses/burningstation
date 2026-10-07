@@ -20,7 +20,7 @@ DEVICES = [
     ("call in", test_cycle_call_in, {}),
 ]
 
-CYCLE_ALL_GLOBAL_KEYS = {"numBurnCycles", "numBurnDelay", "monitors", "broadcast_job"}
+CYCLE_ALL_GLOBAL_KEYS = {"numBurnCycles", "numBurnDelay", "stop_on_fail", "monitors", "broadcast_job"}
 
 
 def _device_key_variants(device: str):
@@ -99,7 +99,11 @@ def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, subtest_k
         subtest_kwargs["subtest"] = True
         subtest_kwargs["banner_text"] = banner_text
         meter.set_ui_mode("banner", banner_text)
-        fn(meter, shared=shared, **subtest_kwargs)
+        if getattr(meter, "is_mock", False):
+            from lib.automation.mock_meter import run_virtual_passive_test
+            run_virtual_passive_test(meter, shared, device, subtest_kwargs)
+        else:
+            fn(meter, shared=shared, **subtest_kwargs)
         if not shared.stop_event.is_set():
             shared.device_results[device] = "pass"
     except StopAutomation:
@@ -117,6 +121,8 @@ def test_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
     func_name = inspect.currentframe().f_code.co_name
     burn_count = kwargs.get("numBurnCycles", 1)
     burn_delay = kwargs.get("numBurnDelay", 10)
+    stop_on_fail = kwargs.get("stop_on_fail", True)
+    failed_devices = set()
 
     shared.device_results.update({name: "pending" for name, _, _ in DEVICES})
 
@@ -134,7 +140,20 @@ def test_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
                 shared.device_results[name] = "n/a"
                 continue
 
-            _run_device(meter, shared, name, fn, subtest_kwargs=subtest_kwargs)
+            try:
+                _run_device(meter, shared, name, fn, subtest_kwargs=subtest_kwargs)
+                if shared.device_results.get(name) == "fail" or shared.stop_event.is_set():
+                    failed_devices.add(name)
+                    if shared.stop_event.is_set() and not shared.abort_event.is_set():
+                        shared.continue_after_failure(stop_on_fail)
+            except Exception as exc:
+                failed_devices.add(name)
+                shared.last_error = str(exc)
+                if not shared.continue_after_failure(stop_on_fail):
+                    raise
+            finally:
+                if name in failed_devices:
+                    shared.device_results[name] = "fail"
             time.sleep(0.5)
 
         time.sleep(burn_delay)

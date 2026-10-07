@@ -136,7 +136,9 @@ class Listener:
             if dev_name:
                 self.shared.device_results[dev_name] = 'fail'
         if any(f.severity == "critical" for f in faults):
-            self.shared.stop_event.set()
+            with self.shared.lock:
+                self.shared.abort_event.set()
+                self.shared.stop_event.set()
 
     def _process_action(self, a: Action, dev_id: str) -> None:
         allowed = self.shared.allowed_monitors
@@ -203,7 +205,8 @@ class Listener:
                     dev_id = getattr(a, "device", None) or "unknown"
                     self._process_action(a, dev_id)
 
-                if self.shared.stop_event.is_set() or self.shared.end_listener.is_set():
+                abort_event = getattr(self.shared, "abort_event", self.shared.stop_event)
+                if abort_event.is_set() or self.shared.end_listener.is_set():
                     break
 
                 ev = self._parse_line(line)

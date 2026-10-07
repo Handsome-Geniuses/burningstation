@@ -33,6 +33,31 @@ class OperatorKeypadMockTests(unittest.TestCase):
             )
         return result
 
+    def test_operator_fail_route_requires_matching_full_run_subtest(self):
+        self.run_python("""
+            from app import app
+            from lib.automation import jobs
+            client = app.test_client()
+            host = "operator-fail-route"
+            state = jobs.JobState(host)
+            jobs._states[host] = state
+            def fail(meter, test):
+                return client.post("/api/system/operator/fail", json={"meter_ip": meter, "test": test})
+            assert client.post("/api/system/operator/fail", json={}).status_code == 400
+            assert fail(host, "coins").status_code == 409
+            state.status = "running"
+            state.current_program = "operator_coins"
+            state.current_device = "coins"
+            assert fail(host, "coins").status_code == 409
+            state.current_program = "operator_cycle_all"
+            assert fail("another-meter", "coins").status_code == 409
+            assert fail(host, "keypad").status_code == 409
+            assert fail(host, "coins").status_code == 200
+            assert state.stop_event.is_set()
+            assert state.extras["operator_failure"]["reason"] == "Operator marked coins failed"
+            assert fail(host, "coins").status_code == 409
+        """)
+
     def test_mock_runner_skips_ssh_listener_and_preserves_logs(self):
         result = self.run_python(
             """

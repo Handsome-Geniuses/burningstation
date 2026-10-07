@@ -146,6 +146,7 @@ class JobState(SharedState):
 
         # per-run events/state
         self.stop_event.clear()
+        self.abort_event.clear()
         self.end_listener.clear()
         self.success_event.clear()
 
@@ -205,6 +206,24 @@ def submit_operator_response(meter_ip: str, test: str, value: bool) -> bool:
         submit_operator_feedback_response(st, test, value)
         return True
 
+
+def fail_operator_subtest(meter_ip: str, test: str) -> bool:
+    """Fail only the active subtest of this meter's full operator run."""
+    with _registry_lock:
+        st = _states.get(meter_ip)
+    if st is None:
+        return False
+    with st.lock:
+        if (st.status != "running" or st.current_program != "operator_cycle_all"
+                or st.current_device != test or st.abort_event.is_set()
+                or st.stop_event.is_set()):
+            return False
+        reason = f"Operator marked {test.replace('_', ' ')} failed"
+        st.extras["operator_failure"] = {"device": test, "reason": reason}
+        st.stop_event.set()
+    st.log(reason)
+    return True
+
 def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     meter = mm.get_meter(meter_ip)
     st = _state(meter_ip)
@@ -254,8 +273,11 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
                 log=log,
                 verbose=verbose,
             )
-            st.result  = "pass" if not st.stop_event.is_set() else "fail"
-            st.status  = "finished"
+            st.result = "fail" if (
+                st.stop_event.is_set()
+                or any(result == "fail" for result in st.device_results.values())
+            ) else "pass"
+            st.status = "cancelled" if st.abort_event.is_set() and st.extras.get("failure_reason") == "manually stopped" else "finished"
             st.log(f"JOB FINISHED: {st.result.upper()}", console=verbose)
 
             meter.results[program_name] = st.result
@@ -314,8 +336,10 @@ def stop_job(meter_ip):
     st.extras["failure_reason"] = "manually stopped"
     if not st.last_error:
         st.last_error = "manually stopped"
-    st.stop_event.set()
-    st.status = "cancelled"
+    with st.lock:
+        st.abort_event.set()
+        st.stop_event.set()
+        st.status = "cancelled"
     meter.status = "ready"
     master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'current_action': ''})
     meter.beep(3)

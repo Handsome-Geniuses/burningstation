@@ -22,6 +22,7 @@ import {
     meterStopPassive,
     meterStopPhysical,
     meterStopOperator,
+    meterFailOperatorSubtest,
 } from "@/lib/ep"
 
 import { MeterState, SystemState } from "../../store/system"
@@ -78,6 +79,7 @@ export const MeterDialog = ({
     const { run, running } = useAsyncAction()
     const isMeterReady = meter?.status === "ready"
     const isPassiveRunning = meter?.current_action === "cycle_all"
+    const isMockPassiveRunning = systemState.hardware.mock && isPassiveRunning
     const isPhysicalRunning = meter?.current_action === "physical_cycle_all"
     const isOperatorRunning = meter?.current_action === "operator_cycle_all"
     const isOperatorKeypadRunning = meter?.current_action === "operator_keypad"
@@ -86,9 +88,15 @@ export const MeterDialog = ({
     const keypadState = meter ? systemState.operatorKeypad[meter.ip] : undefined
     const operatorFeedback = meter ? systemState.operatorFeedback[meter.ip] : undefined
     const keypadIncomplete = keypadState ? keypadState.total <= 0 || keypadState.current < keypadState.total : false
-    const isOperatorCycleKeypadActive = Boolean(isOperatorRunning && keypadIncomplete)
+    const isOperatorCycleKeypadActive = Boolean(isOperatorRunning && operatorFeedback?.test === "keypad" && operatorFeedback.active && keypadIncomplete)
+    const activeOperatorTest = isOperatorCycleKeypadActive ? "keypad" : isOperatorRunning && operatorFeedback?.active ? operatorFeedback.test : undefined
     const showOperatorKeypad = Boolean(isOperatorKeypadRunning || isOperatorCycleKeypadActive)
-    const showOperatorFeedback = Boolean((isOperatorRunning || isStandaloneOperatorRunning) && operatorFeedback?.active && !showOperatorKeypad)
+    const showOperatorFeedback = Boolean(
+        !showOperatorKeypad && (
+            ((isOperatorRunning || isStandaloneOperatorRunning) && operatorFeedback?.active)
+            || (isMockPassiveRunning && operatorFeedback?.test.startsWith("passive_"))
+        )
+    )
     const showVersionChecks = Boolean(meter && !showOperatorKeypad && !showOperatorFeedback && view === "version-checks")
 
     React.useEffect(() => {
@@ -218,13 +226,13 @@ export const MeterDialog = ({
                     </DialogFooter>
                 ) : (
                     <DialogFooter className="border-t p-4 sm:flex-wrap">
-                        {systemState.playground && isPassiveRunning &&
+                        {(systemState.playground || systemState.hardware.mock) && isPassiveRunning &&
                             <Button
                                 variant="destructive"
                                 onClick={run(() => meterStopPassive(meter?.ip))}
                                 disabled={running}
                             >
-                                passive
+                                stop passive
                             </Button>
                         }
                         {systemState.playground && isPhysicalRunning &&
@@ -242,7 +250,17 @@ export const MeterDialog = ({
                                 onClick={run(() => meterStopOperator(meter?.ip))}
                                 disabled={running}
                             >
-                                {isStandaloneOperatorRunning ? "stop test" : "stop operator"}
+                                Stop
+                            </Button>
+                        }
+                        {isOperatorRunning &&
+                            <Button
+                                variant="outline"
+                                className="border-destructive text-destructive hover:bg-destructive/10"
+                                onClick={run(() => meterFailOperatorSubtest(meter?.ip, activeOperatorTest))}
+                                disabled={running || !activeOperatorTest}
+                            >
+                                Fail
                             </Button>
                         }
                         {!showOperatorKeypad && !showOperatorFeedback && (

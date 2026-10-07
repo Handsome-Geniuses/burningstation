@@ -27,6 +27,7 @@ PHYSICAL_DEVICES = [
 PHYSICAL_CYCLE_GLOBAL_KEYS = {
     "numBurnCycles",
     "numBurnDelay",
+    "stop_on_fail",
     "monitors",
     "broadcast_job",
     "robot_ready_timeout",
@@ -130,6 +131,8 @@ def physical_cycle_all(
     func_name = inspect.currentframe().f_code.co_name
     burn_count = int(kwargs.get("numBurnCycles", 1))
     burn_delay = int(kwargs.get("numBurnDelay", 5))
+    stop_on_fail = kwargs.get("stop_on_fail", True)
+    failed_devices = set()
     robot_ready_timeout = float(kwargs.get("robot_ready_timeout", 30.0))
 
     # if "monitors" in kwargs:
@@ -208,40 +211,52 @@ def physical_cycle_all(
                 else:
                     test_func(meter, shared=shared, **final_kwargs)
 
+                if shared.stop_event.is_set() and not shared.abort_event.is_set():
+                    failed_devices.add(device_name)
+                    if not shared.continue_after_failure(stop_on_fail):
+                        return
                 if not shared.stop_event.is_set():
                     shared.device_results[device_name] = "pass"
 
             except StopAutomation as e:
-                if is_combined_subtest:
-                    raise
                 shared.log(f"{device_name} subtest fail due to StopAutomation")
                 shared.device_results[device_name] = "fail"
+                failed_devices.add(device_name)
                 shared.last_error = str(e)
 
-                try:
-                    robot.send_command("abort_program")
-                    shared.log("Robot program aborted due to subtest failure")
-                except Exception as abort_e:
-                    shared.log(f"Failed to abort robot program: {abort_e}")
+                if not is_combined_subtest:
+                    try:
+                        robot.send_command("abort_program")
+                        shared.log("Robot program aborted due to subtest failure")
+                    except Exception as abort_e:
+                        shared.log(f"Failed to abort robot program: {abort_e}")
 
-                raise e
+                if not shared.continue_after_failure(stop_on_fail):
+                    raise
             
             except Exception as e:
-                if is_combined_subtest:
-                    raise
                 shared.log(f"{device_name} subtest fail due to {e}")
                 shared.device_results[device_name] = "fail"
+                failed_devices.add(device_name)
                 shared.last_error = str(e)
 
-                try:
-                    robot.send_command("abort_program")
-                    shared.log("Robot program aborted due to subtest failure")
-                except Exception as abort_e:
-                    shared.log(f"Failed to abort robot program: {abort_e}")
+                if not is_combined_subtest:
+                    try:
+                        robot.send_command("abort_program")
+                        shared.log("Robot program aborted due to subtest failure")
+                    except Exception as abort_e:
+                        shared.log(f"Failed to abort robot program: {abort_e}")
 
-                raise e
+                if not shared.continue_after_failure(stop_on_fail):
+                    raise
 
             finally:
+                failed_devices.update(
+                    name for name, result in shared.device_results.items()
+                    if result == "fail"
+                )
+                for failed_device in failed_devices:
+                    shared.device_results[failed_device] = "fail"
                 shared.current_device = None
                 shared.set_allowed(set(), reason="Subtest complete")
 
