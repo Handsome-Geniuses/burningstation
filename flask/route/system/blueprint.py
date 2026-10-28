@@ -22,6 +22,15 @@ from lib.sse.sse_queue_manager import SSEQM
 bp = flask.Blueprint("hello", __name__)
 
 
+@bp.post("/meters/wipe")
+def wipe_meters():
+    try:
+        return flask.jsonify(mm.wipe())
+    except Exception:
+        flask.current_app.logger.exception("Meter wipe failed")
+        return {"error": "Unable to wipe meters"}, 500
+
+
 @bp.route("/mockmeter/<meter_ip>", methods=["GET", "POST"])
 def virtual_meter(meter_ip):
     if not secrets.MOCK:

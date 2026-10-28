@@ -319,6 +319,10 @@ class VersionCheckSet(BaseModel):
         "BNA Bus MEI",
         module_aliases=("BNA",),
     )
+    kiosk_v: FirmwareVersionCheck = version_check_field(
+        "Kiosk V",
+        module_aliases=("KISOK_V",),
+    )
 
 
 def default_version_check_profiles() -> list[VersionCheckSet]:

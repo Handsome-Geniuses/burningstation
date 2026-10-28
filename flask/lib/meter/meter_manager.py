@@ -1,5 +1,6 @@
 from typing import Dict, Set, TypedDict
 import ip_scanner
+from threading import RLock
 from lib.sse.sse_queue_manager import SSEQM, key_payload
 from lib.meter.fun import send_fun_meter
 from lib.meter.ssh_meter import SSHMeter
@@ -24,6 +25,7 @@ class METERMANAGER:
     base = secrets.BASE
     address_range = secrets.RANGE
     __limit = 30
+    __discovery_lock = RLock()
     __meters: Set[str] = set()
     __splash: Set[str] = set()
     __attempts: dict[str, int] = {}
@@ -41,15 +43,15 @@ class METERMANAGER:
         return datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
     @classmethod
-    def __on_stale(cls, ip: str):
+    def __on_stale(cls, ip: str, *, force: bool = False):
         """Track stale detections and remove inactive meters once threshold is met. Defer romoval if meter is busy."""
         cls.__stale_counts[ip] = cls.__stale_counts.get(ip, 0) + 1
 
-        if cls.__stale_counts[ip] >= cls.__STALE_THRESHOLD:
+        if force or cls.__stale_counts[ip] >= cls.__STALE_THRESHOLD:
             if ip in cls.meters:
                 meter = cls.meters[ip]
                 hn = meter.hostname if hasattr(meter, 'hostname') else "unknown"
-                if getattr(meter, "status", None) == "busy":
+                if not force and getattr(meter, "status", None) == "busy":
                     print(
                         f"[{cls._timestamp()}] STALE: {ip} ({hn}) removal deferred because meter is busy",
                         fg="#888800",
@@ -65,7 +67,8 @@ class METERMANAGER:
                     },
                 )
 
-            cls.meters[ip].close()
+            if ip in cls.meters:
+                cls.meters[ip].close()
             cls.meters.pop(ip, None)
             cls.__meters.discard(ip)
             cls.__splash.discard(ip)
@@ -241,6 +244,31 @@ class METERMANAGER:
 
     @classmethod
     def refresh(cls):
+        with cls.__discovery_lock:
+            return cls.__refresh()
+
+    @classmethod
+    def wipe(cls):
+        """Forget unreachable or idle meters; preserve reachable busy meters."""
+        with cls.__discovery_lock:
+            if not cls.meters:
+                return {"removed": [], "preserved": []}
+            reachable = set(ip_scanner.get_ips(
+                base=cls.base, start=cls.address_range[0],
+                end=cls.address_range[1], timeout=1, concurrency=500,
+            ))
+            removed, preserved = [], []
+            for ip, meter in list(cls.meters.items()):
+                if ip in reachable and getattr(meter, "status", None) == "busy":
+                    cls.__stale_counts.pop(ip, None)
+                    preserved.append(ip)
+                else:
+                    cls.__on_stale(ip, force=True)
+                    removed.append(ip)
+            return {"removed": removed, "preserved": preserved}
+
+    @classmethod
+    def __refresh(cls):
         current = set(
             ip_scanner.get_ips(
                 base=cls.base,
