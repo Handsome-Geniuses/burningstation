@@ -13,7 +13,6 @@ REGISTRY = {
     "nfc": NFCMonitor,
     "modem": ModemMonitor,
     "keypad": KeypadMonitor,
-    "nfc_read": NFCMonitor,
     "robot_keypad": RobotKeypadMonitor,
 }
 

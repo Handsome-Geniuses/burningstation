@@ -15,6 +15,7 @@
 .vscode
 
 *.log
+*.ndjson
 
 
 

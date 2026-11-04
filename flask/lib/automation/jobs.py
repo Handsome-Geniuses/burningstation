@@ -52,7 +52,6 @@ PROG2DEVICE = {
     "operator_card_reader": "card_reader",
     "test_solar": "solar",
     "test_robot_coin_shutter": "coin_shutter",
-    "test_robot_nfc_read": "nfc",
     "test_robot_keypad": "robot_keypad",
     "test_robot_display_brightness": "display_brightness",
     "robot_display_brightness": "display_brightness",
@@ -255,7 +254,9 @@ def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
     if dev:
         st.current_device = dev
         st.device_results[dev] = "running"
-        st.set_allowed({dev}, reason=f"Start job {program_name}")
+        locally_verified = {"cycle_print", "printer", "cycle_nfc", "nfc", "cycle_modem", "modem"}
+        allowed = set() if program_name in locally_verified else {dev}
+        st.set_allowed(allowed, reason=f"Start job {program_name}")
     else:
         st.set_allowed(set(), reason=f"Start job {program_name} (no monitors expected)")
     

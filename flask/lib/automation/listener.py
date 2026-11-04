@@ -292,10 +292,9 @@ if __name__ == "__main__":
     # Edit here to choose devices and kwargs
     DEVICES = [
         # ("printer", {"timeout_s": 8.0}),
-        # ("nfc", {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
         # ("modem", {"connect_timeout_s": 25.0, "disconnect_timeout_s": 20.0}),
         # ("keypad", {"inactivity_timeout_s": 8.0, "count": 1}),
-        ("nfc_read", {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
+        ("nfc", {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
     ]
 
     # Minimal SharedState fallback

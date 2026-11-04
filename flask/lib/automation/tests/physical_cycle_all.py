@@ -16,7 +16,6 @@ PHYSICAL_DEVICES = [
     ("solar",          test_solar, {}),
     ("display_brightness", test_robot_display_brightness, {"max_duration_s": 40.0}),
     ("coin_shutter",   test_robot_coin_shutter, {}),
-    ### ("nfc",            test_robot_nfc_read,     {}),
     ("nfc_gui",        test_cycle_meter_ui,     {"payment_type": "robot_contactless"}),
     ("robot_keypad",   test_robot_keypad,       {
         "buttons": ["1","2","3"],

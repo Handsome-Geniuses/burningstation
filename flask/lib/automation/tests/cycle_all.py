@@ -81,7 +81,7 @@ def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, subtest_k
         return
 
     shared.current_device = device
-    if device in {"printer", "coin shutter", "nfc", "modem"}:
+    if device == "coin shutter":
         shared.set_allowed({device}, reason=f"Running {device} subtest")
     else:
         shared.set_allowed(set(), reason=f"Running {device} (no monitors expected)")

@@ -16,7 +16,6 @@ from .refresh_meter import refresh_meter
 
 from .test_solar import test_solar
 from .test_robot_coin_shutter import test_robot_coin_shutter
-from .test_robot_nfc_read import test_robot_nfc_read
 from .test_robot_keypad import test_robot_keypad
 from .test_robot_display_brightness import test_robot_display_brightness
 from .physical_cycle_all import physical_cycle_all
@@ -75,7 +74,6 @@ PROGRAM_REGISTRY = {
 
     "test_robot_coin_shutter": test_robot_coin_shutter,
 
-    "test_robot_nfc_read": test_robot_nfc_read,
 
     "test_robot_keypad": test_robot_keypad,
 
@@ -86,24 +84,18 @@ PROGRAM_REGISTRY = {
 }
 
 _PROGRAM_MONITORS = {
-    "cycle_print":       [("printer", {"timeout_s": 8.0})],
+    "cycle_print":       [],
     "cycle_coin_shutter":[],
-    "cycle_nfc":         [("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
-    "cycle_modem":       [("modem",   {"connect_timeout_s": 35.0, "disconnect_timeout_s": 30.0})],
+    "cycle_nfc":         [],
+    "cycle_modem":       [],
     "cycle_call_in":     [],
     "cycle_meter_ui":    [],
-    "cycle_all": [
-        ("nfc",     {"timeout_on_s": 6.0, "timeout_off_s": 3.0}),
-        ("modem",   {"connect_timeout_s": 35.0, "disconnect_timeout_s": 30.0}),
-        ("printer", {"timeout_s": 8.0}),
-    ],
-    # "test_keypad":       [("keypad",  {"inactivity_timeout_s": 15.0, "layouts": ["1x6"], "count": 1})],
+    "cycle_all": [],
     "test_operator_keypad":       [],
     "test_operator_coins":        [],
     "test_operator_nfc_tap":     [],
     "test_operator_touchscreen":  [],
     "test_operator_display_brightness": [],
-    "test_robot_nfc_read":  [("nfc",  {"timeout_on_s": 6.0, "timeout_off_s": 3.0})],
     "test_robot_keypad":    [],
     "test_robot_display_brightness": [],
     "physical_cycle_all":   [],
