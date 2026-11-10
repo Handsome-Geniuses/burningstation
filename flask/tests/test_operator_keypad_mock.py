@@ -58,7 +58,7 @@ class OperatorKeypadMockTests(unittest.TestCase):
             assert fail(host, "coins").status_code == 409
         """)
 
-    def test_mock_runner_skips_ssh_listener_and_preserves_logs(self):
+    def test_runner_logs_without_the_retired_listener(self):
         result = self.run_python(
             """
             from pathlib import Path
@@ -67,36 +67,26 @@ class OperatorKeypadMockTests(unittest.TestCase):
             from unittest.mock import patch
             from lib.automation import runner
             from lib.automation.shared_state import SharedState
-
             def test_job(meter, shared, **kwargs):
                 shared.log("test completed")
-
             for is_mock in (True, False):
                 shared = SharedState()
                 shared.current_program = "dummy"
-                meter = SimpleNamespace(
-                    is_mock=is_mock, host="192.168.69.900" if is_mock else "192.168.69.10",
-                    hostname="90090090", pswd="", user="root",
-                    clear_banner_text=lambda: None,
-                )
+                meter = SimpleNamespace(is_mock=is_mock, host="192.0.2.1",
+                                        clear_banner_text=lambda: None)
                 with TemporaryDirectory() as directory:
                     logfile = Path(directory) / "job.log"
                     shared.set_logfile(str(logfile))
-                    with patch.dict(runner.PROGRAM_REGISTRY, {"dummy": test_job}), \
-                         patch.object(runner, "start_listener_thread") as listener:
+                    with patch.dict(runner.PROGRAM_REGISTRY, {"dummy": test_job}):
                         runner.run_test_job(meter, "dummy", {"monitors": []}, shared)
                     shared.flush_logs()
                     assert "test completed" in logfile.read_text()
                     assert not shared.stop_event.is_set()
-                    if is_mock:
-                        listener.assert_not_called()
-                    else:
-                        listener.assert_called_once()
-                        listener.return_value.join.assert_called_once_with(timeout=5)
-            print("mock-listener-skipped-real-listener-preserved")
-            """
+            print("runner-logs-without-listener")
+            """,
+            profile="portable",
         )
-        self.assertIn("mock-listener-skipped-real-listener-preserved", result.stdout)
+        self.assertIn("runner-logs-without-listener", result.stdout)
 
     def test_individual_operator_buttons_override_only_job_count(self):
         self.run_python(
@@ -121,19 +111,29 @@ class OperatorKeypadMockTests(unittest.TestCase):
                 )
                 configs["keypad"]["buttons"] = ["1", "2"]
                 original = deepcopy(configs)
+                launched = Mock()
+                def capture(ip, program, options, **job_options):
+                    setup = job_options.pop("prepare", None)
+                    if setup:
+                        prepared = setup(meter)
+                        if prepared is not None:
+                            options = {**options, **prepared}
+                    launched(ip, program, options, **job_options)
+                    return True, "started"
                 with patch.object(jobs.mm, "get_meter", return_value=meter), \
                      patch.object(jobs, "get_default_buttons", return_value=["1", "2"]), \
                      patch.object(jobs, "build_operator_kwargs", return_value=configs), \
-                     patch.object(jobs, "start_job", return_value=(True, "started")) as start:
+                     patch.object(jobs, "start_job", side_effect=capture):
                     for program, device in OPERATOR_PROGRAMS.items():
                         assert jobs.start_operator_test_job("host", program)[0]
-                        start.assert_called_with(
+                        launched.assert_called_with(
                             "host", program, {**original[device], "job_count": 1}, verbose=True,
                         )
                     jobs.start_operator_job("host")
-                    start.assert_called_with("host", "operator_cycle_all", original, verbose=True)
+                    launched.assert_called_with("host", "operator_cycle_all", original, verbose=True)
                 assert configs == original, "Stored settings must not be mutated"
-            """
+            """,
+            profile="portable",
         )
 
     def test_standalone_operator_mock_jobs_save_results_and_duration(self):

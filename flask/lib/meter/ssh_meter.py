@@ -11,11 +11,14 @@ import math
 import json
 import shlex
 import threading
+from functools import wraps
+from contextlib import nullcontext
 from html import unescape
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from lib.utils import secrets
+from lib.meter.lifecycle import session_for, MeterInterrupted
 from lib.automation.shared_state import SharedState
 from lib.meter.coin_utils import clear_coin_tallies as clear_coin_tallies_impl
 from lib.meter.display_utils import (
@@ -179,7 +182,27 @@ class DiagPageState(TypedDict):
 
 def_user = bytes(a ^ b for a, b in zip(bytes([238,149,49,210]), [156,250,94,166])).decode()
 def_pswd = bytes(a ^ b for a, b in zip(bytes([236,108,173,77,97,238,131,254,65,42,46]), [156,44,223,6,8,128,228,201,118,25,25])).decode()
+def _controlled(function):
+    """Reuse an authorized thread's lease or reserve controls for a short action."""
+    @wraps(function)
+    def invoke(meter, *args, **kwargs):
+        session = session_for(meter)
+        if session is None:
+            return function(meter, *args, **kwargs)
+        with session.control():
+            return function(meter, *args, **kwargs)
+    return invoke
+
+
 class SSHMeter(sshkit.Client):
+    """Meter commands, UI feedback, and cached hardware inventory.
+
+    Managed instances receive a MeterSession after SSH identity is validated.
+    Its readiness/lease replaces legacy status strings as the control authority;
+    admission must be able to enumerate before public readiness. Public SSE info
+    uses cached data. See ``lib/docs/meter/supervisor.md`` and update that document
+    when changing inventory, guarded navigation, or session logging contracts.
+    """
     DEFAULT_SSH_IDLE_TIMEOUT = 180.0
 
     def __init__(self, host, **kwargs):
@@ -196,6 +219,7 @@ class SSHMeter(sshkit.Client):
         self._firmwares: Firmwares = None 
 
         self.results = {}
+        self.db_id = None
         self.__resolution = ""
         self._module_details_cache: Optional[Dict[str, Dict[str, str]]] = None
         self._module_info_cache: Optional[Dict[str, ModuleInfo]] = None
@@ -307,6 +331,44 @@ class SSHMeter(sshkit.Client):
             self.close()
             return True
 
+    def _check_lifecycle(self):
+        session = session_for(self)
+        if session is not None:
+            session.action_checkpoint()
+
+    def public_info(self):
+        """SSE reads must not navigate/query a restarting meter."""
+        session = session_for(self)
+        if session is None:
+            return self.get_info()
+        shared = session.shared
+        action = ""
+        progress = {"current": 0, "total": 0}
+        if shared is not None:
+            action = "stopping" if shared.abort_event.is_set() else shared.current_program or ""
+            progress = shared.extras.get("progress", progress)
+        return {**session.info, "ip": self.host, "hostname": self.hostname,
+                "status": self.status, "lifecycle": session.snapshot(),
+                "current_action": action, "progress": progress}
+
+    @property
+    def status(self):
+        session = session_for(self)
+        if session is not None:
+            if session.owner is not None and session.owner not in {"admission", "recovery"}:
+                return "busy"
+            if not session.ready:
+                return session.phase
+            if not session.admitted:
+                return "initializing"
+            if session.supervisor is not None and not session.journal_connected:
+                return "observing"
+        return getattr(self, "_status", "ready")
+
+    @status.setter
+    def status(self, value):
+        self._status = value
+
     def _exec_command_with_retry(self, command: str, *args, **kwargs):
         """Open an SSH command channel, reconnecting once if the transport is stale."""
         last_exc = None
@@ -326,6 +388,7 @@ class SSHMeter(sshkit.Client):
 
     def exec_command(self, command, *args, **kwargs):
         """Run a raw SSH command while protecting connection state."""
+        kwargs.setdefault("timeout", 10)
         with self._command_lock:
             self._begin_ssh_operation()
             try:
@@ -341,9 +404,14 @@ class SSHMeter(sshkit.Client):
         with self._command_lock:
             self._begin_ssh_operation()
             try:
-                res = self._exec_command_with_retry(command)
+                res = self._exec_command_with_retry(command, timeout=10)
                 if not was_connected:
-                    res[1].channel.recv_exit_status()
+                    deadline = time.monotonic() + 10
+                    while not res[1].channel.exit_status_ready():
+                        if time.monotonic() >= deadline:
+                            res[1].channel.close()
+                            raise TimeoutError("SSH command did not finish within 10 seconds")
+                        time.sleep(0.025)
                 return res
             finally:
                 self._end_ssh_operation()
@@ -353,22 +421,50 @@ class SSHMeter(sshkit.Client):
         with self._command_lock:
             self._begin_ssh_operation()
             try:
-                _, stdout, stderr = self._exec_command_with_retry(command)
-                out = stdout.read().decode(errors="replace").strip()
-                err = stderr.read().decode(errors="replace").strip()
-                code = stdout.channel.recv_exit_status()
-                return code, out, err
+                _, stdout, stderr = self._exec_command_with_retry(command, timeout=10)
+                return self._read_command_result(stdout, stderr)
             finally:
                 self._end_ssh_operation()
 
+    @staticmethod
+    def _read_command_result(stdout, stderr, timeout=10.0):
+        """Bound total command time, including trickling output and exit wait."""
+        channel = stdout.channel
+        deadline = time.monotonic() + timeout
+        out, err = bytearray(), bytearray()
+        try:
+            while True:
+                if channel.recv_ready():
+                    out.extend(channel.recv(65536))
+                if channel.recv_stderr_ready():
+                    err.extend(channel.recv_stderr(65536))
+                if len(out) + len(err) > 32 * 1024 * 1024:
+                    raise RuntimeError("SSH command output exceeded 32 MiB")
+                finished = channel.exit_status_ready() and (channel.eof_received or channel.closed)
+                if finished and not channel.recv_ready() and not channel.recv_stderr_ready():
+                    return (channel.recv_exit_status(), out.decode(errors="replace").strip(),
+                            err.decode(errors="replace").strip())
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"SSH command exceeded {timeout:g} seconds")
+                time.sleep(0.025)
+        finally:
+            channel.close()
+
     def get_info(self, force=False)->InfoDict:
+        """Return/cache firmware, module, type, region, and version information.
+
+        ``force=True`` clears those caches and requires owned UI navigation for
+        a complete inventory. This is an initialization/retry operation, not an
+        SSE getter; use public_info() to observe without meter I/O.
+        """
+        session = session_for(self)
         if force:
             self._firmwares = None
             self._module_details_cache = None
             self._module_info_cache = None
             self._system_versions_cache = None
             self._meter_region_cache = None
-        return {
+        info = {
             'ip': self.host,
             'status': self.status,
             'hostname': self.hostname,
@@ -378,15 +474,16 @@ class SSHMeter(sshkit.Client):
             'module_info': self.module_info,
             'system_versions': self.system_versions
         }
+        if session is not None:
+            session.info = info
+        return info
 
     def _cli_full(self, cmd: str) -> Tuple[str, str]:
         with self._command_lock:
             self._begin_ssh_operation()
             try:
-                stdin, stdout, stderr = self._exec_command_with_retry(cmd)
-                out = stdout.read().decode(errors="replace").strip()
-                err = stderr.read().decode(errors="replace").strip()
-                stdout.channel.recv_exit_status()
+                stdin, stdout, stderr = self._exec_command_with_retry(cmd, timeout=10)
+                _, out, err = self._read_command_result(stdout, stderr)
                 return out, err
             finally:
                 self._end_ssh_operation()
@@ -421,8 +518,11 @@ class SSHMeter(sshkit.Client):
                 response.raise_for_status()
             self._http_available = True
             return response
-        except Exception:
+        except Exception as exc:
             self._http_available = False
+            session = session_for(self)
+            if session is not None and session.supervisor is not None and url.endswith("/UIPage.php"):
+                session.supervisor.record_ui(source="http:UIPage.php", error=exc)
             return None
 
     def _run_remote_php_script(
@@ -716,16 +816,22 @@ class SSHMeter(sshkit.Client):
                 if diag_key in page_text:
                     return True
             return False
+        except MeterInterrupted:
+            raise
         except Exception as e:
+            if session_for(self) is not None:
+                raise MeterInterrupted(f"Unable to determine diagnostics page: {e}") from e
             print(f"[in_diagnostics] Error fetching http://{self.host}:8005/UIPage.php: {e}")
             return False
 
+    @_controlled
     def force_diagnostics(self, settle_delay=0.4):
         """Return to Diagnostics and allow its asynchronous UI transition to settle.
 
         Set ``settle_delay`` to zero only when the caller provides its own wait
         or feedback loop before relying on the updated UIPage HTML.
         """
+        self._check_lifecycle()
         if self.in_diagnostics():
             self.press('diagnostics')
             time.sleep(0.1)
@@ -735,12 +841,32 @@ class SSHMeter(sshkit.Client):
         time.sleep(settle_delay)
 
     def _get_uipage_html(self, timeout: float = 5.0) -> str:
+        self._check_lifecycle()
         url = f"http://{self.host}:8005/UIPage.php"
-        resp = self._http_request("get", url, timeout=timeout, raise_for_status=True)
-        if resp is not None:
-            return resp.text
-
-        return self._read_uipage_html_via_cli()
+        session = session_for(self)
+        for attempt in range(2):
+            self._check_lifecycle()
+            resp = self._http_request("get", url, timeout=timeout, raise_for_status=True)
+            source = "http:UIPage.php" if resp is not None else "ssh_php:UIPage.php"
+            try:
+                html = resp.text if resp is not None else self._read_uipage_html_via_cli()
+            except Exception as exc:
+                if session is not None and session.supervisor is not None:
+                    session.supervisor.record_ui(source=source, error=exc)
+                raise
+            if session is not None and session.supervisor is not None:
+                session.supervisor.record_ui(source=source, html=html)
+            if session is None or html.strip() or attempt:
+                break
+            time.sleep(0.05)
+        if session is not None:
+            from lib.meter.supervisor import page_kind
+            kind = page_kind(html)
+            if kind in {"transition", "unavailable", "unknown"}:
+                session.interrupt(f"MS3 UI {kind}")
+                raise MeterInterrupted(f"MS3 UI {kind}", session.epoch)
+        self._check_lifecycle()
+        return html
 
     def get_ui_page_html(self, timeout: float = 5.0) -> str:
         return self._get_uipage_html(timeout=timeout)
@@ -761,7 +887,7 @@ class SSHMeter(sshkit.Client):
         return match.group(1)
 
     def get_meter_status_text(self) -> str:
-        return self.cli("echo 'cmd.main.meter:status' | socat - UDP:127.0.0.1:8008")
+        return self._send_rtsc_command("cmd.main.meter:status", timeout=2.0)
 
     def get_linux_uptime_seconds(self) -> float:
         """Return elapsed seconds since Linux boot from ``/proc/uptime``."""
@@ -942,6 +1068,7 @@ class SSHMeter(sshkit.Client):
             "page_html": page_html,
         }
 
+    @_controlled
     def goto_diagnostics_path(
         self,
         path: Sequence,
@@ -988,8 +1115,11 @@ class SSHMeter(sshkit.Client):
         state: Optional[DiagPageState] = None
 
         while time.monotonic() < deadline:
+            self._check_lifecycle()
             try:
                 state = self.get_diagnostics_state(timeout=fetch_timeout)
+            except MeterInterrupted:
+                raise
             except Exception as exc:
                 last_problem = f"Unable to read diagnostics page: {exc}"
                 time.sleep(settle_delay)
@@ -1110,6 +1240,7 @@ class SSHMeter(sshkit.Client):
         raise RuntimeError(message)
 
 
+    @_controlled
     def press(self, button: str, value: Optional[str] = "1", delay: float = 0.1):
         """
         Sends a button press using user-friendly string. 
@@ -1119,6 +1250,10 @@ class SSHMeter(sshkit.Client):
         Examples:
             press('plus'), press('cancel'), press('1'), press('A'), press('Enter')
         """
+        self._check_lifecycle()
+        # Preserve HTTP -> SSH fallback for deployed meter variants. A timeout
+        # theoretically leaves delivery uncertain; no production duplicate
+        # press has been demonstrated. Do not add slow verification/retries.
         label_map = {
             "+": "plus",
             "-": "minus",
@@ -1174,6 +1309,7 @@ class SSHMeter(sshkit.Client):
         else:
             resp = self._send_key_press_cli(key, delay=delay)
 
+        self._check_lifecycle()
         return resp
 
 
@@ -1240,20 +1376,46 @@ class SSHMeter(sshkit.Client):
     def _iterate_module_details_on_page(self, *, delay: float = 0.3, timeout: float = 5.0,
                                max_modules: int = 32, verbose: bool = False) -> Dict[str, Dict[str, str]]:
         """
-        Assumes we are on the IPSBus Modules page; iterates every module and
-        returns { module_name: details_dict_with_all_fields }.
+        Read the meter's reported IPSBus inventory, not a required hardware list.
+
+        Button 2 advances modules; asynchronous repeated HTML is polled until it
+        changes. For managed meters, parse errors, stuck pages, disruptions, and
+        hitting the module limit raise instead of committing a partial inventory.
+        Legacy callers retain their best-effort behavior.
         """
         def _fetch_html() -> str:
             return self._get_uipage_html(timeout=timeout)
 
         results: Dict[str, Dict[str, str]] = {}
+        session = session_for(self)
+
+        def report(module, details):
+            if session is not None:
+                if not session.admitted:
+                    session.initializing(f"Reading IPSBus modules: {module} ({len(results)} found)")
+                if session.supervisor:
+                    session.supervisor._log("module_detected", module=module, details=details)
 
         try:
             html = _fetch_html()
+            # The live overview tells us which modules exist on this meter.
+            # A single-module (or genuinely empty) overview is valid; there is
+            # no requirement for a printer/keypad/modem or any other peripheral.
+            block = re.search(r'<pre[^>]*>(.*?)</pre>', html, re.I | re.S)
+            overview = unescape(re.sub(r'<[^>]+>', '', block.group(1) if block else html))
+            has_overview = re.search(r'Module\s+FW Version\s+uptime', overview, re.I) is not None
+            reported = set(re.findall(r'^\s*([A-Z][A-Z0-9_]*)\s+\d+\s+\d+\s+\S+', overview, re.M)) if has_overview else None
+            if reported == set():
+                return results
             mod, d = self._extract_detail_dict(html)
             results[mod] = d
+            report(mod, d)
+            if reported is not None and reported <= results.keys():
+                return results
             if verbose: print(f"[details] {mod}: keys={sorted(d.keys())}")
         except Exception as e:
+            if session is not None:
+                raise
             if verbose: print(f"[details] initial parse failed: {e}")
             return results
 
@@ -1261,18 +1423,36 @@ class SSHMeter(sshkit.Client):
             self.press('2')
             time.sleep(delay)
             try:
-                html = _fetch_html()
-                mod, d = self._extract_detail_dict(html)
+                deadline = time.monotonic() + timeout
+                previous = mod
+                while True:
+                    html = _fetch_html()
+                    mod, d = self._extract_detail_dict(html)
+                    if mod != previous or session is None:
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(f"IPSBus page did not advance beyond {previous}")
+                    time.sleep(delay)
             except Exception as e:
+                if session is not None:
+                    raise
                 if verbose: print(f"[details] parse after next failed: {e}")
                 break
 
             if mod in results:
+                if session is not None and mod != next(iter(results)):
+                    raise RuntimeError(f"IPSBus enumeration repeated {mod} before returning to its first module")
                 break
 
             results[mod] = d
+            report(mod, d)
+            if reported is not None and reported <= results.keys():
+                return results
             if verbose: print(f"[details] {mod}: keys={sorted(d.keys())}")
 
+        else:
+            if session is not None:
+                raise RuntimeError(f"IPSBus enumeration exceeded {max_modules} modules without completing a cycle")
         return results
 
     def get_power_info(self):
@@ -1307,29 +1487,47 @@ class SSHMeter(sshkit.Client):
         finally:
             self.status = "ready"
 
+    @_controlled
     def get_module_details(self, *, force_refresh: bool = False,
                            delay: float = 0.3, timeout: float = 5.0,
                            verbose: bool = False) -> Dict[str, Dict[str, str]]:
+        """Read/cache a complete module inventory under the caller's control lease.
+
+        Returns all normalized fields by module name; also atomically derives
+        ``module_info`` (integer ver/mod/id) and ``firmwares`` (version strings).
+        Admission and retry owners may enumerate while public status is still
+        initializing/busy. Missing optional modules and a valid empty overview
+        are accepted. Transport/parse failures propagate rather than claiming
+        unread hardware is absent. Keep ``lib/docs/meter/supervisor.md`` in sync.
+        """
         if self._module_details_cache is not None and not force_refresh:
             return self._module_details_cache
 
-        if self.status != 'ready':
+        session = session_for(self)
+        if session is None and self.status != 'ready':
             return self._module_details_cache or {}
 
+        self._check_lifecycle()
+        epoch = session.epoch if session is not None else None
         self.status = "busy"
         try:
-            if self.in_diagnostics():
-                self.press('diagnostics'); self.press('diagnostics')
+            if session is not None:
+                if not session.admitted:
+                    session.initializing("Opening IPSBus Modules to identify hardware and firmware")
+                self.goto_diagnostics_path(["IPSBus Modules"])
             else:
-                self.press('diagnostics')
-            self.press('minus'); time.sleep(0.1)
-            self.press('minus'); time.sleep(0.1)
-            self.press('ok'); time.sleep(0.1)
-            time.sleep(0.5)
+                if self.in_diagnostics():
+                    self.press('diagnostics'); self.press('diagnostics')
+                else:
+                    self.press('diagnostics')
+                self.press('minus'); time.sleep(0.1)
+                self.press('minus'); time.sleep(0.1)
+                self.press('ok'); time.sleep(0.1)
+                time.sleep(0.5)
 
             details = self._iterate_module_details_on_page(delay=delay, timeout=timeout, verbose=verbose)
 
-            if not details:
+            if session is None and not details:
                 if verbose: print(f'details empty, retrying once')
                 time.sleep(0.5)
 
@@ -1346,9 +1544,7 @@ class SSHMeter(sshkit.Client):
         finally:
             self.status = "ready"
 
-        if details:
-            self._module_details_cache = details.copy()
-
+        if details or session is not None:
             # derive module_info
             combined: Dict[str, ModuleInfo] = {}
             for name, det in details.items():
@@ -1359,10 +1555,21 @@ class SSHMeter(sshkit.Client):
                 # combined[name] = {"fw": fw, "mod_func": mf, "full_id": full_id}
                 # combined[name] = {"fw": int(fw), "mod_func": int(mf), "full_id": int(full_id)}
                 combined[name] = {"ver": int(fw), "mod": int(mf), "id": int(full_id)}
-            self._module_info_cache = combined
-
-            # derive firmwares
-            self._firmwares = {name: (d.get("module_fw") or "").strip() for name, d in details.items()}
+            if session is not None:
+                self.goto_diagnostics_path([])
+            # Derive/validate before publishing any caches, so a failed field
+            # conversion cannot leave an apparently complete empty inventory.
+            with session.condition if session is not None else nullcontext():
+                if session is not None:
+                    # Recovery is intentionally not ready yet. Its maintenance
+                    # lease authorizes inventory needed to restore display assets;
+                    # requiring readiness here caused endless restore retries.
+                    session.action_checkpoint()
+                    if session.epoch != epoch:
+                        raise MeterInterrupted("Meter changed during inventory read", session.epoch)
+                self._module_details_cache = details.copy()
+                self._module_info_cache = combined
+                self._firmwares = {name: (d.get("module_fw") or "").strip() for name, d in details.items()}
 
         return self._module_details_cache or {}
 
@@ -1511,6 +1718,7 @@ class SSHMeter(sshkit.Client):
         except:
             return True
         
+    @_controlled
     def reset_uipage(self):
         content="""\
 <?php
@@ -1524,6 +1732,7 @@ fclose($myfile);
         code, out, err = self.exec_parse(cmd)
 
 
+    @_controlled
     def coin_shutter_pulse(self, count: int=1, on_delay:int=0.1, off_delay:int=0.3):
         # cmd = f"(echo 'cmd.main.coinshutter:setflags=15' | socat - UDP:127.0.0.1:8008) & (sleep {on_delay}; echo 'cmd.main.coinshutter:setflags=14' | socat - UDP:127.0.0.1:8008) & wait"
         # send = f"bash -c 'for i in {{1..{count}}}; do {cmd} done'"
@@ -1535,6 +1744,7 @@ fclose($myfile);
     
         _, out, err = self.safe_exec_command(send)
 
+    @_controlled
     def coin_shutter_hold_open(self, enabled_time: float, interval: float = 1.5):
         """
         Keeps the coin shutter open for `enabled_time` seconds by repeatedly
@@ -1554,31 +1764,37 @@ fclose($myfile);
         send = " & ".join(cmd_parts) + " & wait"
         _, out, err = self.safe_exec_command(send)
 
+    @_controlled
     def printer_test(self, code="0,123"):
         cmd = f"echo 'cmd.main.printer:pt={code}' | socat - UDP:127.0.0.1:8008"
         _, out, err = self.safe_exec_command(cmd)
         
+    @_controlled
     def toggle_printer(self, b: bool):
         s = "on" if b else "off"
         cmd = f"echo 'cmd.main.printer:{s}' | socat - UDP:127.0.0.1:8008"
         _, out, err = self.safe_exec_command(cmd)
 
+    @_controlled
     def reboot_printer(self):
         self.toggle_printer(False)
         time.sleep(0.1)
         self.toggle_printer(True)
         time.sleep(5)
 
+    @_controlled
     def toggle_coin_shutter(self, b: bool):
         s = "15" if b else "14"
         cmd = f"echo 'cmd.main.coinshutter:setflags={s}' | socat - UDP:127.0.0.1:8008"
         _, out, err = self.safe_exec_command(cmd)
 
+    @_controlled
     def toggle_nfc(self, b: bool):
         s = "emvOn" if b else "emvOff"
         cmd = f"echo 'cmd.main.bus:{s}' | socat - UDP:127.0.0.1:8008"
         _, out, err = self.safe_exec_command(cmd)
 
+    @_controlled
     def toggle_modem(self, b: bool):
         s = "connect" if b else "disconnect"
         cmd = f"echo 'cmd.main.modem:{s}' | socat - UDP:127.0.0.1:8008"
@@ -1608,6 +1824,7 @@ fclose($myfile);
     def goto_coins(self):
         self.goto_diagnostics_path(["Utilities", "Coins"])
     
+    @_controlled
     def print_msg(self, msg):
         msg  = re.sub(r'\n[ \t]+', '\n', msg)
         url = f"http://{self.host}:8005/web/control_print_direct.php"
@@ -1625,6 +1842,7 @@ fclose($myfile);
             self._cli_full(f"rm -f {shlex.quote(remote_path)}")
 
 
+    @_controlled
     def custom_print(self):
         now = datetime.now(ZoneInfo("America/Los_Angeles"))
         _full = now.strftime("%m/%d/%Y %H:%M:%S")
@@ -1687,6 +1905,7 @@ fclose($myfile);
         self.print_msg(msg)
     
 
+    @_controlled
     def reboot_meter(self, delay_s: float = 0.2, close_after: bool = True) -> None:
         """ Schedule a reboot and return immediately. No waiting. """
         inner = f"sleep {max(0.0, float(delay_s))}; (reboot || /sbin/reboot || busybox reboot)"
@@ -1695,6 +1914,7 @@ fclose($myfile);
             try: self.close()
             except: pass
 
+    @_controlled
     def shutdown_meter(self, delay_s: float = 0.2, close_after: bool = True) -> None:
         """ Schedule a clean poweroff and return immediately. No waiting. """
         inner = (
@@ -1711,10 +1931,17 @@ fclose($myfile);
         res = self.cli("cat /sys/class/backlight/backlight/actual_brightness")
         return int(res)
     
+    @_controlled
     def set_brightness(self, val:int):
+        self._check_lifecycle()
+        session = session_for(self)
+        if (session is not None and not getattr(session.local, "maintenance", False)
+                and not str(session.owner or "").startswith("identify:")):
+            session.set_desired(brightness=max(0, min(val, 100)))
         res = self.cli(f"echo {max(0,min(val,100))} > /sys/class/backlight/backlight/brightness")
         return res
 
+    @_controlled
     def insert_coin(self, value: int, delay: float = 0.1):
         meter_region = str(self.meter_region or "").strip().lower() or "us"
         value_to_index = COIN_VALUE_TO_INDEX_BY_REGION.get(meter_region)
@@ -1728,6 +1955,7 @@ fclose($myfile);
         resp = self._post_busdev_form(data, delay=delay)
         return resp
 
+    @_controlled
     def clear_coin_tallies(
         self,
         *,
@@ -1798,6 +2026,7 @@ fclose($myfile);
         payload[track2_start:track2_start + len(track2_bytes)] = track2_bytes
         return payload.hex()
 
+    @_controlled
     def present_special_card_raw(
         self,
         card_name: str,
@@ -1832,11 +2061,13 @@ fclose($myfile);
     def present_meter_diagnostics_card(self, delay: float = 0.1) -> requests.Response:
         return self.present_special_card_raw("METERDIAGNOSTICS", delay=delay)
     
+    @_controlled
     def custom_busdev(self, button_name, button_value, delay=0.1):
         data = {button_name: "" if button_value is None else str(button_value)}
         resp = self._post_busdev_form(data, delay=delay)
         return resp
 
+    @_controlled
     def set_ui_mode(self, mode: str, banner_text: Optional[str] = None) -> None:
         """Set the UI mode; a banner call without text clears any prior suffix.
 
@@ -1850,6 +2081,11 @@ fclose($myfile);
         if normalized_mode != "banner" and banner_text is not None:
             raise ValueError("banner_text can only be used with banner UI mode")
 
+        self._check_lifecycle()
+        session = session_for(self)
+        if session is not None:
+            session.set_desired(mode=normalized_mode, banner="" if banner_text is None else str(banner_text))
+
         if normalized_mode == "banner":
             # A parameterless banner call intentionally clears stale subtest text.
             write_banner_json(self, "" if banner_text is None else str(banner_text))
@@ -1861,6 +2097,11 @@ fclose($myfile);
 
     def clear_banner_text(self) -> None:
         """Clear the runtime banner suffix without changing the current UI mode."""
+        session = session_for(self)
+        if session is not None:
+            session.set_desired(banner="")
+            if not session.ready:
+                return
         current_mode = self.cli(
             "cat /var/volatile/html/.ui_mode 2>/dev/null || true"
         ).strip().lower()
@@ -1869,9 +2110,12 @@ fclose($myfile);
             time.sleep(0.2)
             self.force_diagnostics()
 
+    @_controlled
     def setup_custom_display(self) -> None:
         """Automate uploading/writing UIPage.php, ui_overlay.json, and type-specific Charuco PNG."""
-        if self.status != "ready":
+        session = session_for(self)
+        if self.status != "ready" and not (session is not None and (
+                getattr(session.local, "maintenance", False) or session.local.owner == session.owner)):
             raise RuntimeError("Meter is not ready")
 
         meter_type = self.meter_type
@@ -1879,7 +2123,8 @@ fclose($myfile);
 
         if is_custom_display_current(self):
             # print(f"[setup_custom_display] display already current, forcing diagnostics refresh then returning")
-            self.force_diagnostics()
+            if session is None or not getattr(session.local, "maintenance", False):
+                self.force_diagnostics()
             return
 
         self.status = "busy"
@@ -1905,6 +2150,21 @@ fclose($myfile);
         finally:
             self.status = "ready"
 
+    def _apply_display_results(self, payload):
+        """Remember results for recovery, then use the normal write when ready.
+
+        session_for is a local attribute lookup, not a meter query or a wait.
+        Only this result operation defers a write while unready; the low-level
+        display_utils.write_results_json remains an unconditional upload helper.
+        """
+        session = session_for(self)
+        if session is not None:
+            session.set_desired(results=payload, mode="results")
+            if not session.ready:
+                return
+        write_results_json(self, payload)
+        self.set_ui_mode("results")
+
     def update_display_results(self, shared: SharedState) -> None:
         """Update the meter display payload for a completed supported cycle."""
         program_name = shared.current_program
@@ -1912,11 +2172,13 @@ fclose($myfile);
             shared.log(f"unable to update display results for program_name = '{program_name}'", console=True)
             return
 
+        session = session_for(self)
+        cached = session.info if session is not None else {}
         meter_info = {
             "IP": self.host,
             "Hostname": self.hostname,
-            "Meter Type": self.meter_type,
-            "Meter Region": self.meter_region or "N/A",
+            "Meter Type": cached.get("meter_type", "") if session is not None else self.meter_type,
+            "Meter Region": (cached.get("meter_region", "") if session is not None else self.meter_region) or "N/A",
         }
         dev_res = {k: str(v).lower() for k, v in shared.device_results.items()}
         other_info = {k: str(v) for k, v in shared.device_meta.items()}
@@ -1924,15 +2186,14 @@ fclose($myfile);
 
         if program_name == "operator_cycle_all":
             operator_results = {
-                "overall_result": "FAIL" if any(v == "fail" for v in dev_res.values()) else "PASS",
+                "overall_result": "FAIL" if any(v in {"fail", "interrupted"} for v in dev_res.values()) else "PASS",
                 "meter_info": meter_info,
                 "operator": {
                     "device_results": dev_res,
                     "other_info": other_info,
                 },
             }
-            write_results_json(self, operator_results)
-            self.set_ui_mode("results")
+            self._apply_display_results(operator_results)
             return
 
         # Initialize _display_results if it doesn't exist yet
@@ -1963,14 +2224,14 @@ fclose($myfile);
             **self._display_results["passive"]["device_results"],
             **self._display_results["physical"]["device_results"]
         }
-        if any(v == "fail" for v in all_dev_res.values()):
+        if any(v in {"fail", "interrupted"} for v in all_dev_res.values()):
             self._display_results["overall_result"] = "FAIL"
         else:
             self._display_results["overall_result"] = "PASS"
 
-        write_results_json(self, self._display_results)
-        self.set_ui_mode("results")
+        self._apply_display_results(self._display_results)
         
+    @_controlled
     def blink(self, amnt=2) -> None:
         v = self.get_brightness()
         for i in range(amnt):
@@ -1994,7 +2255,14 @@ fclose($myfile);
             self._blink_until_status = previous_status
             self.status = "busy"
 
-        def _blink_loop():
+        session = session_for(self)
+        blink_owner = f"identify:{id(stop_event)}"
+        if session is not None and not session.claim(blink_owner):
+            self._blink_until_stop = None
+            self.status = previous_status
+            raise MeterInterrupted(session.reason or "Meter controls are in use", session.epoch)
+
+        def _blink_body():
             brightness = high
             try:
                 brightness = self.get_brightness()
@@ -2019,6 +2287,19 @@ fclose($myfile);
                             self._blink_until_status = None
                             if on_done:
                                 on_done()
+
+        def _blink_loop():
+            try:
+                if session is None:
+                    _blink_body()
+                else:
+                    with session.bind(blink_owner):
+                        _blink_body()
+            except MeterInterrupted:
+                pass  # Recovery owns brightness restoration after a disruption.
+            finally:
+                if session is not None:
+                    session.release(blink_owner)
 
         thread = threading.Thread(target=_blink_loop, name=f"meter-blink-{self.host}", daemon=True)
         with self._lock:

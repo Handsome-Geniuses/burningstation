@@ -5,7 +5,6 @@ from unittest.mock import Mock, patch
 
 from lib.automation.helpers import StopAutomation
 from lib.automation.shared_state import SharedState
-from lib.automation.listener import Listener
 
 cycle_all = import_module("lib.automation.tests.cycle_all")
 operator_cycle_all = import_module("lib.automation.tests.operator_cycle_all")
@@ -13,18 +12,6 @@ physical_cycle_all = import_module("lib.automation.tests.physical_cycle_all")
 
 
 class FullRunStopOnFailTests(unittest.TestCase):
-    def test_critical_listener_fault_is_an_abort(self):
-        shared = SharedState()
-        shared.last_error = None
-        listener = object.__new__(Listener)
-        listener.shared = shared
-        listener.verbose = False
-        fault = Mock(severity="critical", device="coin shutter", message="fault")
-        listener._emit_faults([fault])
-        self.assertTrue(shared.abort_event.is_set())
-        self.assertTrue(shared.stop_event.is_set())
-        self.assertFalse(shared.continue_after_failure(False))
-
     def _run(self, module, entrypoint, stop_on_fail, abort=False, cycles=1):
         shared = SharedState()
         shared.last_error = None

@@ -1,27 +1,9 @@
-import threading
 import traceback
 from lib.meter.ssh_meter import SSHMeter
-from lib.automation.listener import start_listener_thread
-from lib.automation.tests import PROGRAM_REGISTRY, get_monitors
+from lib.automation.tests import PROGRAM_REGISTRY
 from lib.automation.shared_state import SharedState
-from datetime import datetime
-
-_SENTINEL = object()
-
-def _resolve_devices(program_name: str, automation_kwargs: dict, shared: SharedState):
-    """
-    Resolve which devices (monitors) to register for this run
-    monitors override precedence:
-      1) automation_kwargs['monitors'] if present (even if [])
-      2) get_monitors(program_name) from tests package
-    """
-    override = automation_kwargs.pop("monitors", _SENTINEL)
-    if override is not _SENTINEL:
-        devices = override or []
-        shared.log(f"using override monitors for {program_name!r}: {devices}")
-        return devices
-    devices = get_monitors(program_name)
-    return devices
+from lib.meter.lifecycle import session_for, MeterInterrupted
+from lib.automation.recovery import run_subtest, await_meter
 
 def run_test_job(
     meter: SSHMeter,
@@ -31,51 +13,54 @@ def run_test_job(
     log: bool = True,
     verbose: bool = False,
 ):
+    """Dispatch existing subtests with shared interruption handling.
+
+    The supervisor is the only continuous journal reader. Full cycles apply
+    run_subtest per stage; this function supplies the same wrapper for a single
+    requested test. It never imports or starts the retired listener/monitors.
     """
-    Runs a test job: optionally spins up modular listener with selected devices,
-    runs the selected test, and manages shared state.
-    """
-    devices = _resolve_devices(program_name, automation_kwargs, shared)
-
-    devices_enriched = []
-    for dev_id, cfg in devices:
-        cfg = dict(cfg or {})
-        cfg.setdefault("meter_type", getattr(meter, "meter_type", ""))
-        try:
-            cfg.setdefault("firmwares", dict(meter.firmwares or {}))
-        except Exception:
-            cfg.setdefault("firmwares", {})
-        devices_enriched.append((dev_id, cfg))
-
-    # Start the modular listener only if needed (devices or logging/verbose)
-    listener_thread = None
-    logfile_name = None
-    if log:
-        logfile_name=f'[{meter.hostname}]{datetime.now().strftime("d%y%m%dt%H%M%S")}'
-        if shared.current_program: logfile_name+=f"-{shared.current_program}"
-
-    if getattr(meter, "is_mock", False):
-        shared.log("Mock meter: SSH journal listener skipped")
-    elif devices or log or verbose:
-        listener_thread = start_listener_thread(
-            shared=shared,
-            host=meter.host,
-            pswd=meter.pswd,
-            devices=devices_enriched,
-            user=meter.user,
-            save_logs=log,
-            verbose=verbose,
-            trace_lines=False,
-            # kwargs
-            logfile_name=logfile_name
-        )
-
+    if automation_kwargs.pop("monitors", None):
+        shared.log("Ignoring retired monitors option; subtests validate their own results", console=True)
+    session = session_for(meter)
+    if session is not None:
+        with session.condition:
+            session.subscribers.add(shared)
+        shared.log(f"Continuous journal session={session.id}; path={session.supervisor.log_path if session.supervisor else None}")
+        if session.supervisor:
+            shared.extras["meter_session"] = {"id": session.id, "journal_path": session.supervisor.log_path,
+                                               "start_cursor": session.supervisor.cursor}
     try:
         if program_name not in PROGRAM_REGISTRY:
             raise ValueError(f"Unknown test: {program_name!r}")
         test_func = PROGRAM_REGISTRY[program_name]
-        test_func(meter, shared=shared, **automation_kwargs)
+        if program_name in {"cycle_all", "all tests", "physical_cycle_all", "operator_cycle_all"}:
+            test_func(meter, shared=shared, **automation_kwargs)
+        else:
+            uses_robot = (program_name.startswith("test_robot") or program_name == "robot_display_brightness"
+                          or automation_kwargs.get("payment_type") == "robot_contactless")
+            pose_epoch = session.epoch if session is not None else None
 
+            def prepare_attempt(attempt):
+                nonlocal pose_epoch
+                if uses_robot and (attempt or (session is not None and pose_epoch != shared.attempt_epoch)):
+                    from lib.robot.robot_client import RobotClient
+                    from lib.automation.tests.physical_cycle_all import run_and_retrieve_charuco
+                    meter.set_brightness(15)
+                    automation_kwargs["charuco_frame"] = run_and_retrieve_charuco(RobotClient(), meter, shared, 30)
+                    pose_epoch = shared.attempt_epoch
+
+            run_subtest(meter, shared, program_name,
+                        lambda: test_func(meter, shared=shared, **automation_kwargs),
+                        robot=uses_robot, prepare=prepare_attempt)
+        await_meter(meter, shared)
+
+    except MeterInterrupted as exc:
+        shared.extras["meter_disruption"] = str(exc)
+        if shared.current_device:
+            shared.device_results[shared.current_device] = "interrupted"
+        shared.last_error = str(exc)
+        shared.stop_event.set()
+        shared.log(str(exc), console=True)
     except Exception as exc:
         shared.log(f"Error running test {program_name!r} on {meter.host}: {type(exc).__name__}: {exc}", console=True)
         for line in traceback.format_exc().splitlines():
@@ -85,11 +70,15 @@ def run_test_job(
         shared.stop_event.set()
 
     finally:
-        # Ensure listener thread (if any) stops
-        if listener_thread is not None:
-            shared.end_listener.set()
-            listener_thread.join(timeout=5)
-
+        if shared.abort_event.is_set() and getattr(meter, "is_mock", False):
+            virtual = getattr(meter, "virtual_meter", None)
+            if virtual is not None:
+                virtual.finish(False)
+        if session is not None:
+            with session.condition:
+                session.subscribers.discard(shared)
+            if session.supervisor:
+                shared.extras["meter_session"]["end_cursor"] = session.supervisor.cursor
         # This runs before jobs.job_done() can switch completed cycle groups to
         # results mode. clear_banner_text() does not change the current UI mode,
         # so cleanup also remains safe if that ordering changes in the future.

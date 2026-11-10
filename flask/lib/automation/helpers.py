@@ -12,3 +12,9 @@ def check_stop_event(shared):
             if reason:
                 raise StopAutomation(reason)
         raise StopAutomation("Stop event triggered")
+    session = getattr(shared, "meter_session", None)
+    if session is not None:
+        # Composite worker threads share the job lease, not thread identity.
+        session.local.owner = shared.control_owner
+        if not shared.lifecycle_observer:
+            session.checkpoint(shared.attempt_epoch)

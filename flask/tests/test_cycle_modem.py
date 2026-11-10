@@ -88,14 +88,11 @@ class FakeModemMeter:
 class ModemCycleTests(unittest.TestCase):
     def test_default_monitor_registration_is_removed_from_modem_flows(self):
         tree = ast.parse((MODULE_PATH.parent / "__init__.py").read_text(encoding="utf-8"))
-        registry = next(
-            ast.literal_eval(node.value)
-            for node in tree.body
-            if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "_PROGRAM_MONITORS" for target in node.targets)
-        )
-        self.assertEqual(registry["cycle_modem"], [])
-        self.assertNotIn("modem", [name for name, _ in registry["cycle_all"]])
+        names = {target.id for node in tree.body if isinstance(node, ast.Assign)
+                 for target in node.targets if isinstance(target, ast.Name)}
+        self.assertNotIn("_PROGRAM_MONITORS", names)
+        self.assertFalse(any(isinstance(node, ast.FunctionDef) and node.name == "get_monitors"
+                             for node in tree.body))
 
     def clock_patches(self, clock):
         return (

@@ -4,6 +4,8 @@ import inspect
 from lib.meter.ssh_meter import SSHMeter
 from lib.automation.shared_state import SharedState
 from lib.automation.helpers import StopAutomation
+from lib.automation.recovery import run_subtest
+from lib.meter.lifecycle import MeterInterrupted, session_for
 from lib.automation.tests.test_solar import test_solar
 from lib.automation.tests.test_robot_coin_shutter import test_robot_coin_shutter
 from lib.automation.tests.cycle_meter_ui import test_cycle_meter_ui
@@ -83,16 +85,16 @@ def _resolve_subtest_kwargs(device: str, kwargs, default_cfg=None):
 
 
 def run_and_retrieve_charuco(robot: RobotClient, meter: SSHMeter, shared: SharedState, wait_timeout):
-    robot.wait_until_ready(wait_timeout)
+    robot.wait_until_ready(wait_timeout, shared=shared)
 
     meter.set_ui_mode("charuco")
     job_id = robot.run_program("run_find_meter", args={
         "meter_type": meter.meter_type,
         "meter_id": meter.hostname,
         "burningstation_logfile_path": shared.logfile_path,
-    })
+    }, shared=shared)
 
-    program_result = robot.wait_for_event("program_done", job_id=job_id, timeout=60)
+    program_result = robot.wait_for_event("program_done", job_id=job_id, timeout=60, shared=shared)
     if program_result.get("result") != "success":
         raise RuntimeError(
             "Robot meter discovery failed: "
@@ -143,9 +145,12 @@ def physical_cycle_all(
     robot = RobotClient()
     charuco_frame = kwargs.get("charuco_frame")
     if charuco_frame is None:
-        charuco_frame = run_and_retrieve_charuco(robot, meter, shared, robot_ready_timeout)
+        charuco_frame = run_subtest(meter, shared, "physical_setup",
+                                  lambda: run_and_retrieve_charuco(robot, meter, shared, robot_ready_timeout), robot=True)
     else:
         shared.log("using supplied charuco_frame; skipping robot meter discovery")
+    session = session_for(meter)
+    charuco_epoch = session.epoch if session is not None else None
     # charuco_frame = [-570.921, 143.128, 612.393, 90.673, -0.913, 87.678] #! for desk testing
 
     for cycle in range(burn_count):
@@ -182,11 +187,9 @@ def physical_cycle_all(
                 shared.log("Solar will run inside the robot_keypad_with_solar subtest")
                 continue
 
-            robot.wait_until_ready(robot_ready_timeout)
-
             shared.current_device = device_name
             shared.device_results[device_name] = "running"
-            shared.set_allowed(set(), reason=f"No monitor for {device_name}")
+            shared.log(f"Running {device_name} subtest")
 
             is_combined_subtest = device_name == "robot_keypad" and combined_solar_keypad
             try:
@@ -197,18 +200,23 @@ def physical_cycle_all(
                 final_kwargs["subtest"] = True
                 final_kwargs["charuco_frame"] = charuco_frame
                 final_kwargs["banner_text"] = banner_text
-                meter.set_ui_mode("banner", banner_text)
+                def prepare_attempt(attempt):
+                    nonlocal charuco_frame, charuco_epoch
+                    robot.wait_until_ready(robot_ready_timeout, shared=shared)
+                    if attempt or (session is not None and charuco_epoch != shared.attempt_epoch):
+                        meter.set_brightness(15)
+                        charuco_frame = run_and_retrieve_charuco(robot, meter, shared, robot_ready_timeout)
+                        final_kwargs["charuco_frame"] = charuco_frame
+                        charuco_epoch = shared.attempt_epoch
+                    meter.set_ui_mode("banner", banner_text)
 
-                if is_combined_subtest:
-                    _, solar_kwargs = _resolve_subtest_kwargs("solar", kwargs)
-                    test_robot_keypad_with_solar(
-                        meter,
-                        shared=shared,
-                        solar_kwargs=solar_kwargs,
-                        **final_kwargs,
-                    )
-                else:
-                    test_func(meter, shared=shared, **final_kwargs)
+                def invoke_subtest():
+                    if is_combined_subtest:
+                        _, solar_kwargs = _resolve_subtest_kwargs("solar", kwargs)
+                        return test_robot_keypad_with_solar(meter, shared=shared, solar_kwargs=solar_kwargs, **final_kwargs)
+                    return test_func(meter, shared=shared, **final_kwargs)
+
+                run_subtest(meter, shared, device_name, invoke_subtest, robot=True, prepare=prepare_attempt)
 
                 if shared.stop_event.is_set() and not shared.abort_event.is_set():
                     failed_devices.add(device_name)
@@ -217,6 +225,9 @@ def physical_cycle_all(
                 if not shared.stop_event.is_set():
                     shared.device_results[device_name] = "pass"
 
+            except MeterInterrupted:
+                shared.device_results[device_name] = "interrupted"
+                raise
             except StopAutomation as e:
                 shared.log(f"{device_name} subtest fail due to StopAutomation")
                 shared.device_results[device_name] = "fail"
@@ -257,10 +268,12 @@ def physical_cycle_all(
                 for failed_device in failed_devices:
                     shared.device_results[failed_device] = "fail"
                 shared.current_device = None
-                shared.set_allowed(set(), reason="Subtest complete")
+                shared.log("Subtest complete")
 
         time.sleep(burn_delay)
 
     # shared.log(f"Final results: {shared.device_results}")
+    from lib.automation.recovery import await_meter
+    await_meter(meter, shared)
     if not meter.in_diagnostics():
         meter.press("diagnostics", delay=0.4)

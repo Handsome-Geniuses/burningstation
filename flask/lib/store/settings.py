@@ -439,7 +439,22 @@ class HandsomeSettings(BaseModel):
 # ==================================================================
 # Settings Settings
 # ==================================================================
+class MeterMonitoringSettings(BaseModel):
+    """Live logging controls; these never weaken readiness or ownership guards."""
+
+    debug: bool = Field(
+        False, description="Log and print detailed meter discovery/supervisor decisions (takes effect immediately)"
+    )
+    capture_ui: bool = Field(
+        True, description="Save changed raw UI HTML and read errors in each meter lifecycle log"
+    )
+
+
 class Settings(BaseModel):
+    meter_monitoring: MeterMonitoringSettings = Field(
+        default_factory=MeterMonitoringSettings,
+        description="Continuous meter supervision and diagnostic logging",
+    )
     # dummy: DummySettings = Field(default_factory=DummySettings)
     handsome: HandsomeSettings = Field(
         default_factory=HandsomeSettings, description="secret settings"

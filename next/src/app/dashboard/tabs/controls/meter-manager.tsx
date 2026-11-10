@@ -25,6 +25,8 @@ export const MeterManager = ({
     const wipePending = useRef(false)
 
     const wipeMeters = async () => {
+        // Last-resort operator reset. Reassess with lifecycle supervision:
+        // one missed scan can retire a busy or known sleeping session.
         if (wipePending.current) return
         wipePending.current = true
         setWiping(true)

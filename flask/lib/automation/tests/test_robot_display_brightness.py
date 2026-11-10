@@ -122,15 +122,16 @@ def test_robot_display_brightness(
                     "charuco_frame": charuco_frame,
                     "burningstation_logfile_path": shared.logfile_path,
                 },
+                shared=shared,
             )
 
             robot.wait_for_event(
-                "low_brightness_pic_captured", job_id=job_id, timeout=40
+                "low_brightness_pic_captured", job_id=job_id, timeout=40, shared=shared
             )
             meter.set_brightness(high_brightness)
 
             data = robot.wait_for_event(
-                "display_brightness_results", job_id=job_id, timeout=20
+                "display_brightness_results", job_id=job_id, timeout=20, shared=shared
             )
             verdict, verdict_reason = _get_result_verdict(data)
             warnings = data.get("warnings") if isinstance(data, dict) else None
@@ -154,7 +155,7 @@ def test_robot_display_brightness(
                 % (cycle_num, job_count, data)
             )
 
-            robot.wait_for_event("program_done", job_id=job_id, timeout=10)
+            robot.wait_for_event("program_done", job_id=job_id, timeout=10, shared=shared)
 
             if verdict == "fail":
                 display_brightness_meta.update(

@@ -29,7 +29,7 @@ def initial_payloads():
             from lib.automation.jobs import get_frontend_job_state
 
             job_state = get_frontend_job_state(ip)
-            info = meter.get_info()
+            info = meter.public_info()
             if job_state.get("current_action"):
                 info["current_action"] = job_state["current_action"]
             if job_state.get("progress"):

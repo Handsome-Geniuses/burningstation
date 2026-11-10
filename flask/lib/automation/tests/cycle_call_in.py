@@ -18,7 +18,8 @@ from datetime import datetime, timedelta
 from html import unescape
 from typing import Optional
 
-from lib.automation.helpers import check_stop_event
+from lib.automation.helpers import check_stop_event, StopAutomation
+from lib.meter.lifecycle import session_for, MeterInterrupted
 from lib.automation.shared_state import SharedState
 from lib.meter.ssh_meter import SSHMeter
 
@@ -407,6 +408,12 @@ def _wait_for_call_in_idle(
 
     while True:
         check_stop_event(shared)
+        session = session_for(meter)
+        if session is not None and not session.ready:
+            if shared.lifecycle_observer:
+                raise MeterInterrupted(session.reason, session.epoch)
+            shared.attempt_epoch = session.wait_ready(shared)
+            shared.disruption_event.clear()
 
         try:
             snapshot = _parse_meter_status(meter.get_meter_status_text())
@@ -494,6 +501,11 @@ def _wait_for_call_in_lifecycle(
 
     while True:
         check_stop_event(shared)
+
+        session = session_for(meter)
+        if session is not None and not session.ready:
+            lifecycle["runtime_loss_after_start"] = True
+            return None, lifecycle, time.time() - started
 
         try:
             snapshot = _parse_meter_status(meter.get_meter_status_text())
@@ -587,6 +599,13 @@ def _wait_for_meter_status_recovery(
     poll_s: float,
 ) -> tuple[Optional[dict], dict, float]:
     started = time.time()
+    session = session_for(meter)
+    if session is not None:
+        shared.attempt_epoch = session.wait_ready(shared, timeout=timeout_s)
+        shared.disruption_event.clear()
+        snapshot = _parse_meter_status(meter.get_meter_status_text())
+        return snapshot, {"attempted": True, "recovered": True, "saw_splash": False,
+                          "saw_status_unavailable": True}, time.time() - started
     deadline = started + max(0.0, timeout_s)
     recovery = {
         "attempted": True,
@@ -634,6 +653,12 @@ def _observe_post_recovery_guard(
     timeout_s: float,
     poll_s: float,
 ) -> tuple[dict, float]:
+    session = session_for(meter)
+    if session is not None:
+        started = time.time()
+        shared.attempt_epoch = session.wait_ready(shared, timeout=timeout_s)
+        shared.disruption_event.clear()
+        return _parse_meter_status(meter.get_meter_status_text()), time.time() - started
     if observe_s <= 0:
         snapshot, elapsed_s = _wait_for_call_in_idle(
             meter,
@@ -856,6 +881,12 @@ def _wait_for_startup_call_in_guard(
         "startup_age_s": None,
     }
     if guard_s <= 0:
+        return result
+    if session_for(meter) is not None:
+        # Managed sessions already perform startup settling before admitting
+        # work. Do not run another history-based timer before each transaction.
+        result["checked"] = False
+        shared.log("Call-in startup readiness supplied by meter session")
         return result
 
     started = time.time()
@@ -1141,6 +1172,7 @@ def _run_call_in_cycle(
     cycle_started: float,
 ) -> None:
     cycle_meta["phase"] = "navigate_to_call_in"
+    shared.extras.pop("call_in_in_flight", None)
     meter.goto_callin()
 
     cycle_meta["phase"] = "startup_guard"
@@ -1196,7 +1228,17 @@ def _run_call_in_cycle(
     journal_since = _journal_since_now(meter)
     cycle_meta["journal_since"] = journal_since
     shared.log(f"{meter.host} call-in cycle {cycle_num}: press '+' on Service:Call In")
-    meter.press("plus")
+    if session_for(meter) is not None:
+        shared.extras["call_in_in_flight"] = True
+        shared.lifecycle_observer = True
+    try:
+        meter.press("plus")
+    except MeterInterrupted:
+        if session_for(meter) is None:
+            raise
+        # The transition may have begun during the press. Preserve the original
+        # watermark and inspect its proof after recovery instead of sending + again.
+        shared.log("MS3 interrupted the call-in trigger; retaining the original transaction window")
 
     lifecycle = _new_lifecycle()
     lifecycle_snapshot: Optional[dict] = None
@@ -1230,6 +1272,8 @@ def _run_call_in_cycle(
             poll_s=settings["poll_s"],
             status_loss_grace_s=settings["status_loss_grace_s"],
         )
+    except StopAutomation:
+        raise
     except Exception as exc:
         lifecycle_error = str(exc)
         if isinstance(exc, CallInObservationError):
@@ -1261,6 +1305,8 @@ def _run_call_in_cycle(
                 phase="cleanup",
             )
             cleanup_observed_snapshot = cleanup_snapshot
+        except StopAutomation:
+            raise
         except Exception as exc:
             cleanup_error = str(exc)
             if isinstance(exc, CallInObservationError):
@@ -1292,6 +1338,8 @@ def _run_call_in_cycle(
                     poll_s=settings["poll_s"],
                 )
                 post_recovery_observed_snapshot = post_recovery_snapshot
+            except StopAutomation:
+                raise
             except Exception as exc:
                 post_recovery_error = str(exc)
                 if isinstance(exc, CallInObservationError):
@@ -1323,6 +1371,12 @@ def _run_call_in_cycle(
         }
     )
 
+    session = session_for(meter)
+    if session is not None:
+        # The original transaction is never retriggered by an update. Shared
+        # recovery owns diagnostics/settling, including subsequent startup calls.
+        shared.attempt_epoch = session.wait_ready(shared)
+        shared.disruption_event.clear()
     cycle_meta["phase"] = "collect_journals"
     include_previous_boot = bool(need_recovery)
     platform_journal = _get_service_journal(
@@ -1494,6 +1548,7 @@ def _run_call_in_cycle(
             f"{meter.host} call-in cycle {cycle_num}: recovery path succeeded "
             f"(splash={recovery.get('saw_splash')})",
         )
+    shared.extras.pop("call_in_in_flight", None)
 
 
 def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):

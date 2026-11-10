@@ -26,7 +26,7 @@ class MeterWipeTests(unittest.TestCase):
                 mm._METERMANAGER__meters = set(meters)
                 mm._METERMANAGER__stale_counts = dict.fromkeys(meters, 1)
                 mm._METERMANAGER__attempts = dict.fromkeys(meters, 2)
-                mm._METERMANAGER__splash = set(meters)
+                mm._METERMANAGER__retry_at = dict.fromkeys(meters, 999)
                 states["bayGuess"] = empty_bay_guess()
                 states["bayGuess"][2] = "disconnected-busy"
 
@@ -42,7 +42,7 @@ class MeterWipeTests(unittest.TestCase):
                     for ip in result["removed"]:
                         meters[ip].close.assert_called_once()
                         assert ip not in mm._METERMANAGER__attempts
-                        assert ip not in mm._METERMANAGER__splash
+                        assert ip not in mm._METERMANAGER__retry_at
                     assert not mm._METERMANAGER__stale_counts
                     assert "disconnected-busy" not in states["bayGuess"]
                     removed_events = [call.args[1]["ip"] for call in broadcast.call_args_list

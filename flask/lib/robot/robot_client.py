@@ -52,6 +52,7 @@ class RobotClient:
 
             try:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.settimeout(3)
                 self.sock.connect((self.host, self.port))
                 self.sock.settimeout(None)
                 self._running = True
@@ -188,11 +189,16 @@ class RobotClient:
             raise RuntimeError(f"Command '{command}' failed: {placeholder['error']}")
         return placeholder["data"]
 
-    def run_program(self, name: str, args=None, timeout=3.0):
+    def run_program(self, name: str, args=None, timeout=3.0, shared=None):
         """Send run_program and return job_id if accepted."""
         if args is None:
             args = {}
+        if shared is not None:
+            from lib.automation.helpers import check_stop_event
+            check_stop_event(shared)
         result = self.send_command("run_program", {"name": name, "args": args}, timeout=timeout)
+        if shared is not None:
+            check_stop_event(shared)
         job_id = result.get("job_id")
         log.info("Program '%s' started with job_id = %s", name, job_id)
         return job_id
@@ -283,12 +289,15 @@ class RobotClient:
             params["reason"] = reason
         return self.send_command("resolve_button_group", params=params, timeout=timeout)
 
-    def wait_for_event(self, event_name: str, job_id: Optional[str] = None, timeout: float = 30.0):
+    def wait_for_event(self, event_name: str, job_id: Optional[str] = None, timeout: float = 30.0, shared=None):
         """Wait up to `timeout` seconds for a specific event. Consumes the first match."""
         log.info("waiting for event '%s'%s with timeout=%s sec", event_name, f" on job {job_id}" if job_id else "", timeout)
         start = time.time()
 
         while time.time() - start < timeout:
+            if shared is not None:
+                from lib.automation.helpers import check_stop_event
+                check_stop_event(shared)
             with self._main_lock:
                 if not self.sock:
                     raise RuntimeError(f"Connection dropped while waiting for event: {event_name}")
@@ -338,11 +347,14 @@ class RobotClient:
             # Not found
             return False, {}
 
-    def wait_until_ready(self, wait_timeout: float):
+    def wait_until_ready(self, wait_timeout: float, shared=None):
         """Wait up to 'timeout' seconds for the robot to be ready (NOT busy)."""
         log.info("waiting for robot ready with timeout=%s sec", wait_timeout)
         start = time.time()
         while time.time() - start < wait_timeout:
+            if shared is not None:
+                from lib.automation.helpers import check_stop_event
+                check_stop_event(shared)
             status = self.send_command("get_system_status")
             if not status.get("robot_busy", True):
                 return

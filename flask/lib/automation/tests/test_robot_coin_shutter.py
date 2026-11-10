@@ -35,19 +35,20 @@ def test_robot_coin_shutter(meter: SSHMeter, shared: SharedState, **kwargs):
                 "charuco_frame": charuco_frame,
                 "burningstation_logfile_path": shared.logfile_path,
             },
+            shared=shared,
         )
 
-        robot.wait_for_event("taking_enabled_picture", job_id=job_id, timeout=40)
+        robot.wait_for_event("taking_enabled_picture", job_id=job_id, timeout=40, shared=shared)
         meter.coin_shutter_hold_open(10)
 
-        data = robot.wait_for_event("coin_shutter_results", job_id=job_id, timeout=20)
+        data = robot.wait_for_event("coin_shutter_results", job_id=job_id, timeout=20, shared=shared)
         shared.log("Coin shutter analysis data (%d/%d): %s" % (cycle_num, job_count, data))
         coin_shutter_meta = _get_coin_shutter_meta(shared)
         coin_shutter_meta[cycle_num] = data
         opened = data.get("opened")
         confidence = data.get("confidence")
 
-        robot.wait_for_event("program_done", job_id=job_id, timeout=10)
+        robot.wait_for_event("program_done", job_id=job_id, timeout=10, shared=shared)
 
         if opened is True:
             pass

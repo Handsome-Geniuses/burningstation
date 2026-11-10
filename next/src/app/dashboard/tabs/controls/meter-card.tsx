@@ -79,6 +79,18 @@ export const MeterCard = ({
                 <div className="text-sm font-medium text-center leading-1">{meter.ip.slice(-3)}</div>
                 <AnimatedMeter busy={meter.status === "busy"} />
                 <div className="text-sm font-medium text-center leading-1">{meter.hostname}</div>
+                {meter.lifecycle && !meter.lifecycle.ready && (
+                    <div className="mt-2 max-w-48 text-xs text-center" title={meter.lifecycle.reason}>
+                        {meter.lifecycle.phase.replaceAll("_", " ")}
+                        <div className="mt-1 text-muted-foreground">{meter.lifecycle.reason}</div>
+                        {(meter.lifecycle.startup_remaining_s ?? 0) > 0 && (
+                            <div className="mt-1">Startup settling: at least {meter.lifecycle.startup_remaining_s}s</div>
+                        )}
+                        {(meter.lifecycle.stable_remaining_s ?? 0) > 0 && (
+                            <div className="mt-1">Stability check: at least {meter.lifecycle.stable_remaining_s}s</div>
+                        )}
+                    </div>
+                )}
             </div>
 
             <div

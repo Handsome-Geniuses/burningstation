@@ -6,7 +6,9 @@ from lib.automation.tests.cycle_modem import test_cycle_modem
 from lib.automation.tests.cycle_print import test_cycle_print
 from lib.automation.tests.cycle_meter_ui import test_cycle_meter_ui
 from lib.automation.tests.cycle_call_in import test_cycle_call_in
-from lib.automation.helpers import StopAutomation
+from lib.automation.helpers import StopAutomation, check_stop_event
+from lib.automation.recovery import run_subtest
+from lib.meter.lifecycle import MeterInterrupted
 import time
 import inspect
 
@@ -81,15 +83,12 @@ def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, subtest_k
         return
 
     shared.current_device = device
-    if device == "coin shutter":
-        shared.set_allowed({device}, reason=f"Running {device} subtest")
-    else:
-        shared.set_allowed(set(), reason=f"Running {device} (no monitors expected)")
+    shared.log(f"Running {device} subtest")
 
     if not meter.device_firmware(device):
         shared.device_results[device] = "missing"
         shared.current_device = None
-        shared.set_allowed(set(), reason=f"{device} missing, monitors reset")
+        shared.log(f"{device} missing; skipping subtest")
         return
 
     shared.device_results[device] = "running"
@@ -106,6 +105,9 @@ def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, subtest_k
             fn(meter, shared=shared, **subtest_kwargs)
         if not shared.stop_event.is_set():
             shared.device_results[device] = "pass"
+    except MeterInterrupted:
+        shared.device_results[device] = "interrupted"
+        raise
     except StopAutomation:
         shared.device_results[device] = "fail"
         raise
@@ -114,7 +116,20 @@ def _run_device(meter: SSHMeter, shared: SharedState, device: str, fn, subtest_k
         raise
     finally:
         shared.current_device = None
-        shared.set_allowed(set(), reason=f"Finished {device} subtest")
+        shared.log(f"Finished {device} subtest")
+
+
+def _cycle_wait(shared, seconds):
+    remaining = max(0.0, float(seconds))
+    while remaining > 0:
+        if shared.meter_session is not None:
+            shared.attempt_epoch = shared.meter_session.wait_ready(shared)
+            shared.disruption_event.clear()
+        check_stop_event(shared)
+        step = min(0.1, remaining)
+        time.sleep(step)
+        remaining -= step
+    check_stop_event(shared)
 
 
 def test_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
@@ -141,11 +156,14 @@ def test_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
                 continue
 
             try:
-                _run_device(meter, shared, name, fn, subtest_kwargs=subtest_kwargs)
+                run_subtest(meter, shared, name,
+                            lambda: _run_device(meter, shared, name, fn, subtest_kwargs=subtest_kwargs))
                 if shared.device_results.get(name) == "fail" or shared.stop_event.is_set():
                     failed_devices.add(name)
                     if shared.stop_event.is_set() and not shared.abort_event.is_set():
                         shared.continue_after_failure(stop_on_fail)
+            except MeterInterrupted:
+                raise
             except Exception as exc:
                 failed_devices.add(name)
                 shared.last_error = str(exc)
@@ -154,10 +172,12 @@ def test_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
             finally:
                 if name in failed_devices:
                     shared.device_results[name] = "fail"
-            time.sleep(0.5)
+            _cycle_wait(shared, 0.5)
 
-        time.sleep(burn_delay)
+        _cycle_wait(shared, burn_delay)
 
-    time.sleep(0.5)
+    _cycle_wait(shared, 0.5)
+    from lib.automation.recovery import await_meter
+    await_meter(meter, shared)
     if not meter.in_diagnostics():
         meter.press("diagnostics", delay=0.4)

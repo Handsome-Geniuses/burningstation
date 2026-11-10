@@ -83,45 +83,9 @@ PROGRAM_REGISTRY = {
     "physical_cycle_all": physical_cycle_all,
 }
 
-_PROGRAM_MONITORS = {
-    "cycle_print":       [],
-    "cycle_coin_shutter":[],
-    "cycle_nfc":         [],
-    "cycle_modem":       [],
-    "cycle_call_in":     [],
-    "cycle_meter_ui":    [],
-    "cycle_all": [],
-    "test_operator_keypad":       [],
-    "test_operator_coins":        [],
-    "test_operator_nfc_tap":     [],
-    "test_operator_touchscreen":  [],
-    "test_operator_display_brightness": [],
-    "test_robot_keypad":    [],
-    "test_robot_display_brightness": [],
-    "physical_cycle_all":   [],
-    "test_operator_card_reader":     [],
-    "operator_cycle_all":   [],
-}
-
 from .operator_standalone import STANDALONE_TESTS
 
 PROGRAM_REGISTRY.update(STANDALONE_TESTS)
 
 
-def _build_alias_index(registry):
-    func_to_canon = {}
-    for name, fn in registry.items():
-        if name.startswith("cycle_") and fn not in func_to_canon:
-            func_to_canon[fn] = name
-    for name, fn in registry.items():
-        func_to_canon.setdefault(fn, name)
-    return {name: func_to_canon[fn] for name, fn in registry.items()}
-
-_ALIAS_TO_CANON = _build_alias_index(PROGRAM_REGISTRY)
-
-def get_monitors(program_name: str):
-    canon = _ALIAS_TO_CANON.get(program_name, program_name)
-    return _PROGRAM_MONITORS.get(canon, [])
-
-
-__all__ = ["PROGRAM_REGISTRY", "get_monitors"]
+__all__ = ["PROGRAM_REGISTRY"]

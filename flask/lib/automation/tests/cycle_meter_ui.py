@@ -1069,7 +1069,7 @@ def execute_pay_ui_action(
                 "'charuco_frame' argument is required for robot_contactless payment"
             )
         ## time.sleep(PRE_CARD_SEND_DELAY_S) # skip bc the robot will take a few seconds to move into position, so we can start the card action req immediately
-        context.robot.wait_until_ready(robot_ready_timeout)
+        context.robot.wait_until_ready(robot_ready_timeout, shared=shared)
         context.robot.flush_event_queue()
         job_args = {
             "meter_type": meter.meter_type,
@@ -1079,7 +1079,7 @@ def execute_pay_ui_action(
             "burningstation_logfile_path": shared.logfile_path,
         }
         _debug_log(shared, meter, debug_ui, f'>> robot.run_program("{action.robot_program}", {job_args})')
-        job_id = context.robot.run_program(action.robot_program, job_args)
+        job_id = context.robot.run_program(action.robot_program, job_args, shared=shared)
         if not job_id:
             raise RuntimeError(f"Robot did not accept program '{action.robot_program}'")
         context.robot_payment_job_id = job_id
@@ -1294,7 +1294,7 @@ def test_cycle_meter_ui(meter: SSHMeter, shared: SharedState = None, **kwargs):
     robot = None
     if payment_type == PaymentType.ROBOT_CONTACTLESS:
         robot = RobotClient()
-        robot.wait_until_ready(robot_ready_timeout)
+        robot.wait_until_ready(robot_ready_timeout, shared=shared)
         # robot.flush_event_queue()
     
     should_clear_coin_tallies = payment_type in {PaymentType.AUTO, PaymentType.COINS}

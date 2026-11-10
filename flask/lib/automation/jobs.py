@@ -5,7 +5,6 @@ import traceback
 from collections import deque
 from typing import Dict, Optional
 from datetime import datetime
-from lib.automation.tests import get_monitors
 from lib.automation.tests.operator_standalone import OPERATOR_PROGRAMS
 from lib.automation.shared_state import SharedState
 from lib.automation.runner import run_test_job
@@ -20,6 +19,10 @@ from lib.meter.ssh_meter import ModuleInfo, SSHMeter
 from lib.robot.robot_client import RobotClient
 import json
 import time
+import logging
+from contextlib import nullcontext
+from uuid import uuid4
+from lib.meter.lifecycle import session_for
 
 from lib.system.states import states
 from lib.automation.settings import *
@@ -88,10 +91,15 @@ def _module_info_for_program(meter: SSHMeter, program_name: str, default_info):
     if isinstance(modules, str):
         modules = (modules,)
     for module in modules:
-        info = meter.module_info.get(module)
+        info = _module_map(meter).get(module)
         if info is not None:
             return info
     return default_info
+
+
+def _module_map(meter):
+    session = session_for(meter)
+    return session.info.get("module_info", {}) if session is not None else meter.module_info
 
 def _wait_for_middle_bay_full(
     timeout_s: float = 20.0,
@@ -147,7 +155,9 @@ class JobState(SharedState):
         self.stop_event.clear()
         self.abort_event.clear()
         self.end_listener.clear()
-        self.success_event.clear()
+        self.disruption_event.clear()
+        self.lifecycle_observer = False
+        self.attempt_epoch = None
 
         # per-device state
         self.current_device = None
@@ -159,7 +169,6 @@ class JobState(SharedState):
 _states: Dict[str, JobState] = {}
 _threads: Dict[str, threading.Thread] = {}
 _registry_lock = threading.Lock()
-
 def _state(ip):
     with _registry_lock:
         if ip not in _states:
@@ -223,109 +232,135 @@ def fail_operator_subtest(meter_ip: str, test: str) -> bool:
     st.log(reason)
     return True
 
-def start_job(meter_ip, program_name, kwargs, log=True, verbose=False):
+def start_job(meter_ip, program_name, kwargs, log=True, verbose=False, *, prepare=None):
+    """Start the original job flow while reserving this meter's controls.
+
+    Optional prepare(meter) performs the caller's existing UI setup synchronously
+    under this same reservation; a returned dictionary supplies job kwargs.
+    The worker retains controls through results display and DB handling. Subtest
+    retries belong to runner/cycle functions, not to this job launcher.
+    See lib/docs/meter/supervisor.md for the call order and failure paths.
+    """
     meter = mm.get_meter(meter_ip)
+    session = session_for(meter)
+    owner = uuid4().hex
+    with _registry_lock:
+        if session is not None:
+            if not session.claim(owner):
+                return False, session.reason or "meter controls are in use"
+        elif meter.status != "ready":
+            return False, "job already running"
+        meter.status = "busy"
     st = _state(meter_ip)
-
-    if meter.status != 'ready': return False, "job already running"
-    meter.connect()
-
-    st.reset()
-    if log:
-        now = datetime.now()
-        log_dir = os.path.join("./logs", now.strftime("%Y-%m-%d"))
-        ts = now.strftime("%H-%M-%S")
-        logfile_name = f"{ts}_{meter.hostname}_{program_name}.log"
-        logfile_path = os.path.join(log_dir, logfile_name)
-        st.set_logfile(logfile_path)
-    else:
-        st.set_logfile(None)
-
-    st.log(f"STARTING JOB THREAD: {program_name} on {meter.hostname}", console=True)
-    st.log(f"Arguments: {kwargs}")
-    st.log(f"Meter Info: {json.dumps(meter.get_info(), sort_keys=True)}")
-
-    meter.status = "busy"
-    st.status = "running"
-    st.current_program = program_name
-    master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'current_action': program_name})
-
-    dev = PROG2DEVICE.get(program_name)
-    if dev:
-        st.current_device = dev
-        st.device_results[dev] = "running"
-        locally_verified = {"cycle_print", "printer", "cycle_nfc", "nfc", "cycle_modem", "modem"}
-        allowed = set() if program_name in locally_verified else {dev}
-        st.set_allowed(allowed, reason=f"Start job {program_name}")
-    else:
-        st.set_allowed(set(), reason=f"Start job {program_name} (no monitors expected)")
-    
-
-    broadcast_job = kwargs.pop('broadcast_job', True)
+    try:
+        with session.bind(owner) if session else nullcontext():
+            meter.connect()
+            st.reset()
+            st.meter_session, st.control_owner = session, owner
+            if session:
+                session.shared = st
+                st.attempt_epoch = session.epoch
+            st.current_program = program_name
+            st.status = "running"
+            kwargs = dict(kwargs)
+            now = datetime.now()
+            if session is not None and session.supervisor is not None:
+                st.set_session_log(session.supervisor)
+                session.supervisor._log("job_started", program=program_name, cursor=session.supervisor.cursor)
+            else:
+                st.set_logfile(os.path.join("./logs", now.strftime("%Y-%m-%d"),
+                                           f"{now.strftime('%H-%M-%S')}_{meter.hostname}_{program_name}.log") if log else None)
+            st.log(f"STARTING JOB THREAD: {program_name} on {meter.hostname}", console=True)
+            if prepare is not None:
+                st.log("Preparing meter display and test options")
+                prepared = prepare(meter)
+                if prepared is not None:
+                    kwargs.update(prepared)
+            kwargs.pop("broadcast_job", None)
+            st.log(f"Arguments: {kwargs}")
+            st.log(f"Meter Info: {json.dumps(meter.get_info(), sort_keys=True)}")
+            dev = PROG2DEVICE.get(program_name)
+            if dev:
+                st.current_device = dev
+                st.device_results[dev] = "running"
+            master.broadcast("status", {"ip": meter_ip, "status": "busy", "current_action": program_name})
+    except Exception as exc:
+        # No worker exists to finalize a failed setup. Publish the failure on
+        # this job state before releasing its lease, so status does not remain
+        # "running" after connect/get_info or setup logging raises.
+        st.status, st.result = "error", "fail"
+        st.current_program = program_name
+        st.last_error = str(exc)
+        if session is not None and session.supervisor is not None:
+            try:
+                session.supervisor._log("job_setup_failed", program=program_name,
+                                        error=str(exc), exception_type=type(exc).__name__)
+            except Exception:
+                logging.exception("Unable to log job setup failure")
+        if session:
+            session.release(owner)
+        meter.status = "ready"
+        raise
 
     def target():
-        started_at = time.monotonic()
+        started = time.monotonic()
+        finalized = False
         try:
-            run_test_job(
-                meter=meter,
-                program_name=program_name,
-                automation_kwargs=kwargs,
-                shared=st,
-                log=log,
-                verbose=verbose,
-            )
-            st.result = "fail" if (
-                st.stop_event.is_set()
-                or any(result == "fail" for result in st.device_results.values())
-            ) else "pass"
-            st.status = "cancelled" if st.abort_event.is_set() and st.extras.get("failure_reason") == "manually stopped" else "finished"
-            st.log(f"JOB FINISHED: {st.result.upper()}", console=verbose)
-
-            meter.results[program_name] = st.result
-
+            with session.bind(owner) if session else nullcontext():
+                run_test_job(meter, program_name, kwargs, st, log=log, verbose=verbose)
+                st.result = "fail" if (st.stop_event.is_set() or any(
+                    value in {"fail", "interrupted"} for value in st.device_results.values())) else "pass"
+                if not st.abort_event.is_set():
+                    st.status = "finished"
+                st.log(f"JOB FINISHED: {st.result.upper()}", console=verbose)
+                dev = PROG2DEVICE.get(program_name)
+                if dev and st.device_results.get(dev) in {None, "running"}:
+                    st.device_results[dev] = ("interrupted" if st.extras.get("meter_disruption")
+                                              else "fail" if st.stop_event.is_set() else "pass")
+                meter.results.update(st.device_results)
+                meter.results[program_name] = st.result
+                st.extras["duration_s"] = round(time.monotonic() - started, 3)
+                st.extras["kwargs"] = kwargs
+                master.broadcast("devices", {"ip": meter_ip, "results": st.device_results})
+                job_done(meter_ip, meter=meter, st=st)
+                finalized = True
+                if os.name != "nt" and (session is None or session.ready):
+                    meter.beep(3)
         except Exception as exc:
-            st.log(f"JOB CRASHED: {exc}", console=True)
-
-            st.status = "error"
-            st.result = "fail"
-            st.last_error = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-
-            meter.results[program_name] = st.result
+            st.status, st.result = "error", "fail"
+            st.last_error = str(exc)
+            st.log(f"JOB FINALIZATION ERROR: {exc}", console=True)
         finally:
-            st.flush_logs()
+            try:
+                st.flush_logs()
+                if session is not None and session.supervisor is not None:
+                    session.supervisor._log("job_finalized", program=program_name,
+                                            result=st.result, cursor=session.supervisor.cursor)
+            except Exception:
+                logging.exception("Unable to flush final job logs")
+            if session:
+                session.release(owner)
+            meter.status = "ready"
+            # A retained object is never allowed to publish into a new session
+            # which happens to reuse its IP address.
+            if mm.meters.get(meter_ip) is meter:
+                master.broadcast("status", {"ip": meter_ip, "status": meter.status, "current_action": ""})
+                if session:
+                    master.broadcast("meter", {"ip": meter_ip, "alive": True, "info": meter.public_info()})
+                if (finalized and not st.abort_event.is_set() and not st.extras.get("meter_disruption")
+                        and (session is None or session.ready)):
+                    _handle_auto_job_done(meter_ip, program_name)
 
-        dev_results = getattr(st, "device_results", {}) or {}
-        dev = PROG2DEVICE.get(program_name)
-        if dev:
-            status = dev_results.get(dev)
-            if status is None or status == "running":
-                dev_results[dev] = 'fail' if st.stop_event.is_set() else 'pass'
-
-        meter.results.update(dev_results)
-        st.log(f"meter.results: {meter.results}", console=True)
-        master.broadcast('devices', {'ip': meter_ip, 'results': dev_results})
-
-        meter.status = "ready"
-        meter.results[program_name] = st.result
-        master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'msg': '', 'current_action': ''})
-
-        st.extras['duration_s'] = round(time.monotonic() - started_at, 3)
-        st.extras['kwargs'] = kwargs
-        job_done(meter_ip)
-        if os.name != "nt": meter.beep(3) # leave uncommented for production
-
-        # if program_name in ['cycle_all', 'all tests'] and meter.meter_type != 'msx':
-            # meter.custom_print()
-
-    t = threading.Thread(target=target, daemon=True)
-    _threads[meter_ip] = t
-    t.start()
-    if (meter): meter.status = "busy"
+    thread = threading.Thread(target=target, daemon=True, name=f"job:{meter_ip}:{program_name}")
+    _threads[meter_ip] = thread
+    thread.start()
     return True, "started"
 
 
 
+
 def stop_job(meter_ip):
+    """Request cancellation; the worker, not this request, releases controls."""
     st = _state(meter_ip)
     meter = mm.get_meter(meter_ip)
     if (st.status!='running' and meter.status!='busy'):
@@ -341,9 +376,8 @@ def stop_job(meter_ip):
         st.abort_event.set()
         st.stop_event.set()
         st.status = "cancelled"
-    meter.status = "ready"
-    master.broadcast('status', {'ip':meter_ip, 'status': meter.status, 'current_action': ''})
-    meter.beep(3)
+    # Cancellation is a request. The worker retains its lease through cleanup.
+    master.broadcast('status', {'ip':meter_ip, 'status': 'busy', 'current_action': 'stopping'})
 
     return True
 
@@ -360,94 +394,54 @@ def job_status(meter_ip):
 
 
 def start_passive_job(meter_ip):
-    meter = mm.get_meter(meter_ip)
-    meter.set_ui_mode("banner")
-    modules = meter.module_info
-    meter.setup_custom_display()
-    
-    # has_nfc = "KIOSK_NFC" in modules
-    # has_modem = "MK7_XE910" in modules
-    # has_printer = "PRINTER" in modules
-    # has_coin_shutter = "COIN_SHUTTER" in modules
-    # has_screen_test = True  # all meters have screen test
+    """Prepare the original passive display/options, then launch cycle_all."""
+    def prepare(meter):
+        meter.set_ui_mode("banner")
+        modules = meter.module_info
+        meter.setup_custom_display()
+        return build_passive_kwargs(modules)
 
-    # kwargs = {
-    #     "numBurnCycles": 1,
-    #     "numBurnDelay": 10,
-    #     "nfc": {"enabled": has_nfc},
-    #     "modem": {"enabled": has_modem},
-    #     # "printer": {"enabled": has_printer},
-    #     "printer": {"enabled": 0},
-    #     "coin shutter": {"enabled": has_coin_shutter},
-    #     "screen test": {"enabled": has_screen_test, "payment_type": "coins", "debug_ui": 0},
-    # }
-    kwargs = build_passive_kwargs(modules)
-
-    start_job(meter_ip, "cycle_all", kwargs, verbose=True)
+    return start_job(meter_ip, "cycle_all", {}, verbose=True, prepare=prepare)
 
 
 def start_physical_job(meter_ip, buttons=None):
+    """Keep the bay check, brightness/setup order, and post-start clearance delay."""
     loaded, sensor_value = _wait_for_middle_bay_full(timeout_s=20.0)
     if not loaded:
         msg = f"Cannot start physical job since station M is not fully occupied; middle-bay sensors read {sensor_value:03b} (expected 111)"
         master.broadcast('notify', {'ntype': 'error', 'msg': msg})
         return False, msg
 
-    robot = RobotClient()
-    robot.flush_event_queue()
+    def prepare(meter):
+        robot = RobotClient()
+        robot.flush_event_queue()
+        modules = meter.module_info
+        meter.set_brightness(15)
+        meter.setup_custom_display()
+        selected = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
+        return build_physical_kwargs(modules, buttons=selected)
 
-    meter = mm.get_meter(meter_ip)
-    modules = meter.module_info
-    meter.set_brightness(15)
-    meter.setup_custom_display()
-    buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
-    
-    # has_solar = True
-    # has_coin_shutter = "COIN_SHUTTER" in modules
-    # has_nfc = "KIOSK_NFC" in modules
-    # buttons = get_default_buttons(modules, meter.meter_type) if not buttons else buttons
-
-    # kwargs = {
-    #     "numBurnCycles": 1,
-    #     "numBurnDelay": 5,
-    #     "solar": {"enabled": has_solar},
-    #     "coin_shutter": {"enabled": has_coin_shutter},
-    #     ### "nfc": {"enabled": has_nfc},
-    #     "nfc_gui": {
-    #         "enabled": has_nfc,
-    #         "payment_type": "robot_contactless",
-    #         "robot_ready_timeout": 20.0,
-    #     },
-    #     "robot_keypad": {"enabled": bool(buttons), "buttons": buttons},
-
-    #     "monitors": [
-    #         ("robot_keypad", {"buttons": buttons})
-    #     ]
-    # }
-
-    kwargs = build_physical_kwargs(modules, buttons=buttons)
-
-    success, msg = start_job(meter_ip, "physical_cycle_all", kwargs, verbose=True)
+    success, msg = start_job(meter_ip, "physical_cycle_all", {}, verbose=True, prepare=prepare)
     time.sleep(5) # incase robot needs to get out of there
     return success, msg
 
 
 def start_operator_job(meter_ip):
-    meter = mm.get_meter(meter_ip)
-    modules = meter.module_info
-    buttons = get_default_buttons(modules, meter.meter_type)
-    meter.set_ui_mode("banner")
-    meter.setup_custom_display()
+    """Build operator options under the same meter reservation as display setup."""
+    def prepare(meter):
+        modules = meter.module_info
+        buttons = get_default_buttons(modules, meter.meter_type)
+        meter.set_ui_mode("banner")
+        meter.setup_custom_display()
+        return build_operator_kwargs(
+            modules, buttons=buttons, meter_region=getattr(meter, "meter_region", None),
+        )
 
-    kwargs = build_operator_kwargs(
-        modules,
-        buttons=buttons,
-        meter_region=getattr(meter, "meter_region", None),
-    )
-    return start_job(meter_ip, "operator_cycle_all", kwargs, verbose=True)
+    return start_job(meter_ip, "operator_cycle_all", {}, verbose=True, prepare=prepare)
 
 
 def start_operator_test_job(meter_ip, test):
+    """Run one selected operator test while preserving its configured options."""
     if test not in OPERATOR_PROGRAMS:
         return False, "unknown operator test"
     meter = mm.get_meter(meter_ip)
@@ -461,10 +455,13 @@ def start_operator_test_job(meter_ip, test):
     )[device]
     if device == "keypad" and not buttons:
         return False, "operator keypad has no buttons to test"
-    meter.set_ui_mode("banner")
-    meter.setup_custom_display()
+
+    def prepare(meter):
+        meter.set_ui_mode("banner")
+        meter.setup_custom_display()
+
     # Individual OP buttons always run once, retaining the test's other options.
-    return start_job(meter_ip, test, {**config, "job_count": 1}, verbose=True)
+    return start_job(meter_ip, test, {**config, "job_count": 1}, verbose=True, prepare=prepare)
 
 
 def start_operator_keypad_job(meter_ip):
@@ -512,7 +509,7 @@ def _job_has_failure(st: JobState) -> bool:
     return (
         st.result == "fail"
         or st.stop_event.is_set()
-        or any(status == "fail" for status in st.device_results.values())
+        or any(status in {"fail", "interrupted"} for status in st.device_results.values())
     )
 
 
@@ -579,7 +576,7 @@ def _build_keypad_job_results(meter: SSHMeter, keypad_status: str, error: str | 
     if error:
         job_results["keypad"]["error"] = error
 
-    keypad2_info = meter.module_info.get(PROG2MODULE.get("keypad2"))
+    keypad2_info = _module_map(meter).get(PROG2MODULE.get("keypad2"))
     if keypad2_info is not None:
         job_results["keypad2"] = {
             "status": keypad_status,
@@ -591,24 +588,24 @@ def _build_keypad_job_results(meter: SSHMeter, keypad_status: str, error: str | 
 
 
 # using this to database?
-def job_done(meter_ip):
-    meter = mm.get_meter(meter_ip)
-    st = _state(meter_ip)
-    status = job_status(meter_ip)
-    current_program = status.get("current_program")
-
-    _handle_auto_job_done(meter_ip, current_program)
+def job_done(meter_ip, *, meter=None, st=None):
+    meter = meter if meter is not None else mm.get_meter(meter_ip)
+    st = st if st is not None else _state(meter_ip)
+    current_program = st.current_program
 
     meter.results.pop(current_program, None)
 
     # initial 
     overall_status = "pass"
-    data = {"kwargs": st.extras.get('kwargs', {})}
+    data = {"kwargs": st.extras.get('kwargs', {}),
+            "meter_session": st.extras.get("meter_session"),
+            "meter_interruptions": st.extras.get("meter_interruptions", []),
+            "meter_disruption": st.extras.get("meter_disruption")}
     
     # for cycle all passive
     if current_program == 'cycle_all':
         for key, val in st.device_results.items():
-            if val == "fail":
+            if val in {"fail", "interrupted"}:
                 overall_status = "fail"
                 break
 
@@ -629,7 +626,7 @@ def job_done(meter_ip):
 
     elif current_program == "physical_cycle_all":
         for key, val in st.device_results.items():
-            if val == "fail":
+            if val in {"fail", "interrupted"}:
                 overall_status = "fail"
                 break
 
@@ -644,7 +641,7 @@ def job_done(meter_ip):
                 "id": info.get("id", -1),
             }
             if key == "robot_keypad":
-                info = meter.module_info.get(PROG2MODULE.get("robot_keypad2"), default_info)
+                info = _module_map(meter).get(PROG2MODULE.get("robot_keypad2"), default_info)
                 job_results["robot_keypad2"] = {
                     "status": val,
                     "fw": info.get("ver", -1),
@@ -659,7 +656,7 @@ def job_done(meter_ip):
 
     elif current_program == "operator_cycle_all":
         for key, val in st.device_results.items():
-            if val == "fail":
+            if val in {"fail", "interrupted"}:
                 overall_status = "fail"
                 break
 
@@ -674,7 +671,7 @@ def job_done(meter_ip):
                 "id": info.get("id", -1),
             }
             if key == "keypad":
-                info = meter.module_info.get(PROG2MODULE.get("keypad2"), default_info)
+                info = _module_map(meter).get(PROG2MODULE.get("keypad2"), default_info)
                 job_results["keypad2"] = {
                     "status": val,
                     "fw": info.get("ver", -1),
@@ -725,8 +722,6 @@ def job_done(meter_ip):
         "job", hostname=meter.hostname, name=current_program,
         status=overall_status, data=data,
     )
-    if meter.db_id is None:
-        return
 
     # insertion time!
     job_data = {
@@ -745,9 +740,12 @@ def job_done(meter_ip):
     st.log("=== END OF JOB ===")
     st.flush_logs()
 
+    # Operator-visible results come first: a DB outage must not hide them.
+    # Keep this order; production DB insertion has raised after successful tests.
     if current_program in {"cycle_all", "physical_cycle_all", "operator_cycle_all"}:
         meter.update_display_results(st)
-    insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
+    if meter.db_id is not None:
+        insert_meter_jobs(meter.db_id,[job_data],'\n'.join(line.rstrip('\n') for line in st.logs))
     # if st.logs successfully inserted to db, rm log file maybe?
 
     if current_program == "cycle_all" and store.settings.other.auto_print_fw:

@@ -69,6 +69,22 @@ export const MotorStateName: Record<MotorState, string> = {
 }
 
 export interface MeterInfo {
+    lifecycle?: {
+        session_id: string
+        phase: string
+        reason: string
+        ready: boolean
+        epoch: number
+        link: string
+        ui: string
+        journal_connected: boolean
+        last_interruption?: string | null
+        runtime_sec?: number | null
+        startup_remaining_s?: number | null
+        stable_remaining_s?: number | null
+        initialization_step?: string | null
+        log_path?: string | null
+    }
     ip: string
     status: string
     current_action?: string

@@ -87,17 +87,12 @@ class FakeNFCMeter:
 
 class NFCCycleTests(unittest.TestCase):
     def test_no_registered_test_requires_a_default_monitor(self):
-        registry_path = MODULE_PATH.parent / "__init__.py"
-        tree = ast.parse(registry_path.read_text(encoding="utf-8"))
-        registry = next(
-            ast.literal_eval(node.value)
-            for node in tree.body
-            if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "_PROGRAM_MONITORS" for target in node.targets)
-        )
-        self.assertEqual(registry["cycle_nfc"], [])
-        self.assertTrue(all(not monitors for monitors in registry.values()))
-        self.assertNotIn("test_robot_nfc_read", registry)
+        tree = ast.parse((MODULE_PATH.parent / "__init__.py").read_text(encoding="utf-8"))
+        names = {target.id for node in tree.body if isinstance(node, ast.Assign)
+                 for target in node.targets if isinstance(target, ast.Name)}
+        self.assertNotIn("_PROGRAM_MONITORS", names)
+        self.assertFalse(any(isinstance(node, ast.FunctionDef) and node.name == "get_monitors"
+                             for node in tree.body))
 
     def run_cycle(self, meter, **kwargs):
         clock = FakeClock()

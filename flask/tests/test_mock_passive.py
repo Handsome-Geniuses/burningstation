@@ -4,11 +4,13 @@ from pathlib import Path
 import subprocess
 import sys
 import textwrap
+import tempfile
 import unittest
 
 FLASK_DIR = Path(__file__).resolve().parents[1]
 SETUP = '''
 import time
+import os
 from copy import deepcopy
 from unittest.mock import Mock, patch
 import tools.mock as mock
@@ -16,6 +18,14 @@ from lib.automation import jobs, mock_meter
 from lib.automation.tests import cycle_all
 from lib.meter.meter_manager import METERMANAGER as mm
 from lib.sse.sse_queue_manager import SSEQM
+from lib.automation.shared_state import SharedState
+# Test-only legacy/mock logs belong to a temporary directory, never the live
+# station's date folders. Preserve disk logging coverage without leaving files.
+_set_logfile = SharedState.set_logfile
+def set_test_logfile(self, path):
+    target = os.path.join(os.environ['METER_TEST_LOG_DIR'], os.path.basename(path)) if path else None
+    return _set_logfile(self, target)
+SharedState.set_logfile = set_test_logfile
 host = "192.168.69.900"
 meter = mock.SSHMeter(host)
 meter.db_id = 42
@@ -33,11 +43,13 @@ def wait_for(predicate, timeout=3):
 
 class MockPassiveTests(unittest.TestCase):
     def run_python(self, source):
-        result = subprocess.run(
-            [sys.executable, "-c", SETUP + textwrap.dedent(source)], cwd=FLASK_DIR,
-            env={**os.environ, "PYTHONPATH": str(FLASK_DIR), "HARDWARE_PROFILE": "portable", "MOCK": "1"},
-            text=True, capture_output=True, timeout=25,
-        )
+        with tempfile.TemporaryDirectory(prefix='meter-mock-test-') as temporary:
+            result = subprocess.run(
+                [sys.executable, "-c", SETUP + textwrap.dedent(source)], cwd=FLASK_DIR,
+                env={**os.environ, "PYTHONPATH": str(FLASK_DIR), "HARDWARE_PROFILE": "portable", "MOCK": "1",
+                     "METER_TEST_LOG_DIR": temporary},
+                text=True, capture_output=True, timeout=25,
+            )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_fail_button_fails_current_call_in_and_records_reason(self):

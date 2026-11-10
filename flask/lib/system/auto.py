@@ -62,7 +62,13 @@ class AutoCoordinator:
             return False
         if states.get("emergency"):
             return False
-        return meter_ip in mm.meters
+        meter = mm.meters.get(meter_ip)
+        if meter is None:
+            return False
+        from lib.meter.lifecycle import session_for
+        session = session_for(meter)
+        return session is None or (session.ready and session.admitted and (
+            session.owner is None or str(session.owner).startswith("identify:")))
 
     def _notify(self, msg: str, ntype: str = "info", **kwargs):
         SSEQM.broadcast("notify", {"ntype": ntype, "msg": msg, **kwargs})

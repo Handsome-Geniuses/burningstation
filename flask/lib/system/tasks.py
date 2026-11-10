@@ -85,11 +85,10 @@ def task_refresh_meters(count):
         fresh,stale,ips = mm.refresh()
         # print(f"ips: {ips}")
         # print(f"fresh: {fresh}, stale: {stale}, ips: {ips}")
-        for ip in fresh: 
+        for ip in fresh:
             print(f"fresh ip: {ip}")
-            if states['mode']=='auto':
-                mm.get_meter(ip).setup_custom_display()
-                # start_passive_job(ip)
+            # Auto-mode assets are uploaded during admission, before ready.
+            # start_passive_job(ip) remains intentionally disabled.
 
 
 def refresh_battery_state():

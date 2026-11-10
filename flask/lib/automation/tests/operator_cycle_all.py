@@ -1,5 +1,7 @@
 import inspect
 import time
+from lib.automation.recovery import run_subtest
+from lib.meter.lifecycle import MeterInterrupted
 
 from lib.automation.helpers import StopAutomation
 from lib.automation.operator_feedback import publish_operator_feedback
@@ -90,7 +92,7 @@ def _run_operator_test(meter, shared, device, test_func, subtest_kwargs):
     with shared.lock:
         shared.current_device = device
     shared.device_results[device] = "running"
-    shared.set_allowed(set(), reason=f"Running monitor-free {device} subtest")
+    shared.log(f"Running {device} subtest")
     if getattr(shared, "current_program", None) == "operator_cycle_all":
         publish_operator_feedback(
             meter, shared, test=device, title=device.replace("_", " ").title(),
@@ -110,6 +112,9 @@ def _run_operator_test(meter, shared, device, test_func, subtest_kwargs):
             test_func(meter, shared=shared, **subtest_kwargs)
         if not shared.stop_event.is_set():
             shared.device_results[device] = "pass"
+    except MeterInterrupted:
+        shared.device_results[device] = "interrupted"
+        raise
     except StopAutomation:
         shared.device_results[device] = "fail"
         raise
@@ -128,7 +133,7 @@ def _run_operator_test(meter, shared, device, test_func, subtest_kwargs):
                 )
         with shared.lock:
             shared.current_device = None
-        shared.set_allowed(set(), reason=f"Finished {device} subtest")
+        shared.log(f"Finished {device} subtest")
 
 
 def _record_requested_failure(meter, shared, device):
@@ -179,14 +184,15 @@ def operator_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
                 continue
 
             try:
-                _run_operator_test(
-                    meter, shared, device, test_func, subtest_kwargs=subtest_kwargs
-                )
+                run_subtest(meter, shared, device,
+                            lambda: _run_operator_test(meter, shared, device, test_func, subtest_kwargs=subtest_kwargs))
                 if shared.device_results.get(device) == "fail" or shared.stop_event.is_set():
                     failed_devices.add(device)
                     _record_requested_failure(meter, shared, device)
                     if shared.stop_event.is_set() and not shared.abort_event.is_set():
                         shared.continue_after_failure(stop_on_fail)
+            except MeterInterrupted:
+                raise
             except Exception as exc:
                 failed_devices.add(device)
                 shared.last_error = str(exc)
@@ -201,5 +207,7 @@ def operator_cycle_all(meter: SSHMeter, shared: SharedState, **kwargs):
         if cycle_num < cycle_count:
             time.sleep(cycle_delay)
 
+    from lib.automation.recovery import await_meter
+    await_meter(meter, shared)
     if not meter.in_diagnostics():
         meter.press("diagnostics", delay=0.4)

@@ -427,20 +427,31 @@ def get_keypad_page_state(
 ) -> KeypadPageState:
     url = f"http://{meter.host}:8005/UIPage.php"
     try:
-        resp = requests.get(url, timeout=timeout)
-        resp.raise_for_status()
+        from lib.meter.lifecycle import session_for
+        if session_for(meter) is None:
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            html = resp.text
+        else:
+            html = meter.get_ui_page_html(timeout=timeout)
     except Exception as exc:
         _keypad_log(
             shared,
             f"Failed to fetch UI page, assuming NOT on keyboard page | Error: {exc}",
             section="ui",
         )
+        from lib.meter.lifecycle import session_for, MeterInterrupted
+        session = session_for(meter)
+        if session is not None:
+            if not isinstance(exc, MeterInterrupted):
+                session.interrupt(f"Keypad UI unavailable: {exc}")
+            raise MeterInterrupted(str(exc), session.epoch) from exc
         return KeypadPageState(False, False)
 
-    is_keypad_page = KEYPAD_PAGE in resp.text
+    is_keypad_page = KEYPAD_PAGE in html
     return KeypadPageState(
         is_keypad_page=is_keypad_page,
-        requires_back_prime=is_keypad_page and KEYPAD_EXIT_PRIME_TEXT in resp.text,
+        requires_back_prime=is_keypad_page and KEYPAD_EXIT_PRIME_TEXT in html,
     )
 
 
@@ -2172,6 +2183,7 @@ def test_robot_keypad(meter: SSHMeter, shared: SharedState, **kwargs):
             "test": False,
             "burningstation_logfile_path": shared.logfile_path,
         },
+        shared=shared,
     )
     _keypad_log(shared, f"started robot keypad job_id={job_id}", section="robot")
 
@@ -2328,6 +2340,7 @@ def _combined_stop_requested(shared: SharedState) -> bool:
     end_listener = getattr(shared, "end_listener", None)
     return bool(
         (stop_event is not None and stop_event.is_set())
+        or (getattr(shared, "disruption_event", None) is not None and shared.disruption_event.is_set())
         or (end_listener is not None and end_listener.is_set())
     )
 
