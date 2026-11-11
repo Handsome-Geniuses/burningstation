@@ -1641,3 +1641,7 @@ def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
                 f"{meter.host} call-in cycle {cycle_num}: failure metadata -> {cycle_meta}"
             )
             raise
+        finally:
+            # The observer exemption belongs only to this transaction. A later
+            # call-in iteration must start with ordinary lifecycle checks.
+            shared.lifecycle_observer = False

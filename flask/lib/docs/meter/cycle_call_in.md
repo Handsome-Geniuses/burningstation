@@ -217,6 +217,12 @@ So for this scenario, the practical takeaway is:
   navigated back into diagnostics
 - the restarted runtime did perform another startup call-in
 
+Operators may also use a physical diagnostics card to return a restarted meter
+to diagnostics while `cycle_all` is still logging. See
+[`meter_log_search.md`](meter_log_search.md#diagnostics-card-insertion) for the
+meter-runtime signatures, VS Code search settings, capture limitations, and the
+observed October 2026 matches around this recovery path.
+
 ## Key Source References
 
 - `assets/ms3/main/UI/Diagnostics/DiagServiceMenu.c`

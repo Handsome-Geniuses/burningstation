@@ -13,6 +13,21 @@ call_in = import_module('lib.automation.tests.cycle_call_in')
 
 
 class ManagedCallInTests(unittest.TestCase):
+    def test_observer_exemption_ends_before_next_iteration(self):
+        meter = SimpleNamespace(host='192.0.2.1')
+        shared = SharedState()
+        observed_at_start = []
+
+        def run_cycle(_meter, state, **_kwargs):
+            observed_at_start.append(state.lifecycle_observer)
+            state.lifecycle_observer = True
+
+        with patch.object(call_in, '_run_call_in_cycle', side_effect=run_cycle):
+            call_in.test_cycle_call_in(meter, shared, job_count=2, subtest=True)
+
+        self.assertEqual(observed_at_start, [False, False])
+        self.assertFalse(shared.lifecycle_observer)
+
     def test_trigger_interruption_continues_original_transaction(self):
         status = 'CIM: state=S1_WAITING_FOR_CALL_TIME\nCS: state=S5_DISCONNECTED\nMODEM: state=S1_IDLE\nClients requesting connection: (none)'
         meter = SimpleNamespace(host='192.0.2.1', hostname='30001189', goto_callin=Mock(),
