@@ -16,6 +16,7 @@ import {
     meterRunDummy,
     meterRunOperatorTest,
     meterRunPassive,
+    meterRunPhysical,
     meterRunOperator,
     meterRunPrintFw,
     meterStopBlink,
@@ -140,7 +141,7 @@ export const MeterDialog = ({
 
                 {!showOperatorKeypad && !showOperatorFeedback && view === "actions" &&
                     <div className="p-4 grid grid-cols-3 gap-2">
-                        {systemState.playground &&
+                        {systemState.playground && (systemState.hardware.profile !== "portable" || systemState.physicalRunner) &&
                             <Button
                                 variant="outline"
                                 onClick={run(() => meterRunDummy(meter?.ip))}
@@ -157,6 +158,15 @@ export const MeterDialog = ({
                         >
                             run passive
                         </Button>
+                        {systemState.playground &&
+                            <Button
+                                variant="outline"
+                                onClick={run(() => meterRunPhysical(meter?.ip))}
+                                disabled={running || systemState.mode !== "manual" || !isMeterReady}
+                            >
+                                run physical
+                            </Button>
+                        }
                         <Button
                             variant="outline"
                             onClick={run(() => meterRunOperator(meter?.ip))}
@@ -241,7 +251,7 @@ export const MeterDialog = ({
                                 onClick={run(() => meterStopPhysical(meter?.ip))}
                                 disabled={running}
                             >
-                                physical
+                                stop physical
                             </Button>
                         }
                         {(isOperatorRunning || isStandaloneOperatorRunning) &&

@@ -129,6 +129,9 @@ export interface SystemState {
     // flag for ?playground
     playground: boolean,
 
+    // flag for the Windows meter-and-robot runner
+    physicalRunner: boolean,
+
     // flag for sse connection
     connected: boolean
 
@@ -185,6 +188,7 @@ export const initialSystemState: SystemState = {
     emergency: false,
     handsome: false,
     playground: false,
+    physicalRunner: false,
     connected: false,
     meters: {},
     operatorKeypad: {},

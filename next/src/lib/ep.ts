@@ -32,6 +32,7 @@ export const meterRunBlinkUntil = async (meterIp?: string, maxDuration = 3) => m
 export const meterStopBlink = async (meterIp?: string) => meterRunNeutralProg(meterIp, "identify_stop")
 export const meterRunPassive = async (meterIp?: string) => meterRunProg(meterIp, "start_passive_job")
 export const meterStopPassive = async (meterIp?: string) => meterRunProg(meterIp, "stop_passive_job")
+export const meterRunPhysical = async (meterIp?: string) => meterRunProg(meterIp, "start_physical_job")
 export const meterStopPhysical = async (meterIp?: string) => meterRunProg(meterIp, "stop_physical_job")
 export const meterRunOperator = async (meterIp?: string) => meterRunProg(meterIp, "start_operator_job")
 export const meterRunOperatorKeypad = async (meterIp?: string) => meterRunProg(meterIp, "start_operator_keypad_job")

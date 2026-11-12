@@ -269,6 +269,7 @@ export const StoreProvider = ({ children }: StoreProviderProps) => {
         const searchParams = new URLSearchParams(window.location.search)
         systemDispatch({ type: 'set', key: 'handsome', value: searchParams.has('handsome') })
         systemDispatch({ type: 'set', key: 'playground', value: searchParams.has('playground') })
+        systemDispatch({ type: 'set', key: 'physicalRunner', value: searchParams.has('physical-runner') })
         flaskconnect()
         return () => { flasksse.current?.close() }
     }, [])
