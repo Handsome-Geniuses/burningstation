@@ -121,6 +121,18 @@ the old >70-second admission wait. It is not a guarantee that every peripheral
 has appeared or no later update can occur. Countdown values are minimum waits,
 not a promised ready ETA.
 
+It also does not prove the current MS3 generation's startup call-in has run.
+Archived production runs `2026-10-19/09-47-21_30005988_cycle_all.log`,
+`2026-10-19/11-28-28_30005989_cycle_all.log`, and
+`2026-10-20/10-05-03_30005980_cycle_all.log` reached `S4_RUNNING`, then show a
+quiet interval and a grouped power grace timeout, sleep/wake, timer refresh,
+and startup-call-in marker. Old listener timestamps mark workstation receipt,
+so they do not resolve exact meter-side timing. See the post-restart sleep section
+in `flask/wc_copy/debug production logs/2026-10-20 Various Errors/11-11 Call-In
+Update and Reboot/README_FOR_AGENTS.md`. A current-generation, sleep-aware
+readiness rule needs validation against meter journal source/monotonic times;
+the 75-second gate alone can admit work before a startup call-in is observed.
+
 | Evidence | Treatment |
 | --- | --- |
 | Exact Grace period timeout / exact platformSleep command | Sleep entry; retain the known meter for wake/recovery. |

@@ -519,6 +519,14 @@ class MeterSupervisor:
                 return
         idle = (re.search(r"Clients requesting connection:\s*\(?none\)?", status, re.I) is not None
                 and re.search(r"CIM:\s*state=S[14]_", status) is not None)
+        # Runtime age is only a minimum settling heuristic, not proof that this
+        # generation's startup call-in has occurred. Archived production logs
+        # (2026-10-19: 09-47-21_30005988 and 11-28-28_30005989; 2026-10-20:
+        # 10-05-03_30005980) show S4_RUNNING followed by a quiet interval, power
+        # grace timeout, sleep/wake, timer refresh, then a startup marker. Their
+        # listener timestamps are receipt times, so exact meter timing is unknown.
+        # TODO: Validate a sleep-aware/current-generation startup-call-in gate
+        # with meter journal timestamps before treating age >= 75 as settled.
         if not idle or age < 75 or time.monotonic() - self.last_notice < 3:
             self.idle_since = None
             if age < 75:
