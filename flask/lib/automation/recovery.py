@@ -72,7 +72,10 @@ def run_subtest(meter, shared, name, function, *, robot=False, prepare=None, max
             if shared.abort_event.is_set():
                 raise StopAutomation("Cancelled by operator")
             if name in {"call in", "call_in", "cycle_call_in"}:
-                await_meter(meter, shared)
+                # The supervised call-in can finish from its own transaction
+                # proof while an update is starting. The next subtest and job
+                # finalization each have their own readiness gate.
+                return result
             session.checkpoint(shared.attempt_epoch)
             return result
         except Exception as exc:
@@ -119,4 +122,8 @@ def run_subtest(meter, shared, name, function, *, robot=False, prepare=None, max
                 shared.stop_event.clear()
         finally:
             shared.lifecycle_observer = False
+            if name in {"call in", "call_in", "cycle_call_in"}:
+                # Keep the flag through interruption handling, then avoid
+                # leaking it into retries of unrelated later subtests.
+                shared.extras.pop("call_in_in_flight", None)
     raise RecoveryFailed(f"{name}: recovery limit reached")

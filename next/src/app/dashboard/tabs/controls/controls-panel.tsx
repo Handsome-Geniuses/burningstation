@@ -71,6 +71,11 @@ function getBooleanOption(
 }
 
 async function loadMeter(systemState: SystemState, meterIp: string) {
+    // Station load checks belt sensors, not the selected meter's session. A
+    // ready UI snapshot can go stale before this moves the belt and assigns its
+    // bay guess; a later passive-job claim cannot undo that movement.
+    // The response is not checked here; in auto mode a rejected station load
+    // can still be followed by a passive-job start attempt.
     await flask.handleAction('station', 'load', { type: 'L', meter_ip: meterIp })
 
     if (systemState.mode === "auto") {
@@ -183,6 +188,8 @@ const MeterMiddlePhysical = ({
     const handleMiddleYes = async () => {
         if (!middleMeterIp) return
 
+        // This does not verify that identify_until succeeded or that its lease
+        // has finished releasing. start_job will refuse an unready/owned meter.
         notify.success("Middle found")
         await stopBlinkMeter(middleMeterIp)
         startPhysicalJob(middleMeterIp)
@@ -208,6 +215,8 @@ const MeterMiddlePhysical = ({
 
         const bay1GuessIp = getExactBay1GuessIp(systemState.bayGuess)
 
+        // Skipping the blink trusts this bay guess for identity. The backend
+        // still claims a ready session before it starts the physical job.
         if (!physicalCheck && bay1GuessIp && meters.some(meter => meter.ip === bay1GuessIp)) {
             startPhysicalJob(bay1GuessIp)
             return
@@ -311,6 +320,8 @@ export function LoadMeter({
     const handleLoadYes = async () => {
         if (!loadingMeterIp) return
 
+        // The dialog can outlive a failed/interrupted blink. No second meter
+        // readiness or successful-blink check currently precedes station load.
         await stopBlinkMeter(loadingMeterIp)
         await loadMeter(systemState, loadingMeterIp)
 
@@ -331,6 +342,8 @@ export function LoadMeter({
         if (!meters.length) return notify.info("No ready meters found")
 
         const loadGuessIp = getExactLoadGuessIp(systemState.bayGuess)
+        // Skipping the blink trusts this loading-bay guess for identity. The
+        // station load itself has sensor checks but no meter-session claim.
         if (!loadCheck && loadGuessIp && meters.some(meter => meter.ip === loadGuessIp)) {
             void loadMeter(systemState, loadGuessIp)
             return

@@ -1,289 +1,188 @@
-# Call-In Test Notes
+# Call-In Test: Transaction Proof and Lifecycle Handoff
 
-`flask\lib\automation\tests\cycle_call_in.py` is the end-to-end modem/server validation for MS3 meters.
-It is intentionally different from `flask\lib\automation\tests\cycle_modem.py`.
+`lib/automation/tests/cycle_call_in.py` drives **Service > Call In > +** and
+validates the resulting MS3 transaction. `cycle_modem.py` checks modem control
+and signal; this test checks the actual Session Agent exchange and teardown.
 
-## What This Test Proves
+## What constitutes PASS
 
-`cycle_modem.py` proves the modem service can be driven on and off and can
-report usable signal data.
+Each requested cycle needs all of the following:
 
-`cycle_call_in.py` proves the meter completed the real Call In flow that the
-diagnostics UI uses:
+1. A call-in started (CIM left ready, or the platform journal sent `callIn`).
+2. The connection path was used (PPP counter, observed CS/modem connected state,
+   or modem journal connect evidence).
+3. Session Agent sent `callIn` and received a `callInResponse` with the **same
+   reference**, without `result=-1`. A missing result means success in the old
+   MS3 source; only `-1` denotes the Session Agent connection failure.
+4. `Session Manager Completed` or `Session complete` appeared within that
+   transaction.
+5. The connection was released. Valid sources include a later idle status
+   snapshot, ordered modem/CS teardown, modem journal teardown, a
+   latest `Clients that need a connection: (none)` platform state **after session
+   completion**, or post-call updater activity. The first subsequent `callIn`
+   send ends the transaction window, so a restarted runtime's startup call-in
+   cannot supply the manual call-in's response or platform release proof.
 
-1. The test enters `Service > Call In`.
-2. It presses `+`.
-3. MS3 runs `CIMCallInNow()`.
-4. CallInManager requests a connection through ConnectionServer.
-5. Once connected, MS3 sends Session Agent `callIn`.
-6. The Session Agent responds with `callInResponse`.
-7. The session completes and the modem is released.
-8. If new content/config is pending, the updater may restart MS3 or RunOnce.
+An idle snapshot requires CIM `S1_WAITING_FOR_CALL_TIME` or `S4_SUSPENDED`, CS
+`S5_DISCONNECTED` or `S6_ERROR`, modem `S1_IDLE` or `S7_ERROR`, and no named
+ConnectionServer client. A supervised run discards an idle snapshot if the
+session epoch changed before validation, since it could belong to the new
+runtime. A terminal CS/modem error with a successful session
+can pass with a teardown warning. RSSI/BER and a rise in PPP failed connects
+are diagnostic information; neither alone fails the test. The initial idle
+baseline never proves a *later* release.
 
-## Why We Trust These Data Sources
+## Data and ownership
 
-The test uses three sources on purpose:
+- `cmd.main.meter:status` supplies CIM/CS/modem states, client names and PPP
+  counters. The pre-check also requires the Call In page text `Press [+] to
+  Call In.` rather than `Wait for the current Call In to complete.`
+- `MS3_Platform.service` supplies the Session Agent request, matched response,
+  session events, client release and updater markers.
+- `MS3_Modem.service` supplies connection and signal markers.
+- A managed meter has a continuously followed journal stream in
+  `MeterSupervisor`. The test attaches a short-lived subscriber **before**
+  pressing `+`. It collects platform and modem messages while the supervisor
+  independently monitors readiness. This stream remains readable to the test
+  after the supervisor blocks ordinary SSHMeter actions for an update.
+- A meter without a supervisor keeps the older direct journal-query and
+  recovery path. The history-based startup guard and post-recovery guard are
+  only used there.
 
-1. `cmd.main.meter:status`
-   This is the live runtime truth for:
-   - `CIM` state
-   - `CS` state
-   - `MODEM` state
-   - PPP connect/disconnect counters
+The managed stream is bounded to 6,000 lines for one attempt. `callIn` sends
+bound the first transaction; modem evidence is also cut off before the next
+send. If CIM returns to ready without a `callIn` send, the test allows five
+seconds for follower lag and then fails that manual attempt; it does not wait
+for a later scheduled call-in. If live capture misses other required proof
+(for example, a journal reconnect or cursor gap), the test waits for readiness
+once and queries service journals
+with the original pre-press meter-time watermark. It never presses `+` again
+after an in-flight interruption. A real Linux reboot may erase previous-boot
+journal data, so the live capture is the primary proof in that case. A fetched
+request is accepted only if it matches the captured send line, or if no send
+was captured and the supervised epoch never changed. This prevents the
+post-restart startup call-in from filling a gap in the manual transaction.
 
-2. `journalctl -u MS3_Modem.service`
-   This is the best compact source for modem proof:
-   - connect request
-   - disconnect request
-   - modem state transitions
-   - RSSI / BER signal lines
+## Supervised flow
 
-   We prefer this over pulling a very large platform journal window for modem
-   details because it is smaller and more targeted.
+1. At each iteration, wait for session readiness. The supervisor has already
+   handled the fresh-runtime startup window, startup call-in, diagnostics entry,
+   client idle state and stable UI. Navigate to Call In, verify local idle
+   status and the Call In page text, and save a baseline and journal watermark.
+   A disruption before `+` retries navigation for that iteration; completed
+   earlier iterations are retained.
+2. Attach the live journal capture, set `call_in_in_flight` and
+   `lifecycle_observer`, then press `+` once. The observer exemption permits
+   this transaction to finish gathering proof after the supervisor changes
+   epochs. It is cleared in the iteration's `finally` block.
+3. Watch CIM/CS/modem state and evaluate the live transaction. On a stable
+   runtime, wait for a terminal idle status before returning. CIM may return
+   to ready while RSYNC or RunScript still owns the connection, so that state
+   alone does not pass. A cleanup timeout can still validate from independent
+   release proof, as the earlier test did.
+4. If update/restart makes status unavailable, keep reading the already
+   captured journal. Allow a short stream catch-up. An updater commitment can
+   stand in for local terminal status because it invalidates controls through
+   supervision. A complete verdict needs no wait for the new runtime's startup
+   call-in or 75-second settling gate.
+5. If proof remains incomplete, wait for supervisor readiness and make one
+   direct journal-query fallback. Missing or failed proof then fails the
+   original attempt. `run_subtest` does not replay an in-flight call-in.
 
-3. `journalctl -u MS3_Platform.service`
-   This is where the Session Agent and updater evidence lives:
-   - `callIn`
-   - `callInResponse`
-   - Session Manager start/completion
-   - rsync / runscript activity
-   - updater / restart markers
+The call-in result can be recorded while the meter session is restricted.
+Before another test or call-in iteration uses SSHMeter controls, its own
+readiness gate waits through recovery. `cycle_all` and the top-level runner
+also gate job completion on readiness. The test no longer needs a separate
+post-update guard merely to protect later work.
 
-The platform-journal parser associates the first `callIn` sent after the test's
-journal watermark with the `callInResponse` carrying the same `reference`.
-This prevents an older response or a later startup/scheduled call-in from being
-used to validate the manual request. Session completion is allowed to appear
-just after the response because that ordering occurs on real meters.
+## Why the earlier verdict is justified
 
-## Pass Criteria
+October 2026 production `*cycle_all*.log` files were reviewed excluding meter
+IDs `12003859`, `30000269`, `30001189`, and `30002014`. Among 47 logs with an
+update commitment after the test's `+` press, 46 show the first `callIn` send
+before CIM returned to ready (or before the update where no ready return was
+logged). Their Session Agent completion and matched response appeared before
+the updater commitment. Forty-four of those 46 also emitted a post-session
+`Clients that need a connection: (none)` line before commitment. In two slower
+traces
+(`2026-10-06/07-18-13_30004914_cycle_all.log` and
+`2026-10-09/10-14-37_30005467_cycle_all.log`), those explicit release lines
+were absent before the update marker; the updater commitment is the earliest
+available release proof. It is meaningful because MS3's updater runs only
+after the connection need has cleared and the UI is idle. These records
+support deciding the original transaction at or before update commitment,
+without using a later startup call-in's proof. These older logs primarily
+contain platform journal and sampled status; they do not independently cover
+all modem journal or UI evidence.
 
-The test passes when it can prove all of these:
+The October 27 `12-38-26_30005774_cycle_all.log` is an especially useful edge
+case: the manual `+` initially returned CIM to ready without a `callIn` send,
+then a later call-in did produce the first `callIn` and update. Keep the
+watermark and reference matching, and end that manual attempt when CIM returns
+without a send. The November 11 desk-meter capture
+`logs/2026-11-11/14-27-04_30001189.log` shows the no-update path, including
+full journals and UI sampling, but cannot establish update-page timing.
+The October 27 physical log `09-18-24_30005820_physical_cycle_all.log`
+does capture the Notice page text `This meter is being updated. Please wait.`;
+the supervisor classifies that HTML as a transition and restricts controls.
 
-1. A call-in actually started.
-2. The modem/connection path was used.
-3. Session Agent `callIn` was sent.
-4. `callInResponse` was received and was not `result=-1`.
-5. Session completion evidence was seen.
-6. The modem was released afterward, or updater activity proves the connection
-   had already been released before restart logic ran.
+The old code sometimes waited 75 to 180 more seconds after restart and could
+collect a second startup call-in. That wait protected following subtests before
+the supervisor existed; the original transaction's PASS/FAIL evidence was
+already available. For historical timing and update/restart attribution, see
+the October review under `wc_copy/debug production logs/2026-10-20 Various
+Errors/10-20 Passive Call-In Reboot/`.
 
-The preferred release proof is the final live status snapshot returned by the
-cleanup wait. It must show:
+## Diagnosing a surprising result
 
-- CIM ready (`S1_WAITING_FOR_CALL_TIME` or `S4_SUSPENDED`)
-- ConnectionServer terminal (`S5_DISCONNECTED` or `S6_ERROR`)
-- modem `S1_IDLE` or `S7_ERROR`
-- no named ConnectionServer client still requesting the connection
+Set **Settings > Passive > Call In > Debug** to `True` for additional
+`DEBUG:` lines in the normal job/meter log. It defaults to `False`. Debug
+records the selected execution mode and timeouts, changes in live journal
+proof (line count, matched reference, response, connection, release and missing
+criteria), and direct journal fallback coverage/identity checks. The ordinary
+PASS/FAIL validation and essential transition logs remain active when debug
+is off. The passive settings builder passes this toggle only to the Call In
+subtest; direct callers can supply `debug=True` as a keyword argument.
 
-The clients parser deliberately treats values such as
-`(none)<hr>Modem Service:` as `(none)`. Some status responses place the next
-HTML section on the same logical line.
+Inspect `shared.device_meta["call_in"][cycle_number]` in the job summary:
 
-PPP counter changes, ordered lifecycle transitions, and modem-journal markers
-remain alternate evidence. The cleanup snapshot is important because CIM can
-return to ready while `RSYNC` or `RUNSCRIPT` still legitimately owns the
-connection. The lifecycle observer returns at that CIM transition, while the
-cleanup observer continues until the follow-on client releases and the meter is
-actually idle.
+- `phase`, `status`, `exception_type`, `total_elapsed_s` locate the failure.
+- `baseline_snapshot`, `lifecycle_snapshot`, `cleanup_snapshot` and
+  `lifecycle` show what status was actually observed. Raw status HTML is omitted.
+- `evidence_source` is `supervisor_journal` for the normal managed path or
+  `post_recovery_journals` after its fallback. Legacy runs retain their older
+  cleanup/recovery fields. `journal_stream_connected` is the stream state at
+  verdict time, not a guarantee of gap-free history.
+- `platform_evidence.call_in_reference`, `call_in_send_line`,
+  `call_in_response_line`, `clients_released_after_session` and `update_line`
+  identify the original transaction and teardown evidence.
+- `modem_evidence`, `validation.connect_sources`,
+  `validation.release_sources`, `validation.failures` and warnings explain the
+  decision. Missing signal data alone is not a failure.
 
-The old MS3 source treats both `CS_S5_DISCONNECTED` and `CS_S6_ERROR` as
-terminal release states: both clear all connection-needed flags and release
-connection power. Therefore a successful call-in that ends at
-`CS_S6_ERROR`/modem `S7_ERROR` with no clients is a pass under this test's
-end-to-end contract, but it is logged and stored as a teardown warning rather
-than presented as a clean shutdown.
+When a managed run unexpectedly uses the journal fallback, inspect the meter
+session log for `journal_disconnected`, `journal_gap`, update commitment,
+generation changes and UI transition samples around the saved watermark.
+If a response is missing, check whether a second `callIn` send ended the first
+transaction's window and whether the first send/reference belongs to the
+manual press. A failure after an in-flight trigger must not be fixed by
+automatically pressing `+` again.
 
-Signal data is logged when available, but missing RSSI/BER alone does not fail
-an otherwise successful end-to-end call-in.
+## Configuration and source references
 
-The old Meter source treats a missing `result` in `callInResponse` as `0`; only
-`result=-1` means Session Agent could not connect. The automation follows that
-rule and checks `result=-1` on the response matched to the request reference.
+`ready_timeout_s` / `ready_stable_s` govern the local pre-check;
+`start_timeout_s`, `completion_timeout_s`, `disconnect_timeout_s` and
+`state_poll_s` govern observation and proof collection. `recovery_timeout_s`
+governs the managed journal fallback. `platform_journal_max_lines` and
+`modem_journal_max_lines` bound direct fallback queries. The remaining
+`startup_guard_s`, `startup_platform_journal_max_lines`,
+`post_completion_grace_s`, `post_recovery_guard_s`,
+`post_recovery_timeout_s` and `status_loss_grace_s` primarily support the
+legacy path or status-loss detection. `job_count` is the number of complete
+transactions, and `subtest=True` suppresses a duplicate progress broadcast.
 
-## Important Edge Cases
-
-### Meter already calling in
-
-The test waits for a ready/idle state before pressing `+`. This lets boot-time
-or fault-driven call-ins finish first instead of racing them.
-
-It also waits for the Call In diagnostics page text to change from
-`Wait for the current Call In to complete.` to `Press [+] to Call In.` so we do
-not press `+` while the UI is still blocking manual call-in.
-
-### Session Agent follow-on clients
-
-`SESSION_MANAGER`, `RSYNC`, and `RUNSCRIPT` are independent ConnectionServer
-clients in the old source. A successful `callInResponse` only returns CIM to
-ready; it does not imply those clients have finished. The test therefore does
-not fail merely because its lifecycle snapshot still says
-`cs=S3_CONNECTED | modem=S4_CONNECTED | clients=RSYNC`. It proceeds to cleanup
-and waits for a terminal snapshot.
-
-A run still fails when cleanup/recovery ends with a named client such as
-`RSYNC` active and the connection busy. This preserves the real failure seen in
-`07-56-22_30004641_cycle_all.log`: that active snapshot is not release proof,
-and no independent post-call release source exists in that run. The initial
-pre-connection idle state is never allowed to stand in for a later release.
-
-Lifecycle modem-disconnect evidence is ordered: the observer must first see
-the modem connected before a later disconnected/error state can set that
-proof. This prevents the idle polls immediately after pressing `+` from being
-misclassified as post-call-in disconnect evidence.
-
-### Fresh boot or fresh MS3 runtime restart
-
-MS3 has a separate startup call-in path in `assets/ms3/main/MS3.c`.
-
-Important source detail:
-
-- The code currently uses `RESTART_CALLIN_SECS = 60`.
-- The nearby comment still says "after 5 minutes", but that comment is stale.
-
-That startup timer calls `CIMCallInNow()`, which only does work when
-CallInManager is still in `S1_WAITING_FOR_CALL_TIME`.
-
-This means two things:
-
-1. A startup call-in should not stack on top of an already-started manual
-   call-in, because `CIMCallInNow()` is ignored once CIM has already left `S1`.
-2. The automation can still race the startup timer if the test starts very
-   soon after boot or after an MS3 runtime restart. In that case the test might
-   begin just before the startup call-in fires and effectively pre-empt that
-   one-shot startup attempt.
-
-To avoid that race, `cycle_call_in.py` now performs a startup guard before the
-normal ready/idle pre-check:
-
-1. It estimates how old the current MS3 runtime is from the platform journal.
-2. If the runtime is still fresh, it waits until the platform journal shows the
-   explicit `startup call-in` marker, or until the guard window expires.
-3. It then falls through to the existing ready/idle pre-check, which still
-   waits for any active call-in to finish before pressing `+`.
-#! I'm not really sure how it will handle if the startup call-in receives and begins an automatic update...
-
-The guard is intentionally based on source-backed behavior and gives extra
-cushion. It uses current runtime age first, not only system boot age, because
-MS3 can restart within the same Linux boot.
-
-### Call In Manager suspended
-
-The diagnostics page allows manual call-in even when CIM is suspended. The test
-treats `CIM S4_SUSPENDED` as a valid ready state for this reason.
-
-### Update or restart after call-in
-
-This is expected on first call-ins after the meter is added to DMS or when new
-content/config is available.
-
-The test handles this by:
-
-1. Detecting runtime loss or splash after call-in start.
-2. Waiting for the meter runtime to recover.
-3. Optionally checking the previous boot's journals if recovery suggests a
-   restart happened. #! meter does not support previous boot journals, only current.
-4. Holding a post-recovery guard window so the meter can settle before the test
-   exits.
-
-The source basis for this is `UpdaterCheckForUpdates()` in `assets/ms3/main/Updater.c`.
-Updater logic only runs when the UI is idle and ConnectionServer no longer has
-an active connection need, so updater markers are valid evidence that the
-connection was already released.
-
-#### Observed example: added-to-DMS meter, manual Call In, then update
-
-The log
-`logs/2026-04-28/listen_during_call-in_and_update_20260428_091920-listen_all.log`
-shows a useful real case:
-
-1. A manual diagnostics Call In completed.
-2. Updater then logged `Installing legacy config` and `Restarting, to use new
-   legacy config`.
-3. That restart was an MS3 services/runtime restart via `systemctl restart
-   MS3.target`, not a full Linux reboot.
-4. After restart, MS3 came back through `Loading.html`, then normal idle/home
-   UI activity was seen, including `Idle.jpg`.
-5. Later diagnostics key presses re-entered diagnostics, so the meter did not
-   appear to remain parked on `Services > Call In` by itself.
-6. About 60 seconds after the restarted runtime came up, MS3 logged the
-   explicit `startup call-in` marker and began another call-in through the
-   normal CallInManager path.
-
-So for this scenario, the practical takeaway is:
-
-- post-update behavior looked like an MS3 runtime/services restart, not a full
-  OS reboot
-- the meter appears to have returned to normal idle/home UI before automation
-  navigated back into diagnostics
-- the restarted runtime did perform another startup call-in
-
-Operators may also use a physical diagnostics card to return a restarted meter
-to diagnostics while `cycle_all` is still logging. See
-[`meter_log_search.md`](meter_log_search.md#diagnostics-card-insertion) for the
-meter-runtime signatures, VS Code search settings, capture limitations, and the
-observed October 2026 matches around this recovery path.
-
-## Key Source References
-
-- `assets/ms3/main/UI/Diagnostics/DiagServiceMenu.c`
-  The `+` key on the Call In page calls `CIMCallInNow()`.
-- `assets/ms3/main/CallInManager.c`
-  CallInManager transitions into connection wait, then sends Session Agent
-  `callIn` once connected.
-- `assets/ms3/main/Services/ConnectionServer.c`
-  ConnectionServer owns connect/disconnect requests to the modem service.
-- `assets/ms3/services/modem/modem.c`
-  Modem service logs attach/detach requests, state changes, and signal info.
-- `assets/ms3/main/Meter.c`
-  Meter handles Session Agent notify codes and `callInResponse`.
-- `assets/ms3/main/Updater.c`
-  Updater may restart the runtime after a successful call-in/update fetch.
-- `assets/ms3/main/MS3.c`
-  MS3 schedules a startup call-in after runtime startup.
-
-## Result and Metadata Behavior
-
-Each attempt creates `shared.device_meta["call_in"][cycle_number]` before meter
-navigation starts and updates it as the attempt advances. Metadata is therefore
-available in the job summary on both pass and fail. It includes:
-
-- current status (`running`, `pass`, or `fail`), phase, exception type, and
-  elapsed time
-- baseline, lifecycle, cleanup, recovery, and effective final snapshots (raw
-  status payloads are omitted)
-- lifecycle flags and observer errors
-- matched Session Agent request/reference/response and session/follow-on
-  evidence
-- modem journal evidence and signal data
-- each validation boolean, the exact proof sources, warnings, and all failure
-  reasons
-
-On failure the test emits a compact proof evaluation followed by the complete
-per-cycle metadata record before re-raising the exception. In `cycle_all.py`
-that exception still marks only the `call in` device result as `fail` and then
-propagates through the existing job behavior, so the overall passive result is
-unchanged for genuine failures. A pass with a teardown warning remains a
-call-in pass and does not change another subtest's result.
-
-## Useful Knobs
-
-The most important kwargs in `cycle_call_in.py` are:
-
-- `ready_timeout_s`
-- `ready_stable_s`
-- `start_timeout_s`
-- `completion_timeout_s`
-- `disconnect_timeout_s`
-- `recovery_timeout_s`
-- `post_recovery_guard_s`
-- `post_recovery_timeout_s`
-- `status_loss_grace_s`
-- `startup_guard_s`
-- `state_poll_s`
-- `post_completion_grace_s`
-- `platform_journal_max_lines`
-- `modem_journal_max_lines`
-- `startup_platform_journal_max_lines`
-
-If you need tighter journal windows, reduce the journal line counts first
-before changing the state-machine timeouts.
+MS3 source: `assets/ms3/main/UI/Diagnostics/DiagServiceMenu.c` triggers
+`CIMCallInNow()`; `CallInManager.c` and `Services/ConnectionServer.c` own the
+connection; `Meter.c` handles the response; `Updater.c` commits updates;
+`MS3.c` schedules the post-startup call-in. The source uses
+`RESTART_CALLIN_SECS = 60` despite a stale nearby “5 minutes” comment.

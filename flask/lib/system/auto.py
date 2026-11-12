@@ -238,6 +238,9 @@ class AutoCoordinator:
         except KeyError:
             return False
 
+        # A ready candidate can become unavailable before blink_until_start
+        # claims its session. MeterInterrupted is not caught here and will end
+        # this auto-flow worker; revisit if confirmation needs a retry path.
         meter.blink_until_start(max_duration=300)
         SSEQM.broadcast("status", {"ip": candidate_ip, "status": meter.status, "current_action": "blinking"})
 

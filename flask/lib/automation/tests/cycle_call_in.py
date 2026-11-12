@@ -13,6 +13,7 @@ behavior.
 
 import inspect
 import re
+import threading
 import time
 from datetime import datetime, timedelta
 from html import unescape
@@ -28,7 +29,7 @@ DEFAULT_CALL_IN_READY_STABLE_S = 3.0
 DEFAULT_CALL_IN_START_TIMEOUT_S = 20.0
 DEFAULT_CALL_IN_COMPLETION_TIMEOUT_S = 120.0
 DEFAULT_CALL_IN_DISCONNECT_TIMEOUT_S = 45.0
-DEFAULT_CALL_IN_RECOVERY_TIMEOUT_S = 180.0
+DEFAULT_CALL_IN_RECOVERY_TIMEOUT_S = 300.0
 DEFAULT_CALL_IN_POST_RECOVERY_GUARD_S = 75.0
 DEFAULT_CALL_IN_POST_RECOVERY_TIMEOUT_S = 180.0
 DEFAULT_CALL_IN_STATUS_LOSS_GRACE_S = 8.0
@@ -115,6 +116,7 @@ RE_CONNECTION_CLIENTS_RELEASED = re.compile(
     r"Clients that need a connection:\s*\(none\)",
     re.IGNORECASE,
 )
+RE_CONNECTION_CLIENTS_STATUS = re.compile(r"Clients that need a connection:", re.IGNORECASE)
 RE_MODEM_DISCONNECT_SUCCESS = re.compile(
     r"ModemDisconnect\(\) returned:\s*MODEM_RESULT_SUCCESS",
     re.IGNORECASE,
@@ -150,6 +152,38 @@ class CallInObservationError(TimeoutError):
         super().__init__(message)
         self.snapshot = snapshot
         self.lifecycle = lifecycle
+
+
+class _ManagedJournalCapture:
+    """Capture the supervisor's live journal during one manual transaction.
+
+    The supervisor owns a separate SSH journal follower and forwards live lines
+    to session subscribers. This buffer lets the call-in reach a verdict after
+    the session blocks ordinary SSHMeter commands for an update/restart.
+    """
+
+    def __init__(self, max_lines: int = 6000) -> None:
+        self._lock = threading.Lock()
+        self._lines: list[str] = []
+        self._max_lines = max_lines
+
+    def log(self, message: str, *, source=None, **_kwargs) -> None:
+        if source != "supervisor.journal":
+            return
+        with self._lock:
+            self._lines.append(message)
+            if len(self._lines) > self._max_lines:
+                del self._lines[:len(self._lines) - self._max_lines]
+
+    def text(self) -> str:
+        with self._lock:
+            return "\n".join(self._lines)
+
+
+def _debug_call_in(meter: SSHMeter, shared: SharedState, cycle_num: int, enabled: bool, message: str) -> None:
+    """Write opt-in diagnostic context to the normal job/meter log."""
+    if enabled:
+        shared.log(f"{meter.host} call-in cycle {cycle_num} DEBUG: {message}")
 
 
 def _new_lifecycle() -> dict:
@@ -410,7 +444,9 @@ def _wait_for_call_in_idle(
         check_stop_event(shared)
         session = session_for(meter)
         if session is not None and not session.ready:
-            if shared.lifecycle_observer:
+            if shared.lifecycle_observer or phase == "pre-check":
+                # Recovery can reset the UI to home. The caller must navigate
+                # back to Call In before trusting its page text or pressing +.
                 raise MeterInterrupted(session.reason, session.epoch)
             shared.attempt_epoch = session.wait_ready(shared)
             shared.disruption_event.clear()
@@ -489,7 +525,14 @@ def _wait_for_call_in_lifecycle(
     completion_timeout_s: float,
     poll_s: float,
     status_loss_grace_s: float,
+    proof_complete=None,
 ) -> tuple[Optional[dict], dict, float]:
+    """Observe manual CIM progress while status is available.
+
+    The optional proof callback lets a supervised run finish from journal
+    evidence before CIM is fully idle. Session restriction returns control to
+    the caller, which can continue reading its independent journal capture.
+    """
     started = time.time()
     start_deadline = started + max(0.0, start_timeout_s)
     completion_deadline = start_deadline + max(0.0, completion_timeout_s)
@@ -570,6 +613,9 @@ def _wait_for_call_in_lifecycle(
             lifecycle["saw_modem_connected"] |= modem_state == MODEM_CONNECTED_STATE
             if lifecycle["saw_modem_connected"]:
                 lifecycle["saw_modem_disconnected"] |= modem_state in MODEM_DISCONNECTED_STATES
+
+            if proof_complete is not None and proof_complete(lifecycle, snapshot):
+                return snapshot, lifecycle, time.time() - started
 
             if _snapshot_is_ready(snapshot):
                 elapsed_s = time.time() - started
@@ -771,6 +817,11 @@ def _sagent_reference(line: str) -> Optional[int]:
 
 
 def _collect_platform_call_in_evidence(journal_text: str) -> dict:
+    """Match the first post-trigger callIn to its response and bound its proof.
+
+    A subsequent startup/scheduled call-in begins a new transaction. Client
+    release only counts after session completion within the first window.
+    """
     lines = (journal_text or "").splitlines()
     send_index = next((i for i, line in enumerate(lines) if RE_CALL_IN_SEND.search(line)), None)
     send_line = lines[send_index].strip() if send_index is not None else ""
@@ -799,6 +850,23 @@ def _collect_platform_call_in_evidence(journal_text: str) -> dict:
         "\n".join(lines[send_index:transaction_limit]) if send_index is not None else ""
     )
     post_send_text = transaction_text
+    # Follow-on clients may still own the modem when CIM returns to ready.
+    # A release marker counts only after the Session Agent completed this
+    # transaction, and never after the next startup/scheduled call-in begins.
+    completion_index = next(
+        (i for i in range(send_index + 1, transaction_limit)
+         if RE_SESSION_MANAGER_COMPLETED.search(lines[i]) or RE_SESSION_COMPLETE.search(lines[i])),
+        None,
+    ) if send_index is not None else None
+    last_client_index = next(
+        (i for i in range(transaction_limit - 1, completion_index, -1)
+         if RE_CONNECTION_CLIENTS_STATUS.search(lines[i])),
+        None,
+    ) if completion_index is not None else None
+    release_index = (
+        last_client_index if last_client_index is not None
+        and RE_CONNECTION_CLIENTS_RELEASED.search(lines[last_client_index]) else None
+    )
 
     return {
         "call_in_send": send_index is not None,
@@ -815,6 +883,7 @@ def _collect_platform_call_in_evidence(journal_text: str) -> dict:
         "update_activity": bool(RE_UPDATE_ACTIVITY.search(post_send_text)),
         "update_restart": bool(RE_UPDATE_RESTART.search(post_send_text)),
         "clients_released": bool(RE_CONNECTION_CLIENTS_RELEASED.search(post_send_text)),
+        "clients_released_after_session": release_index is not None,
         "modem_disconnect_success": bool(RE_MODEM_DISCONNECT_SUCCESS.search(post_send_text)),
         "platform_modem_disconnect": bool(RE_PLATFORM_MODEM_DISCONNECT.search(post_send_text)),
         "call_in_send_line": send_line,
@@ -988,7 +1057,14 @@ def _validate_call_in_result(
     lifecycle: dict,
     platform_evidence: dict,
     modem_evidence: dict,
+    *,
+    log_result: bool = True,
 ) -> dict:
+    """Evaluate the original transaction's required proof and its sources.
+
+    ``log_result=False`` is used only for repeated checks during live capture;
+    the final call logs the complete verdict once.
+    """
     connect_delta = None
     disconnect_delta = None
     failed_connect_delta = None
@@ -1034,7 +1110,10 @@ def _validate_call_in_result(
     session_proved = (
         platform_evidence["session_manager_completed"] or platform_evidence["session_complete"]
     )
-    release_proved = disconnect_proved or platform_evidence["update_activity"]
+    release_proved = (
+        disconnect_proved or platform_evidence["clients_released_after_session"]
+        or platform_evidence["update_activity"]
+    )
 
     connect_sources = []
     if connect_delta is not None and connect_delta >= 1:
@@ -1065,6 +1144,8 @@ def _validate_call_in_result(
         release_sources.append("modem_journal_idle")
     if platform_evidence["update_activity"]:
         release_sources.append("post_call_in_update_activity")
+    if platform_evidence["clients_released_after_session"]:
+        release_sources.append("platform_clients_released_after_session")
 
     if not call_in_started:
         failures.append("call-in never appeared to start")
@@ -1114,14 +1195,14 @@ def _validate_call_in_result(
         f"release={'yes' if release_proved else 'no'}"
         f"[{','.join(release_sources) or 'none'}]"
     )
-    shared.log(f"{meter.host} call-in cycle {cycle_num}: validation proofs -> {proof_summary}")
-
-    if failures:
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: validation failed -> {'; '.join(failures)}"
-        )
-    for warning in warnings:
-        shared.log(f"{meter.host} call-in cycle {cycle_num}: validation warning -> {warning}")
+    if log_result:
+        shared.log(f"{meter.host} call-in cycle {cycle_num}: validation proofs -> {proof_summary}")
+        if failures:
+            shared.log(
+                f"{meter.host} call-in cycle {cycle_num}: validation failed -> {'; '.join(failures)}"
+            )
+        for warning in warnings:
+            shared.log(f"{meter.host} call-in cycle {cycle_num}: validation warning -> {warning}")
 
     return {
         "connect_delta": connect_delta,
@@ -1163,6 +1244,242 @@ def _snapshot_summary(snapshot: Optional[dict]) -> str:
     return _status_summary(snapshot) if snapshot is not None else "unavailable"
 
 
+def _managed_evidence(journal_text: str) -> tuple[dict, dict]:
+    """Keep modem proof inside the first call-in's transaction window.
+
+    Attach/connect can precede SAgent's send. Teardown must follow that send;
+    a previous call-in's late idle marker cannot release this transaction.
+    """
+    lines = journal_text.splitlines()
+    sends = [i for i, line in enumerate(lines) if RE_CALL_IN_SEND.search(line)]
+    modem_limit = sends[1] if len(sends) > 1 else len(lines)
+    modem = _collect_modem_call_in_evidence("\n".join(lines[:modem_limit]))
+    if sends:
+        teardown = _collect_modem_call_in_evidence("\n".join(lines[sends[0]:modem_limit]))
+        for key in ("disconnect_requested", "disconnecting", "idle_after_disconnect", "disconnect_line"):
+            modem[key] = teardown[key]
+    return _collect_platform_call_in_evidence(journal_text), modem
+
+
+def _complete_managed_call_in_cycle(
+    meter: SSHMeter,
+    shared: SharedState,
+    session,
+    capture: _ManagedJournalCapture,
+    cycle_num: int,
+    cycle_meta: dict,
+    settings: dict,
+    baseline_snapshot: dict,
+    journal_since: str,
+    cycle_started: float,
+) -> None:
+    """Decide the original transaction from live proof before MS3 recovery.
+
+    The supervisor keeps following journals after SSHMeter commands are blocked.
+    A complete matched response, session completion, connection use and release
+    therefore need no post-update status query. If streaming missed proof, wait
+    for recovery once and query the journals; never press '+' a second time.
+    """
+    lifecycle = _new_lifecycle()
+    lifecycle_snapshot = None
+    lifecycle_error = None
+    started = time.monotonic()
+    deadline = started + settings["start_timeout_s"] + settings["completion_timeout_s"] + settings["disconnect_timeout_s"]
+    last_debug_signature = [None]
+
+    def assess(snapshot=None):
+        journal_text = capture.text()
+        platform, modem = _managed_evidence(journal_text)
+        validation = _validate_call_in_result(
+            meter, shared, cycle_num, baseline_snapshot, snapshot, lifecycle,
+            platform, modem, log_result=False,
+        )
+        if settings.get("debug", False):
+            signature = (
+                platform["call_in_send"], platform["call_in_response"],
+                platform["call_in_response_failed"], validation["session_proved"],
+                tuple(validation["connect_sources"]), tuple(validation["release_sources"]),
+                tuple(validation["failures"]), session.ready, session.epoch,
+            )
+            if signature != last_debug_signature[0]:
+                _debug_call_in(
+                    meter, shared, cycle_num, True,
+                    f"stream_lines={len(journal_text.splitlines())} "
+                    f"connected={session.journal_connected} ready={session.ready} "
+                    f"epoch={session.epoch} ref={platform['call_in_reference']} "
+                    f"response={platform['call_in_response']} failed_response={platform['call_in_response_failed']} "
+                    f"session={validation['session_proved']} connect={validation['connect_sources']} "
+                    f"release={validation['release_sources']} missing={validation['failures']}",
+                )
+                last_debug_signature[0] = signature
+        return platform, modem, validation
+
+    def proof_complete(observed_lifecycle, snapshot):
+        lifecycle.update(observed_lifecycle)
+        _, _, validation = assess(snapshot if _snapshot_is_idle(snapshot) else None)
+        # With no update, a later subtest still needs a terminal local status.
+        # A supervisor restriction prevents later controls during transition.
+        return not validation["failures"] and (
+            _snapshot_is_idle(snapshot) or not session.ready
+        )
+
+    cycle_meta["phase"] = "lifecycle"
+    try:
+        lifecycle_snapshot, observed, elapsed = _wait_for_call_in_lifecycle(
+            meter, shared, cycle_num,
+            start_timeout_s=settings["start_timeout_s"],
+            completion_timeout_s=settings["completion_timeout_s"],
+            poll_s=settings["poll_s"],
+            status_loss_grace_s=settings["status_loss_grace_s"],
+            proof_complete=proof_complete,
+        )
+        lifecycle.update(observed)
+        cycle_meta["lifecycle_elapsed_s"] = round(elapsed, 1)
+    except StopAutomation:
+        raise
+    except Exception as exc:
+        lifecycle_error = str(exc)
+        if isinstance(exc, CallInObservationError):
+            lifecycle_snapshot = exc.snapshot
+            if exc.lifecycle is not None:
+                lifecycle.update(exc.lifecycle)
+        shared.log(f"{meter.host} call-in cycle {cycle_num}: status observer ended: {type(exc).__name__}: {exc}")
+
+    cleanup_snapshot = lifecycle_snapshot if lifecycle_snapshot and _snapshot_is_idle(lifecycle_snapshot) else None
+    cleanup_source = "lifecycle" if cleanup_snapshot else None
+    cleanup_error = None
+    if lifecycle["saw_ready_return"] and cleanup_snapshot is None and session.ready:
+        cycle_meta["phase"] = "cleanup"
+        try:
+            cleanup_snapshot, cleanup_elapsed = _wait_for_call_in_idle(
+                meter, shared, cycle_num, settings["disconnect_timeout_s"],
+                settings["poll_s"], "cleanup",
+            )
+            cycle_meta["cleanup_elapsed_s"] = round(cleanup_elapsed, 1)
+            cleanup_source = "cleanup"
+        except StopAutomation:
+            raise
+        except Exception as exc:
+            cleanup_error = str(exc)
+            shared.log(f"{meter.host} call-in cycle {cycle_num}: cleanup observer ended: {type(exc).__name__}: {exc}")
+    if cleanup_snapshot is not None and session.epoch != cycle_meta.get("trigger_epoch", session.epoch):
+        # A fast MS3 generation change can make a new runtime's idle status
+        # look like release of the old transaction. Keep only journal proof.
+        cleanup_snapshot = None
+        cleanup_source = None
+    platform, modem, validation = assess(cleanup_snapshot)
+    # CIM cannot finish the manual Session Agent transaction before sending
+    # callIn. A short follower-lag allowance is enough; a later scheduled or
+    # startup call-in must not turn this abandoned '+' into a pass.
+    closed_without_send = lifecycle["saw_ready_return"] and not platform["call_in_send"]
+    if closed_without_send:
+        deadline = min(deadline, time.monotonic() + 5)
+    # A completed response can be followed by RSYNC/RunScript release markers.
+    # Observe the independent journal stream without asking a restricted meter
+    # for status, and leave a short catch-up period after interruption.
+    disrupted_at = None
+    while validation["failures"] and not platform["call_in_response_failed"]:
+        check_stop_event(shared)
+        now = time.monotonic()
+        if not session.ready and disrupted_at is None:
+            disrupted_at = now
+        if now >= deadline or (disrupted_at is not None and now - disrupted_at >= 8):
+            break
+        _sleep_with_stop(shared, min(settings["poll_s"], deadline - now))
+        platform, modem, validation = assess(cleanup_snapshot)
+
+    evidence_source = "supervisor_journal"
+    missed_manual_send = closed_without_send and not platform["call_in_send"]
+    if missed_manual_send:
+        shared.log(f"{meter.host} call-in cycle {cycle_num}: CIM returned to ready without a manual callIn send")
+    if validation["failures"] and not platform["call_in_response_failed"] and not missed_manual_send:
+        # The live follower can reconnect or encounter a cursor gap. A single
+        # post-recovery journal query is a fallback, never normal completion.
+        cycle_meta["phase"] = "journal_fallback"
+        shared.log(f"{meter.host} call-in cycle {cycle_num}: live proof incomplete; querying journals after readiness")
+        shared.attempt_epoch = session.wait_ready(shared, timeout=settings["recovery_timeout_s"])
+        shared.disruption_event.clear()
+        platform_journal = _get_service_journal(
+            meter, "MS3_Platform.service", journal_since,
+            settings["platform_journal_max_lines"], include_previous_boot=True,
+        )
+        modem_journal = _get_service_journal(
+            meter, "MS3_Modem.service", journal_since,
+            settings["modem_journal_max_lines"], include_previous_boot=True,
+        )
+        fetched_platform = _collect_platform_call_in_evidence(platform_journal)
+        same_request = (
+            platform["call_in_send"]
+            and fetched_platform["call_in_send_line"] == platform["call_in_send_line"]
+        )
+        same_generation_without_send = (
+            not platform["call_in_send"]
+            and session.epoch == cycle_meta.get("trigger_epoch")
+            and not lifecycle["saw_ready_return"]
+        )
+        _debug_call_in(
+            meter, shared, cycle_num, settings.get("debug", False),
+            f"fallback platform_lines={len(platform_journal.splitlines())} "
+            f"modem_lines={len(modem_journal.splitlines())} "
+            f"fetched_ref={fetched_platform['call_in_reference']} "
+            f"same_request={same_request} same_epoch_without_send={same_generation_without_send}",
+        )
+        if fetched_platform["call_in_send"] and (same_request or same_generation_without_send):
+            platform, modem = fetched_platform, _collect_modem_call_in_evidence(modem_journal)
+            validation = _validate_call_in_result(
+                meter, shared, cycle_num, baseline_snapshot, cleanup_snapshot,
+                lifecycle, platform, modem, log_result=False,
+            )
+            evidence_source = "post_recovery_journals"
+        elif fetched_platform["call_in_send"]:
+            shared.log(
+                f"{meter.host} call-in cycle {cycle_num}: ignoring fetched callIn "
+                "from a different or unverified transaction"
+            )
+
+    cycle_meta["phase"] = "validate"
+    validation = _validate_call_in_result(
+        meter, shared, cycle_num, baseline_snapshot, cleanup_snapshot,
+        lifecycle, platform, modem,
+    )
+    cycle_meta.update({
+        "lifecycle": dict(lifecycle),
+        "lifecycle_snapshot": _snapshot_metadata(lifecycle_snapshot),
+        "lifecycle_error": lifecycle_error,
+        "cleanup_snapshot": _snapshot_metadata(cleanup_snapshot),
+        "cleanup_error": cleanup_error,
+        "effective_cleanup_source": cleanup_source,
+        "effective_cleanup_snapshot": _snapshot_metadata(cleanup_snapshot),
+        "evidence_source": evidence_source,
+        "journal_stream_connected": session.journal_connected,
+        "manual_window_closed_without_send": missed_manual_send,
+        "platform_evidence": platform,
+        "modem_evidence": modem,
+        "validation": validation,
+        "connect_delta": validation["connect_delta"],
+        "disconnect_delta": validation["disconnect_delta"],
+        "failed_connect_delta": validation["failed_connect_delta"],
+        "rssi": modem["rssi"],
+        "ber": modem["ber"],
+        "session_manager_started": platform["session_manager_started"],
+        "session_manager_completed": platform["session_manager_completed"],
+        "session_complete": platform["session_complete"],
+        "update_activity": platform["update_activity"],
+        "update_restart": platform["update_restart"],
+        "runtime_loss_after_start": lifecycle["runtime_loss_after_start"],
+        "total_elapsed_s": round(time.time() - cycle_started, 1),
+    })
+    if validation["failures"]:
+        raise RuntimeError("; ".join(validation["failures"]))
+    cycle_meta.update(status="pass", phase="complete", error=None)
+    shared.log(
+        f"{meter.host} call-in cycle {cycle_num}: pass in {cycle_meta['total_elapsed_s']:.1f}s "
+        f"from {evidence_source} (ref={platform['call_in_reference']}, "
+        f"release={','.join(validation['release_sources'])})"
+    )
+    shared.extras.pop("call_in_in_flight", None)
+
+
 def _run_call_in_cycle(
     meter: SSHMeter,
     shared: SharedState,
@@ -1171,7 +1488,18 @@ def _run_call_in_cycle(
     settings: dict,
     cycle_started: float,
 ) -> None:
+    """Run one manual '+' exactly once and select managed or legacy evidence.
+
+    A managed session may finish its verdict while an update restricts meter
+    controls; a later iteration waits for the supervisor before navigating.
+    """
     cycle_meta["phase"] = "navigate_to_call_in"
+    session = session_for(meter)
+    if session is not None:
+        # A previous iteration can validate before its updater restarts MS3.
+        # Wait here before the next '+' instead of replaying a completed cycle.
+        shared.attempt_epoch = session.wait_ready(shared)
+        shared.disruption_event.clear()
     shared.extras.pop("call_in_in_flight", None)
     meter.goto_callin()
 
@@ -1228,17 +1556,35 @@ def _run_call_in_cycle(
     journal_since = _journal_since_now(meter)
     cycle_meta["journal_since"] = journal_since
     shared.log(f"{meter.host} call-in cycle {cycle_num}: press '+' on Service:Call In")
-    if session_for(meter) is not None:
+    session = session_for(meter)
+    capture = _ManagedJournalCapture() if session is not None and session.supervisor is not None else None
+    if session is not None:
+        cycle_meta["trigger_epoch"] = session.epoch
+    if capture is not None:
+        with session.condition:
+            session.subscribers.add(capture)
+    if session is not None:
         shared.extras["call_in_in_flight"] = True
         shared.lifecycle_observer = True
     try:
-        meter.press("plus")
-    except MeterInterrupted:
-        if session_for(meter) is None:
-            raise
-        # The transition may have begun during the press. Preserve the original
-        # watermark and inspect its proof after recovery instead of sending + again.
-        shared.log("MS3 interrupted the call-in trigger; retaining the original transaction window")
+        try:
+            meter.press("plus")
+        except MeterInterrupted:
+            if session is None:
+                raise
+            # The transition may have begun during the press. Preserve the
+            # original watermark and never send '+' a second time.
+            shared.log("MS3 interrupted the call-in trigger; retaining the original transaction window")
+        if capture is not None:
+            _complete_managed_call_in_cycle(
+                meter, shared, session, capture, cycle_num, cycle_meta,
+                settings, baseline_snapshot, journal_since, cycle_started,
+            )
+            return
+    finally:
+        if capture is not None:
+            with session.condition:
+                session.subscribers.discard(capture)
 
     lifecycle = _new_lifecycle()
     lifecycle_snapshot: Optional[dict] = None
@@ -1392,6 +1738,13 @@ def _run_call_in_cycle(
         since=journal_since,
         max_lines=settings["modem_journal_max_lines"],
         include_previous_boot=include_previous_boot,
+    )
+    _debug_call_in(
+        meter, shared, cycle_num, settings["debug"],
+        f"legacy journals platform_lines={len(platform_journal.splitlines())} "
+        f"modem_lines={len(modem_journal.splitlines())} "
+        f"previous_boot_requested={include_previous_boot} "
+        f"lifecycle_error={lifecycle_error or 'none'} cleanup_error={cleanup_error or 'none'}",
     )
     platform_evidence = _collect_platform_call_in_evidence(platform_journal)
     modem_evidence = _collect_modem_call_in_evidence(modem_journal)
@@ -1552,10 +1905,16 @@ def _run_call_in_cycle(
 
 
 def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
+    """Run ``job_count`` independent call-ins, retaining per-cycle proof.
+
+    On failure metadata remains in ``shared.device_meta['call_in']`` so the
+    job summary can distinguish a missing response from a meter disruption.
+    """
     func_name = inspect.currentframe().f_code.co_name
     job_count = int(kwargs.get("job_count", 3))
     subtest = bool(kwargs.get("subtest", False))
     settings = {
+        "debug": bool(kwargs.get("debug", False)),
         "ready_timeout_s": float(
             kwargs.get("ready_timeout_s", DEFAULT_CALL_IN_READY_TIMEOUT_S)
         ),
@@ -1610,22 +1969,53 @@ def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
             "error": None,
             "cycle": cycle_num,
             "job_count": job_count,
+            "debug": settings["debug"],
         }
         call_in_meta[cycle_num] = cycle_meta
 
         shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")
+        session = session_for(meter)
+        _debug_call_in(
+            meter, shared, cycle_num, settings["debug"],
+            f"mode={'supervised' if session is not None and session.supervisor is not None else 'legacy'} "
+            f"timeouts=start:{settings['start_timeout_s']}s completion:{settings['completion_timeout_s']}s "
+            f"disconnect:{settings['disconnect_timeout_s']}s recovery:{settings['recovery_timeout_s']}s",
+        )
         try:
             if not subtest:
                 shared.broadcast_progress(meter.host, "call in", cycle_num, job_count)
 
-            _run_call_in_cycle(
-                meter,
-                shared,
-                cycle_num=cycle_num,
-                cycle_meta=cycle_meta,
-                settings=settings,
-                cycle_started=cycle_started,
-            )
+            pretrigger_deadline = time.monotonic() + 900
+            while True:
+                try:
+                    _run_call_in_cycle(
+                        meter,
+                        shared,
+                        cycle_num=cycle_num,
+                        cycle_meta=cycle_meta,
+                        settings=settings,
+                        cycle_started=cycle_started,
+                    )
+                    break
+                except MeterInterrupted as exc:
+                    session = session_for(meter)
+                    if session is None or shared.extras.get("call_in_in_flight"):
+                        raise
+                    remaining = pretrigger_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise
+                    shared.log(
+                        f"{meter.host} call-in cycle {cycle_num}: pre-trigger interruption "
+                        f"({exc}); waiting to navigate again"
+                    )
+                    shared.attempt_epoch = session.wait_ready(shared, timeout=remaining)
+                    shared.disruption_event.clear()
+                    retries = cycle_meta.get("pretrigger_restarts", 0) + 1
+                    cycle_meta.clear()
+                    cycle_meta.update(status="running", phase="initialize", error=None,
+                                      cycle=cycle_num, job_count=job_count,
+                                      debug=settings["debug"],
+                                      pretrigger_restarts=retries)
         except Exception as exc:
             cycle_meta.update(
                 {

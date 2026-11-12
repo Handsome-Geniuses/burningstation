@@ -25,10 +25,18 @@ class PassiveJobs(BaseModel):
     screen_test: int = Field(1, ge=0, le=10)
 
 
+class PassiveCallInSettings(BaseModel):
+    debug: bool = Field(
+        False,
+        description="Log call-in journal proof changes, lifecycle decisions, and fallback details",
+    )
+
+
 class PassiveSettings(BaseModel):
     cycles: int = Field(1, ge=1, le=10, description="number of full test runs")
     test_delay: int = Field(10, ge=1, le=60, description="delay(s) between tests")
     job_counts: PassiveJobs = Field(default_factory=PassiveJobs)
+    call_in: PassiveCallInSettings = Field(default_factory=PassiveCallInSettings)
 
 
 # ==================================================================
@@ -372,7 +380,7 @@ class FlowSettings(BaseModel):
         True, description="blink meters to confirm middle meter for physical test"
     )
     stop_on_fail: bool = Field(
-        True, description="for multi-tests, stop full test if 1 fails."
+        False, description="for multi-tests, stop full test if 1 fails."
     )
 
 

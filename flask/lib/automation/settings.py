@@ -64,7 +64,8 @@ def build_passive_kwargs(modules: dict):
             "job_count": (j.modem if has_modem else 0)
         },
         "call in": {
-            "job_count": (j.call_in if has_modem else 0)
+            "job_count": (j.call_in if has_modem else 0),
+            "debug": s.call_in.debug,
         },
         "printer": {
             "job_count": (j.printer if has_printer else 0)

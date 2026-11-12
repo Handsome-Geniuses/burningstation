@@ -83,6 +83,31 @@ release their condition while waiting; ordinary network commands are not run
 while holding that condition. Inventory's final cache commit checks the epoch
 under the condition after navigation is complete.
 
+## Loading and physical identification checks
+
+Settings `flow.load_check` and `flow.physical_check` choose whether to blink a
+candidate meter for operator confirmation. They do not change the supervisor's
+readiness or control rules. The UI selects meters whose published status is
+`ready`; `SSHMeter.blink_until_start()` separately claims the meter session,
+and `start_job()` claims it again before physical or passive meter work. An
+unready or already owned meter cannot run those guarded commands.
+
+| Situation | Current behavior and follow-up concern |
+| --- | --- |
+| Meter remains ready | Blink, confirmation, and the later job claim work normally. With either check disabled, an exact bay guess skips blinking, so the guess must identify the correct meter. A missing exact guess still takes the blink path. |
+| Candidate becomes unready before blink | The session claim rejects the blink. The UI does not check that `identify_until` succeeded before showing its confirmation dialog. Auto physical confirmation can let `MeterInterrupted` escape its worker rather than retrying. |
+| Candidate changes during or just after blink | Guarded brightness writes stop on a lifecycle interruption; recovery is responsible for restoring brightness if that write cannot finish. The UI may still hold a stale candidate. `identify_stop` waits at most two seconds for its thread, so an immediate physical-job claim can be refused while the blink lease is releasing. |
+| Candidate becomes unready before confirmation | A physical-job claim rejects a meter that is still unready, although the UI may already report a confirmation. Loading is different: `station.load_L` checks belt sensors, not meter-session readiness, and may move the belt and assign the selected IP as the bay guess. The later passive-job claim cannot undo that move. |
+
+The UI also ignores the station-load response before requesting a passive job
+in auto mode. A rejected load can therefore still trigger a passive-job start
+attempt; check that response when revisiting this flow.
+
+These are timing and identity gaps in the identification flows, not permission
+for meter SSH actions through an update or restart. If these flows are revised,
+check the blink request/result, revalidate the selected meter before a station
+load, and wait for the blink lease to release before starting a physical job.
+
 ## Readiness and actual meter evidence
 
 Current recovery checks are active MS3, live S4_RUNNING runtime, usable UI,
