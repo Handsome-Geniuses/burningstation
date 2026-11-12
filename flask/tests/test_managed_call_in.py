@@ -16,6 +16,34 @@ automation_settings = import_module('lib.automation.settings')
 
 
 class ManagedCallInTests(unittest.TestCase):
+    def test_supervised_cycle_bypasses_legacy_startup_guard(self):
+        status = ('CIM: state=S1_WAITING_FOR_CALL_TIME\nCS: state=S5_DISCONNECTED\n'
+                  'MODEM: state=S1_IDLE\nClients requesting connection: (none)')
+        meter = SimpleNamespace(host='192.0.2.8', hostname='30005989',
+                                goto_callin=Mock(), press=Mock())
+        session = MeterSession(meter)
+        session.supervisor = object()
+        meter.session = session
+        session.mark_ready()
+        shared = SharedState()
+        baseline = call_in._parse_meter_status(status)
+        settings = dict(startup_guard_s=180, startup_platform_journal_max_lines=1500,
+                        ready_timeout_s=120, ready_stable_s=3, poll_s=2)
+        meta = {}
+
+        with patch.object(call_in, '_wait_for_startup_call_in_guard') as startup_guard, \
+             patch.object(call_in, '_wait_for_call_in_idle', return_value=(baseline, 0)), \
+             patch.object(call_in, '_journal_since_now', return_value='2026-11-12 10:00:00'), \
+             patch.object(call_in, '_complete_managed_call_in_cycle') as complete:
+            call_in._run_call_in_cycle(meter, shared, 1, meta, settings, 0)
+
+        startup_guard.assert_not_called()
+        complete.assert_called_once()
+        self.assertEqual(meta['startup_guard_source'], 'meter_session')
+        self.assertFalse(meta['startup_guard_checked'])
+        self.assertEqual(meta['phase'], 'start_call_in')
+        self.assertTrue(any('startup guard skipped' in line for line in shared.logs))
+
     def test_passive_call_in_debug_setting_reaches_subtest(self):
         configured = Settings()
         self.assertFalse(configured.passive.call_in.debug)

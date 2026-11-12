@@ -133,6 +133,19 @@ Update and Reboot/README_FOR_AGENTS.md`. A current-generation, sleep-aware
 readiness rule needs validation against meter journal source/monotonic times;
 the 75-second gate alone can admit work before a startup call-in is observed.
 
+The controlled `flask/wc_copy/test/ms3_sleep/20261112_135534_192.168.69.138_sleepv2.log`
+adds direct evidence. A failed first MS3 generation logged `SAgent not starting up`,
+selected the archived `error-sa.html` Out of Order page, exited with status 111,
+and systemd restarted the service (lines 273-331). The second generation's
+`Start_time=13:56:06.983` remained unchanged across platform sleep; `Runtime_sec`
+rose from 31 before sleep (line 856) to 121 after wake (line 1126), matching
+elapsed meter wall time. The same boot and service identity remained active.
+Meter journal source timestamps place `TimerRefresh` immediately before the
+startup call-in after wake (lines 908, 944); listener receipt was later. Thus
+runtime age includes sleep and cannot stand in for current-generation startup
+call-in evidence. The Out of Order screen belongs to the failed generation,
+before this sleep interval.
+
 | Evidence | Treatment |
 | --- | --- |
 | Exact Grace period timeout / exact platformSleep command | Sleep entry; retain the known meter for wake/recovery. |

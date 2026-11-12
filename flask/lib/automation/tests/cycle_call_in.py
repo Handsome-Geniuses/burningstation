@@ -951,7 +951,8 @@ def _wait_for_startup_call_in_guard(
     }
     if guard_s <= 0:
         return result
-    if session_for(meter) is not None:
+    session = session_for(meter)
+    if session is not None and session.supervisor is not None:
         # Managed sessions already perform startup settling before admitting
         # work. Do not run another history-based timer before each transaction.
         result["checked"] = False
@@ -1495,6 +1496,7 @@ def _run_call_in_cycle(
     """
     cycle_meta["phase"] = "navigate_to_call_in"
     session = session_for(meter)
+    supervised = session is not None and session.supervisor is not None
     if session is not None:
         # A previous iteration can validate before its updater restarts MS3.
         # Wait here before the next '+' instead of replaying a completed cycle.
@@ -1503,17 +1505,34 @@ def _run_call_in_cycle(
     shared.extras.pop("call_in_in_flight", None)
     meter.goto_callin()
 
-    cycle_meta["phase"] = "startup_guard"
-    startup_guard = _wait_for_startup_call_in_guard(
-        meter,
-        shared,
-        cycle_num=cycle_num,
-        guard_s=settings["startup_guard_s"],
-        platform_journal_max_lines=settings["startup_platform_journal_max_lines"],
-        poll_s=settings["poll_s"],
-    )
+    if not supervised:
+        cycle_meta["phase"] = "startup_guard"
+        startup_guard = _wait_for_startup_call_in_guard(
+            meter,
+            shared,
+            cycle_num=cycle_num,
+            guard_s=settings["startup_guard_s"],
+            platform_journal_max_lines=settings["startup_platform_journal_max_lines"],
+            poll_s=settings["poll_s"],
+        )
+        startup_guard_source = "legacy_history"
+    else:
+        # Session admission already requires the current MS3 generation to be
+        # settled, idle, and safe for controls. Re-reading startup history here
+        # could otherwise hold an admitted 75-179 second runtime until age 180.
+        startup_guard = {
+            "checked": False,
+            "runtime_age_s": None,
+            "boot_age_s": None,
+            "startup_seen": False,
+            "startup_age_s": None,
+        }
+        startup_guard_source = "meter_session"
+        shared.log(f"{meter.host} call-in cycle {cycle_num}: startup guard skipped; "
+                   "readiness supplied by meter session")
     cycle_meta.update(
         {
+            "startup_guard_source": startup_guard_source,
             "startup_guard_checked": startup_guard["checked"],
             "startup_guard_runtime_age_s": (
                 round(startup_guard["runtime_age_s"], 1)

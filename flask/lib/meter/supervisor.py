@@ -525,8 +525,12 @@ class MeterSupervisor:
         # 10-05-03_30005980) show S4_RUNNING followed by a quiet interval, power
         # grace timeout, sleep/wake, timer refresh, then a startup marker. Their
         # listener timestamps are receipt times, so exact meter timing is unknown.
+        # A 2026-11-12 desk-meter sleep capture confirms Runtime_sec advanced
+        # 31 -> 121 across sleep with unchanged Start_time/generation; its startup
+        # marker followed wake's TimerRefresh. See wc_copy/test/ms3_sleep/
+        # 20261112_135534_192.168.69.138_sleepv2.log (lines 856, 908, 944, 1126).
         # TODO: Validate a sleep-aware/current-generation startup-call-in gate
-        # with meter journal timestamps before treating age >= 75 as settled.
+        # before treating age >= 75 as settled; age itself includes sleep time.
         if not idle or age < 75 or time.monotonic() - self.last_notice < 3:
             self.idle_since = None
             if age < 75:

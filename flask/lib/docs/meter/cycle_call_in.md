@@ -67,7 +67,9 @@ post-restart startup call-in from filling a gap in the manual transaction.
 
 1. At each iteration, wait for session readiness. The supervisor has already
    handled the fresh-runtime startup window, startup call-in, diagnostics entry,
-   client idle state and stable UI. Navigate to Call In, verify local idle
+   client idle state and stable UI. The managed path bypasses the legacy
+   history-based startup guard entirely, so an admitted runtime aged 75-179
+   seconds is not held until age 180. Navigate to Call In, verify local idle
    status and the Call In page text, and save a baseline and journal watermark.
    A disruption before `+` retries navigation for that iteration; completed
    earlier iterations are retained.
@@ -147,6 +149,8 @@ subtest; direct callers can supply `debug=True` as a keyword argument.
 Inspect `shared.device_meta["call_in"][cycle_number]` in the job summary:
 
 - `phase`, `status`, `exception_type`, `total_elapsed_s` locate the failure.
+- `startup_guard_source` is `meter_session` when supervised admission replaced
+  the guard, or `legacy_history` when the history-based guard ran.
 - `baseline_snapshot`, `lifecycle_snapshot`, `cleanup_snapshot` and
   `lifecycle` show what status was actually observed. Raw status HTML is omitted.
 - `evidence_source` is `supervisor_journal` for the normal managed path or
