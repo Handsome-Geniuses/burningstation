@@ -4,8 +4,8 @@ This test drives the same `CIMCallInNow()` path as the meter's Service >
 Call In `+` key, then validates the session using three sources:
 
 1. `cmd.main.meter:status` for live CIM / CS / MODEM state and PPP counters.
-2. `journalctl -u MS3_Modem.service` for compact modem attach/detach proof.
-3. `journalctl -u MS3_Platform.service` for Session Agent and updater events.
+2. The supervisor's MS3 Modem journal stream for connection proof.
+3. The supervisor's MS3 Platform journal stream for Session Agent and updater events.
 
 See `flask/lib/docs/meter/cycle_call_in.md` for maintenance notes and expected
 behavior.
@@ -15,7 +15,6 @@ import inspect
 import re
 import threading
 import time
-from datetime import datetime, timedelta
 from html import unescape
 from typing import Optional
 
@@ -29,16 +28,8 @@ DEFAULT_CALL_IN_READY_STABLE_S = 3.0
 DEFAULT_CALL_IN_START_TIMEOUT_S = 20.0
 DEFAULT_CALL_IN_COMPLETION_TIMEOUT_S = 120.0
 DEFAULT_CALL_IN_DISCONNECT_TIMEOUT_S = 45.0
-DEFAULT_CALL_IN_RECOVERY_TIMEOUT_S = 300.0
-DEFAULT_CALL_IN_POST_RECOVERY_GUARD_S = 75.0
-DEFAULT_CALL_IN_POST_RECOVERY_TIMEOUT_S = 180.0
-DEFAULT_CALL_IN_STATUS_LOSS_GRACE_S = 8.0
-DEFAULT_CALL_IN_STARTUP_GUARD_S = 180.0
 DEFAULT_CALL_IN_POLL_S = 2.0
-DEFAULT_CALL_IN_PLATFORM_JOURNAL_LINES = 1500
-DEFAULT_CALL_IN_MODEM_JOURNAL_LINES = 100
-DEFAULT_CALL_IN_STARTUP_PLATFORM_JOURNAL_LINES = 1500
-DEFAULT_CALL_IN_POST_GRACE_S = 2.0
+DEFAULT_CALL_IN_TRANSITION_OBSERVE_S = 20.0
 
 CALL_IN_READY_STATE = "S1_WAITING_FOR_CALL_TIME"
 CALL_IN_WAIT_CONNECTION_STATE = "S2_WAITING_FOR_CONNECTION"
@@ -98,6 +89,12 @@ RE_UPDATE_RESTART = re.compile(
     r"invoking update \(systemctl restart MS3_RunOnce\)|Restarting, to use new legacy config",
     re.IGNORECASE,
 )
+RE_DOWNLOADED_UPDATE_CONFIG = re.compile(
+    r"WRITE_CONFIG_ITEM updating:|Installed new printer templates|"
+    r"Installing legacy config|(?:package|appCfg|appOverlay) update is pending",
+    re.IGNORECASE,
+)
+RE_MS3_STOPPING = re.compile(r"\bStopping MS3 Platform\b", re.IGNORECASE)
 
 RE_MODEM_CONNECT_REQUEST = re.compile(r"Requested to connect, State=", re.IGNORECASE)
 RE_MODEM_DISCONNECT_REQUEST = re.compile(r"Requested to disconnect, State=", re.IGNORECASE)
@@ -130,15 +127,6 @@ RE_CALL_IN_UI_WAIT = re.compile(
     r"wait\s+for\s+the\s+current\s+call\s+in\s+to\s+complete",
     re.IGNORECASE,
 )
-RE_JOURNAL_BOUNDS = re.compile(
-    r"-- Logs begin at (?P<start>.+?), end at (?P<end>.+?)\. --",
-    re.IGNORECASE,
-)
-RE_PLATFORM_RUNTIME_START = re.compile(r"\bMS3:main:\s*starting,\s*version:", re.IGNORECASE)
-RE_PLATFORM_SERVICE_START = re.compile(r"systemd\[\d+\]: Starting MS3 Platform", re.IGNORECASE)
-RE_STARTUP_CALL_IN = re.compile(r"\bMS3:sRestartCallIn:\s*startup call-in\b", re.IGNORECASE)
-
-
 class CallInObservationError(TimeoutError):
     """Timeout that preserves the last status data observed by a wait loop."""
 
@@ -198,7 +186,6 @@ def _new_lifecycle() -> dict:
         "saw_modem_connected": False,
         "saw_modem_disconnected": False,
         "status_unavailable_after_start": False,
-        "saw_splash_after_start": False,
         "runtime_loss_after_start": False,
     }
 
@@ -211,81 +198,6 @@ def _sleep_with_stop(shared: SharedState, seconds: float, poll_interval: float =
         if remaining <= 0:
             return
         time.sleep(min(poll_interval, remaining))
-
-
-def _journal_since_now(meter: SSHMeter) -> str:
-    return _format_meter_time(_get_meter_now(meter))
-
-
-def _get_meter_now(meter: SSHMeter) -> datetime:
-    value = meter.cli("date '+%Y-%m-%d %H:%M:%S'")
-    return datetime.strptime(value.strip(), "%Y-%m-%d %H:%M:%S")
-
-
-def _format_meter_time(value: datetime) -> str:
-    return value.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _parse_journal_bound(value: str) -> Optional[datetime]:
-    text = (value or "").strip()
-    if not text:
-        return None
-
-    text = re.sub(r"^[A-Za-z]{3}\s+", "", text)
-    text = re.sub(r"\s+[+-]\d{2}(?::?\d{2})?$", "", text)
-    try:
-        return datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return None
-
-
-def _parse_journal_bounds(text: str) -> tuple[Optional[datetime], Optional[datetime]]:
-    match = RE_JOURNAL_BOUNDS.search(text or "")
-    if not match:
-        return None, None
-    return _parse_journal_bound(match.group("start")), _parse_journal_bound(match.group("end"))
-
-
-def _parse_journal_line_time(line: str, year: int) -> Optional[datetime]:
-    text = (line or "").strip()
-    if len(text) < 15:
-        return None
-    try:
-        return datetime.strptime(f"{year} {text[:15]}", "%Y %b %d %H:%M:%S")
-    except ValueError:
-        return None
-
-
-def _age_seconds(now: datetime, then: Optional[datetime]) -> Optional[float]:
-    if then is None:
-        return None
-    return max(0.0, (now - then).total_seconds())
-
-
-def _format_age(age_s: Optional[float]) -> str:
-    if age_s is None:
-        return "n/a"
-    return f"{age_s:.1f}s"
-
-
-def _last_matching_timestamp(
-    text: str,
-    pattern: re.Pattern,
-    year: int,
-    not_before: Optional[datetime] = None,
-) -> Optional[datetime]:
-    for line in reversed((text or "").splitlines()):
-        if not pattern.search(line):
-            continue
-
-        timestamp = _parse_journal_line_time(line, year)
-        if timestamp is None:
-            continue
-        if not_before is not None and timestamp < not_before:
-            continue
-        return timestamp
-
-    return None
 
 
 def _parse_int(pattern: re.Pattern, text: str) -> Optional[int]:
@@ -416,13 +328,6 @@ def _snapshot_is_idle(snapshot: dict) -> bool:
     )
 
 
-def _safe_in_splash(meter: SSHMeter) -> bool:
-    try:
-        return meter.in_splash()
-    except Exception:
-        return False
-
-
 def _wait_for_call_in_idle(
     meter: SSHMeter,
     shared: SharedState,
@@ -444,17 +349,14 @@ def _wait_for_call_in_idle(
         check_stop_event(shared)
         session = session_for(meter)
         if session is not None and not session.ready:
-            if shared.lifecycle_observer or phase == "pre-check":
-                # Recovery can reset the UI to home. The caller must navigate
-                # back to Call In before trusting its page text or pressing +.
-                raise MeterInterrupted(session.reason, session.epoch)
-            shared.attempt_epoch = session.wait_ready(shared)
-            shared.disruption_event.clear()
+            # Recovery can reset the UI. Never resume an old navigation path.
+            raise MeterInterrupted(session.reason, session.epoch)
 
         try:
             snapshot = _parse_meter_status(meter.get_meter_status_text())
             last_snapshot = snapshot
         except Exception as exc:
+            idle_since = None
             shared.log(
                 f"{meter.host} call-in {phase} wait {cycle_num}: unable to read meter status ({exc}); retrying",
             )
@@ -496,7 +398,9 @@ def _wait_for_call_in_idle(
                                 f"{meter.host} call-in {phase} wait {cycle_num}: unexpected Call In page text -> {ui_text}",
                             )
 
-            if idle_since is None:
+            if not ui_ready:
+                idle_since = None
+            elif idle_since is None:
                 idle_since = time.time()
             if ui_ready and (time.time() - idle_since) >= max(0.0, stable_s):
                 elapsed_s = time.time() - started
@@ -524,14 +428,15 @@ def _wait_for_call_in_lifecycle(
     start_timeout_s: float,
     completion_timeout_s: float,
     poll_s: float,
-    status_loss_grace_s: float,
-    proof_complete=None,
+    *,
+    proof_complete,
+    request_started,
 ) -> tuple[Optional[dict], dict, float]:
     """Observe manual CIM progress while status is available.
 
-    The optional proof callback lets a supervised run finish from journal
-    evidence before CIM is fully idle. Session restriction returns control to
-    the caller, which can continue reading its independent journal capture.
+    The journal callbacks confirm a fast request
+    from the journal and finish from proof before CIM is fully idle. Session
+    restriction returns control to the independent journal capture.
     """
     started = time.time()
     start_deadline = started + max(0.0, start_timeout_s)
@@ -539,7 +444,6 @@ def _wait_for_call_in_lifecycle(
     last_summary = None
     last_snapshot: Optional[dict] = None
     call_in_started = False
-    status_failure_since: Optional[float] = None
     lifecycle = _new_lifecycle()
 
     while True:
@@ -558,19 +462,14 @@ def _wait_for_call_in_lifecycle(
             shared.log(
                 f"{meter.host} call-in lifecycle {cycle_num}: unable to read meter status ({exc}); retrying",
             )
+            if session is not None and not session.ready:
+                lifecycle["runtime_loss_after_start"] = call_in_started
+                return None, lifecycle, time.time() - started
             if call_in_started:
                 lifecycle["status_unavailable_after_start"] = True
-                splash = _safe_in_splash(meter)
-                lifecycle["saw_splash_after_start"] |= splash
-                if status_failure_since is None:
-                    status_failure_since = time.time()
-                if splash or ((time.time() - status_failure_since) >= max(0.0, status_loss_grace_s)):
-                    lifecycle["runtime_loss_after_start"] = True
-                    shared.log(
-                        f"{meter.host} call-in cycle {cycle_num}: meter runtime became unavailable after call-in start; "
-                        f"switching to recovery handling",
-                    )
-                    return None, lifecycle, time.time() - started
+                # The journal subscriber still works if ordinary status reads
+                # fail. Stop status polling and decide from its live evidence.
+                return None, lifecycle, time.time() - started
 
             remaining = deadline - time.time()
             if remaining <= 0:
@@ -582,7 +481,6 @@ def _wait_for_call_in_lifecycle(
             _sleep_with_stop(shared, min(poll_s, remaining))
             continue
 
-        status_failure_since = None
         summary = _status_summary(snapshot)
         if summary != last_summary:
             shared.log(f"{meter.host} call-in lifecycle {cycle_num}: {summary}")
@@ -593,7 +491,7 @@ def _wait_for_call_in_lifecycle(
         modem_state = snapshot.get("modem_state")
 
         if not call_in_started:
-            if cim_state in (CALL_IN_WAIT_CONNECTION_STATE, CALL_IN_WAIT_COMPLETE_STATE):
+            if cim_state in (CALL_IN_WAIT_CONNECTION_STATE, CALL_IN_WAIT_COMPLETE_STATE) or request_started():
                 call_in_started = True
                 shared.log(f"{meter.host} call-in cycle {cycle_num}: state machine started")
             elif time.time() > start_deadline:
@@ -614,7 +512,7 @@ def _wait_for_call_in_lifecycle(
             if lifecycle["saw_modem_connected"]:
                 lifecycle["saw_modem_disconnected"] |= modem_state in MODEM_DISCONNECTED_STATES
 
-            if proof_complete is not None and proof_complete(lifecycle, snapshot):
+            if proof_complete(lifecycle, snapshot):
                 return snapshot, lifecycle, time.time() - started
 
             if _snapshot_is_ready(snapshot):
@@ -635,171 +533,6 @@ def _wait_for_call_in_lifecycle(
         deadline = completion_deadline if call_in_started else start_deadline
         remaining = deadline - time.time()
         _sleep_with_stop(shared, min(poll_s, max(0.1, remaining)))
-
-
-def _wait_for_meter_status_recovery(
-    meter: SSHMeter,
-    shared: SharedState,
-    cycle_num: int,
-    timeout_s: float,
-    poll_s: float,
-) -> tuple[Optional[dict], dict, float]:
-    started = time.time()
-    session = session_for(meter)
-    if session is not None:
-        shared.attempt_epoch = session.wait_ready(shared, timeout=timeout_s)
-        shared.disruption_event.clear()
-        snapshot = _parse_meter_status(meter.get_meter_status_text())
-        return snapshot, {"attempted": True, "recovered": True, "saw_splash": False,
-                          "saw_status_unavailable": True}, time.time() - started
-    deadline = started + max(0.0, timeout_s)
-    recovery = {
-        "attempted": True,
-        "recovered": False,
-        "saw_splash": False,
-        "saw_status_unavailable": False,
-    }
-    last_probe = None
-
-    while True:
-        check_stop_event(shared)
-
-        try:
-            snapshot = _parse_meter_status(meter.get_meter_status_text())
-            recovery["recovered"] = True
-            elapsed_s = time.time() - started
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: meter runtime recovered in {elapsed_s:.1f}s | "
-                f"{_status_summary(snapshot)}",
-            )
-            return snapshot, recovery, elapsed_s
-        except Exception:
-            recovery["saw_status_unavailable"] = True
-            splash = _safe_in_splash(meter)
-            recovery["saw_splash"] |= splash
-            probe = "splash" if splash else "unreachable"
-            if probe != last_probe:
-                shared.log(
-                    f"{meter.host} call-in cycle {cycle_num}: waiting for meter runtime recovery ({probe})",
-                )
-                last_probe = probe
-
-        remaining = deadline - time.time()
-        if remaining <= 0:
-            return None, recovery, time.time() - started
-
-        _sleep_with_stop(shared, min(poll_s, remaining))
-
-
-def _observe_post_recovery_guard(
-    meter: SSHMeter,
-    shared: SharedState,
-    cycle_num: int,
-    observe_s: float,
-    timeout_s: float,
-    poll_s: float,
-) -> tuple[dict, float]:
-    session = session_for(meter)
-    if session is not None:
-        started = time.time()
-        shared.attempt_epoch = session.wait_ready(shared, timeout=timeout_s)
-        shared.disruption_event.clear()
-        return _parse_meter_status(meter.get_meter_status_text()), time.time() - started
-    if observe_s <= 0:
-        snapshot, elapsed_s = _wait_for_call_in_idle(
-            meter,
-            shared,
-            cycle_num=cycle_num,
-            timeout_s=timeout_s,
-            poll_s=poll_s,
-            phase="post-recovery settle",
-        )
-        return snapshot, elapsed_s
-
-    started = time.time()
-    observe_deadline = started + max(0.0, observe_s)
-    deadline = started + max(timeout_s, observe_s)
-    last_summary = None
-    last_snapshot: Optional[dict] = None
-
-    while True:
-        check_stop_event(shared)
-
-        try:
-            snapshot = _parse_meter_status(meter.get_meter_status_text())
-            last_snapshot = snapshot
-        except Exception as exc:
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                raise CallInObservationError(
-                    f"Call-in cycle {cycle_num} timed out while reading meter status during post-recovery guard",
-                    snapshot=last_snapshot,
-                ) from exc
-            _sleep_with_stop(shared, min(poll_s, remaining))
-            continue
-        summary = _status_summary(snapshot)
-        if summary != last_summary:
-            shared.log(f"{meter.host} call-in post-recovery guard {cycle_num}: {summary}")
-            last_summary = summary
-
-        if time.time() >= observe_deadline and _snapshot_is_idle(snapshot):
-            elapsed_s = time.time() - started
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: post-recovery guard clear after {elapsed_s:.1f}s",
-            )
-            return snapshot, elapsed_s
-
-        remaining = deadline - time.time()
-        if remaining <= 0:
-            raise CallInObservationError(
-                f"Call-in cycle {cycle_num} timed out during post-recovery guard; last={summary}",
-                snapshot=snapshot,
-            )
-
-        _sleep_with_stop(shared, min(poll_s, remaining))
-
-
-def _get_service_journal(
-    meter: SSHMeter,
-    service: str,
-    since: str,
-    max_lines: int,
-    include_previous_boot: bool = False,
-) -> str:
-    if max_lines <= 0:
-        return ""
-
-    chunks = []
-    boots = (-1, 0) if include_previous_boot else (0,)
-    for boot in boots:
-        cmd = (
-            f'journalctl -u {service} --since "{since}" '
-            f"-n {max_lines} --no-pager -o cat -b {boot}"
-        )
-        try:
-            text = meter.cli(cmd)
-        except Exception:
-            text = ""
-        if text:
-            chunks.append(text)
-
-    return "\n".join(chunks).strip()
-
-
-def _get_raw_service_journal(
-    meter: SSHMeter,
-    service: str,
-    since: str,
-    max_lines: int,
-) -> str:
-    if max_lines <= 0:
-        return ""
-
-    cmd = f'journalctl -u {service} --since "{since}" -n {max_lines} --no-pager'
-    try:
-        return meter.cli(cmd)
-    except Exception:
-        return ""
 
 
 def _last_matching_line(text: str, pattern: re.Pattern) -> str:
@@ -882,6 +615,9 @@ def _collect_platform_call_in_evidence(journal_text: str) -> dict:
         "runscript_completed": bool(RE_RUNSCRIPT_COMPLETED.search(post_send_text)),
         "update_activity": bool(RE_UPDATE_ACTIVITY.search(post_send_text)),
         "update_restart": bool(RE_UPDATE_RESTART.search(post_send_text)),
+        "update_or_config_downloaded": bool(RE_DOWNLOADED_UPDATE_CONFIG.search(post_send_text)),
+        "restart_started": bool(RE_MS3_STOPPING.search(post_send_text)),
+        "next_call_in_send": next_send_index is not None,
         "clients_released": bool(RE_CONNECTION_CLIENTS_RELEASED.search(post_send_text)),
         "clients_released_after_session": release_index is not None,
         "modem_disconnect_success": bool(RE_MODEM_DISCONNECT_SUCCESS.search(post_send_text)),
@@ -926,127 +662,6 @@ def _collect_modem_call_in_evidence(journal_text: str) -> dict:
         "connect_line": _last_matching_line(journal_text, RE_MODEM_CONNECT_REQUEST),
         "disconnect_line": _last_matching_line(journal_text, RE_MODEM_DISCONNECT_REQUEST),
     }
-
-
-def _format_delta(name: str, delta: Optional[int]) -> str:
-    if delta is None:
-        return f"{name}=n/a"
-    return f"{name}={delta:+d}"
-
-
-def _wait_for_startup_call_in_guard(
-    meter: SSHMeter,
-    shared: SharedState,
-    cycle_num: int,
-    guard_s: float,
-    platform_journal_max_lines: int,
-    poll_s: float,
-) -> dict:
-    result = {
-        "checked": guard_s > 0,
-        "runtime_age_s": None,
-        "boot_age_s": None,
-        "startup_seen": False,
-        "startup_age_s": None,
-    }
-    if guard_s <= 0:
-        return result
-    session = session_for(meter)
-    if session is not None and session.supervisor is not None:
-        # Managed sessions already perform startup settling before admitting
-        # work. Do not run another history-based timer before each transaction.
-        result["checked"] = False
-        shared.log("Call-in startup readiness supplied by meter session")
-        return result
-
-    started = time.time()
-    last_summary = None
-
-    while True:
-        check_stop_event(shared)
-
-        try:
-            now_dt = _get_meter_now(meter)
-        except Exception as exc:
-            shared.log(
-                f"{meter.host} call-in startup guard {cycle_num}: unable to read meter time ({exc}); retrying",
-            )
-            _sleep_with_stop(shared, poll_s)
-            continue
-
-        lookback_s = guard_s + 120.0
-        since = _format_meter_time(now_dt - timedelta(seconds=lookback_s))
-        platform_journal = _get_raw_service_journal(
-            meter,
-            service="MS3_Platform.service",
-            since=since,
-            max_lines=platform_journal_max_lines,
-        )
-
-        boot_start_dt, _ = _parse_journal_bounds(platform_journal)
-        runtime_start_dt = _last_matching_timestamp(
-            platform_journal,
-            RE_PLATFORM_RUNTIME_START,
-            year=now_dt.year,
-        )
-        if runtime_start_dt is None:
-            runtime_start_dt = _last_matching_timestamp(
-                platform_journal,
-                RE_PLATFORM_SERVICE_START,
-                year=now_dt.year,
-            )
-        startup_call_in_dt = _last_matching_timestamp(
-            platform_journal,
-            RE_STARTUP_CALL_IN,
-            year=now_dt.year,
-            not_before=runtime_start_dt,
-        )
-
-        runtime_age_s = _age_seconds(now_dt, runtime_start_dt)
-        boot_age_s = _age_seconds(now_dt, boot_start_dt)
-        startup_age_s = _age_seconds(now_dt, startup_call_in_dt)
-
-        result.update(
-            {
-                "runtime_age_s": runtime_age_s,
-                "boot_age_s": boot_age_s,
-                "startup_seen": startup_call_in_dt is not None,
-                "startup_age_s": startup_age_s,
-            }
-        )
-
-        summary = (
-            f"runtime_age={_format_age(runtime_age_s)} | "
-            f"boot_age={_format_age(boot_age_s)} | "
-            f"startup_seen={'yes' if startup_call_in_dt is not None else 'no'}"
-        )
-        if summary != last_summary:
-            shared.log(f"{meter.host} call-in startup guard {cycle_num}: {summary}")
-            last_summary = summary
-
-        if startup_call_in_dt is not None:
-            shared.log(
-                f"{meter.host} call-in startup guard {cycle_num}: startup call-in already started; "
-                f"continuing to regular pre-check",
-            )
-            return result
-
-        guard_age_s = runtime_age_s if runtime_age_s is not None else boot_age_s
-        if guard_age_s is not None and guard_age_s >= guard_s:
-            shared.log(
-                f"{meter.host} call-in startup guard {cycle_num}: no startup marker seen by "
-                f"{_format_age(guard_age_s)}; continuing with regular pre-check",
-            )
-            return result
-
-        if guard_age_s is None and (time.time() - started) >= guard_s:
-            shared.log(
-                f"{meter.host} call-in startup guard {cycle_num}: unable to derive startup age "
-                f"within {guard_s:.1f}s; continuing with regular pre-check",
-            )
-            return result
-
-        _sleep_with_stop(shared, poll_s)
 
 
 def _validate_call_in_result(
@@ -1241,10 +856,6 @@ def _snapshot_metadata(snapshot: Optional[dict]) -> Optional[dict]:
     }
 
 
-def _snapshot_summary(snapshot: Optional[dict]) -> str:
-    return _status_summary(snapshot) if snapshot is not None else "unavailable"
-
-
 def _managed_evidence(journal_text: str) -> tuple[dict, dict]:
     """Keep modem proof inside the first call-in's transaction window.
 
@@ -1271,15 +882,13 @@ def _complete_managed_call_in_cycle(
     cycle_meta: dict,
     settings: dict,
     baseline_snapshot: dict,
-    journal_since: str,
     cycle_started: float,
 ) -> None:
-    """Decide the original transaction from live proof before MS3 recovery.
+    """Finish the triggered transaction from live proof, even during restriction.
 
-    The supervisor keeps following journals after SSHMeter commands are blocked.
-    A complete matched response, session completion, connection use and release
-    therefore need no post-update status query. If streaming missed proof, wait
-    for recovery once and query the journals; never press '+' a second time.
+    No status or UI command is sent after the supervisor restricts the meter.
+    The short post-proof window observes update and MS3-stop markers; recovery
+    and the next runtime's startup call-in belong to the supervisor.
     """
     lifecycle = _new_lifecycle()
     lifecycle_snapshot = None
@@ -1318,11 +927,7 @@ def _complete_managed_call_in_cycle(
     def proof_complete(observed_lifecycle, snapshot):
         lifecycle.update(observed_lifecycle)
         _, _, validation = assess(snapshot if _snapshot_is_idle(snapshot) else None)
-        # With no update, a later subtest still needs a terminal local status.
-        # A supervisor restriction prevents later controls during transition.
-        return not validation["failures"] and (
-            _snapshot_is_idle(snapshot) or not session.ready
-        )
+        return not validation["failures"]
 
     cycle_meta["phase"] = "lifecycle"
     try:
@@ -1331,8 +936,8 @@ def _complete_managed_call_in_cycle(
             start_timeout_s=settings["start_timeout_s"],
             completion_timeout_s=settings["completion_timeout_s"],
             poll_s=settings["poll_s"],
-            status_loss_grace_s=settings["status_loss_grace_s"],
             proof_complete=proof_complete,
+            request_started=lambda: bool(RE_CALL_IN_SEND.search(capture.text())),
         )
         lifecycle.update(observed)
         cycle_meta["lifecycle_elapsed_s"] = round(elapsed, 1)
@@ -1346,28 +951,12 @@ def _complete_managed_call_in_cycle(
                 lifecycle.update(exc.lifecycle)
         shared.log(f"{meter.host} call-in cycle {cycle_num}: status observer ended: {type(exc).__name__}: {exc}")
 
-    cleanup_snapshot = lifecycle_snapshot if lifecycle_snapshot and _snapshot_is_idle(lifecycle_snapshot) else None
+    cleanup_snapshot = (
+        lifecycle_snapshot if lifecycle_snapshot and _snapshot_is_idle(lifecycle_snapshot)
+        and session.epoch == cycle_meta.get("trigger_epoch", session.epoch) else None
+    )
     cleanup_source = "lifecycle" if cleanup_snapshot else None
     cleanup_error = None
-    if lifecycle["saw_ready_return"] and cleanup_snapshot is None and session.ready:
-        cycle_meta["phase"] = "cleanup"
-        try:
-            cleanup_snapshot, cleanup_elapsed = _wait_for_call_in_idle(
-                meter, shared, cycle_num, settings["disconnect_timeout_s"],
-                settings["poll_s"], "cleanup",
-            )
-            cycle_meta["cleanup_elapsed_s"] = round(cleanup_elapsed, 1)
-            cleanup_source = "cleanup"
-        except StopAutomation:
-            raise
-        except Exception as exc:
-            cleanup_error = str(exc)
-            shared.log(f"{meter.host} call-in cycle {cycle_num}: cleanup observer ended: {type(exc).__name__}: {exc}")
-    if cleanup_snapshot is not None and session.epoch != cycle_meta.get("trigger_epoch", session.epoch):
-        # A fast MS3 generation change can make a new runtime's idle status
-        # look like release of the old transaction. Keep only journal proof.
-        cleanup_snapshot = None
-        cleanup_source = None
     platform, modem, validation = assess(cleanup_snapshot)
     # CIM cannot finish the manual Session Agent transaction before sending
     # callIn. A short follower-lag allowance is enough; a later scheduled or
@@ -1386,57 +975,82 @@ def _complete_managed_call_in_cycle(
             disrupted_at = now
         if now >= deadline or (disrupted_at is not None and now - disrupted_at >= 8):
             break
+        if session.ready and session.epoch == cycle_meta.get("trigger_epoch", session.epoch):
+            try:
+                snapshot = _parse_meter_status(meter.get_meter_status_text())
+                if _snapshot_is_idle(snapshot):
+                    cleanup_snapshot = snapshot
+                    cleanup_source = "status"
+            except MeterInterrupted:
+                pass
+            except Exception:
+                pass  # The live journal remains the independent proof source.
         _sleep_with_stop(shared, min(settings["poll_s"], deadline - now))
         platform, modem, validation = assess(cleanup_snapshot)
 
-    evidence_source = "supervisor_journal"
     missed_manual_send = closed_without_send and not platform["call_in_send"]
     if missed_manual_send:
         shared.log(f"{meter.host} call-in cycle {cycle_num}: CIM returned to ready without a manual callIn send")
-    if validation["failures"] and not platform["call_in_response_failed"] and not missed_manual_send:
-        # The live follower can reconnect or encounter a cursor gap. A single
-        # post-recovery journal query is a fallback, never normal completion.
-        cycle_meta["phase"] = "journal_fallback"
-        shared.log(f"{meter.host} call-in cycle {cycle_num}: live proof incomplete; querying journals after readiness")
-        shared.attempt_epoch = session.wait_ready(shared, timeout=settings["recovery_timeout_s"])
-        shared.disruption_event.clear()
-        platform_journal = _get_service_journal(
-            meter, "MS3_Platform.service", journal_since,
-            settings["platform_journal_max_lines"], include_previous_boot=True,
-        )
-        modem_journal = _get_service_journal(
-            meter, "MS3_Modem.service", journal_since,
-            settings["modem_journal_max_lines"], include_previous_boot=True,
-        )
-        fetched_platform = _collect_platform_call_in_evidence(platform_journal)
-        same_request = (
-            platform["call_in_send"]
-            and fetched_platform["call_in_send_line"] == platform["call_in_send_line"]
-        )
-        same_generation_without_send = (
-            not platform["call_in_send"]
-            and session.epoch == cycle_meta.get("trigger_epoch")
-            and not lifecycle["saw_ready_return"]
-        )
-        _debug_call_in(
-            meter, shared, cycle_num, settings.get("debug", False),
-            f"fallback platform_lines={len(platform_journal.splitlines())} "
-            f"modem_lines={len(modem_journal.splitlines())} "
-            f"fetched_ref={fetched_platform['call_in_reference']} "
-            f"same_request={same_request} same_epoch_without_send={same_generation_without_send}",
-        )
-        if fetched_platform["call_in_send"] and (same_request or same_generation_without_send):
-            platform, modem = fetched_platform, _collect_modem_call_in_evidence(modem_journal)
-            validation = _validate_call_in_result(
-                meter, shared, cycle_num, baseline_snapshot, cleanup_snapshot,
-                lifecycle, platform, modem, log_result=False,
+    # A matched response and release can precede the updater decision. The
+    # archive's largest observed response-to-commit gap is 11.7 seconds, so a
+    # 20-second window covers that path without following the restarted app.
+    observed_s = 0.0
+    if not validation["failures"]:
+        cycle_meta["phase"] = "observe_transition"
+        observe_started = time.monotonic()
+        observe_s = max(0.0, settings.get("transition_observe_s", DEFAULT_CALL_IN_TRANSITION_OBSERVE_S))
+        while True:
+            check_stop_event(shared)
+            platform, modem, validation = assess(cleanup_snapshot)
+            restart_detected = platform["restart_started"] or (
+                not platform["next_call_in_send"] and (
+                    session.phase == "restarting"
+                    or (cycle_meta.get("trigger_generation") is not None
+                        and session.generation is not None
+                        and session.generation != cycle_meta["trigger_generation"])
+                )
             )
-            evidence_source = "post_recovery_journals"
-        elif fetched_platform["call_in_send"]:
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: ignoring fetched callIn "
-                "from a different or unverified transaction"
-            )
+            observed_s = time.monotonic() - observe_started
+            if restart_detected or platform["next_call_in_send"] or observed_s >= observe_s:
+                break
+            _sleep_with_stop(shared, min(settings["poll_s"], observe_s - observed_s))
+
+        # On a stable runtime, later controls need the local Call In state to
+        # become idle. Once an update/restart restricts the session, the
+        # supervisor owns that handoff and no further meter read is safe.
+        if session.ready and session.epoch == cycle_meta.get("trigger_epoch", session.epoch) and cleanup_snapshot is None:
+            cycle_meta["phase"] = "cleanup"
+            try:
+                cleanup_snapshot, cleanup_elapsed = _wait_for_call_in_idle(
+                    meter, shared, cycle_num, settings["disconnect_timeout_s"],
+                    settings["poll_s"], "cleanup",
+                )
+                cycle_meta["cleanup_elapsed_s"] = round(cleanup_elapsed, 1)
+                cleanup_source = "cleanup"
+            except StopAutomation:
+                raise
+            except MeterInterrupted:
+                pass
+            except Exception as exc:
+                cleanup_error = str(exc)
+                shared.log(f"{meter.host} call-in cycle {cycle_num}: cleanup observer ended: {type(exc).__name__}: {exc}")
+
+    if session.epoch != cycle_meta.get("trigger_epoch", session.epoch):
+        # A newly recovered runtime's idle status cannot release the manual
+        # transaction that ran in the prior generation.
+        cleanup_snapshot = None
+        cleanup_source = None
+    # Cleanup may overlap an updater transition; include any final live lines
+    # before freezing metadata and the verdict.
+    platform, modem, validation = assess(cleanup_snapshot)
+    restart_detected = platform["restart_started"] or (
+        not platform["next_call_in_send"] and (
+            session.phase == "restarting"
+            or (cycle_meta.get("trigger_generation") is not None
+                and session.generation is not None
+                and session.generation != cycle_meta["trigger_generation"])
+        )
+    )
 
     cycle_meta["phase"] = "validate"
     validation = _validate_call_in_result(
@@ -1451,7 +1065,7 @@ def _complete_managed_call_in_cycle(
         "cleanup_error": cleanup_error,
         "effective_cleanup_source": cleanup_source,
         "effective_cleanup_snapshot": _snapshot_metadata(cleanup_snapshot),
-        "evidence_source": evidence_source,
+        "evidence_source": "supervisor_journal",
         "journal_stream_connected": session.journal_connected,
         "manual_window_closed_without_send": missed_manual_send,
         "platform_evidence": platform,
@@ -1467,6 +1081,13 @@ def _complete_managed_call_in_cycle(
         "session_complete": platform["session_complete"],
         "update_activity": platform["update_activity"],
         "update_restart": platform["update_restart"],
+        "update_or_config_downloaded": platform["update_or_config_downloaded"],
+        "restart_detected": restart_detected,
+        "follow_on_call_in_seen": platform["next_call_in_send"],
+        "transition_observed_s": round(observed_s, 1),
+        "transition_observation_complete": not validation["failures"] and observed_s >= max(
+            0.0, settings.get("transition_observe_s", DEFAULT_CALL_IN_TRANSITION_OBSERVE_S)
+        ),
         "runtime_loss_after_start": lifecycle["runtime_loss_after_start"],
         "total_elapsed_s": round(time.time() - cycle_started, 1),
     })
@@ -1475,7 +1096,7 @@ def _complete_managed_call_in_cycle(
     cycle_meta.update(status="pass", phase="complete", error=None)
     shared.log(
         f"{meter.host} call-in cycle {cycle_num}: pass in {cycle_meta['total_elapsed_s']:.1f}s "
-        f"from {evidence_source} (ref={platform['call_in_reference']}, "
+        f"from supervisor journal (ref={platform['call_in_reference']}, "
         f"release={','.join(validation['release_sources'])})"
     )
     shared.extras.pop("call_in_in_flight", None)
@@ -1489,69 +1110,36 @@ def _run_call_in_cycle(
     settings: dict,
     cycle_started: float,
 ) -> None:
-    """Run one manual '+' exactly once and select managed or legacy evidence.
+    """Trigger one supervised manual call-in and validate that transaction.
 
-    A managed session may finish its verdict while an update restricts meter
-    controls; a later iteration waits for the supervisor before navigating.
+    The pre-trigger wait may restart this iteration. Once '+' could have been
+    delivered, its journal window is never replayed, even if MS3 restarts.
     """
-    cycle_meta["phase"] = "navigate_to_call_in"
     session = session_for(meter)
-    supervised = session is not None and session.supervisor is not None
-    if session is not None:
-        # A previous iteration can validate before its updater restarts MS3.
-        # Wait here before the next '+' instead of replaying a completed cycle.
-        shared.attempt_epoch = session.wait_ready(shared)
-        shared.disruption_event.clear()
-    shared.extras.pop("call_in_in_flight", None)
-    meter.goto_callin()
+    if session is None or session.supervisor is None:
+        raise RuntimeError("Call In requires an active meter supervisor")
 
-    if not supervised:
-        cycle_meta["phase"] = "startup_guard"
-        startup_guard = _wait_for_startup_call_in_guard(
-            meter,
-            shared,
-            cycle_num=cycle_num,
-            guard_s=settings["startup_guard_s"],
-            platform_journal_max_lines=settings["startup_platform_journal_max_lines"],
-            poll_s=settings["poll_s"],
-        )
-        startup_guard_source = "legacy_history"
-    else:
-        # Session admission already requires the current MS3 generation to be
-        # settled, idle, and safe for controls. Re-reading startup history here
-        # could otherwise hold an admitted 75-179 second runtime until age 180.
-        startup_guard = {
-            "checked": False,
-            "runtime_age_s": None,
-            "boot_age_s": None,
-            "startup_seen": False,
-            "startup_age_s": None,
-        }
-        startup_guard_source = "meter_session"
-        shared.log(f"{meter.host} call-in cycle {cycle_num}: startup guard skipped; "
-                   "readiness supplied by meter session")
-    cycle_meta.update(
-        {
-            "startup_guard_source": startup_guard_source,
-            "startup_guard_checked": startup_guard["checked"],
-            "startup_guard_runtime_age_s": (
-                round(startup_guard["runtime_age_s"], 1)
-                if startup_guard["runtime_age_s"] is not None
-                else None
-            ),
-            "startup_guard_boot_age_s": (
-                round(startup_guard["boot_age_s"], 1)
-                if startup_guard["boot_age_s"] is not None
-                else None
-            ),
-            "startup_call_in_seen_before_test": startup_guard["startup_seen"],
-            "startup_call_in_age_s": (
-                round(startup_guard["startup_age_s"], 1)
-                if startup_guard["startup_age_s"] is not None
-                else None
-            ),
-        }
-    )
+    cycle_meta["phase"] = "wait_for_journal"
+    shared.attempt_epoch = session.wait_ready(shared)
+    shared.disruption_event.clear()
+    shared.extras.pop("call_in_in_flight", None)
+    journal_deadline = time.monotonic() + settings["ready_timeout_s"]
+    while True:
+        check_stop_event(shared)
+        with session.condition:
+            if not session.ready:
+                raise MeterInterrupted(session.reason, session.epoch)
+            if session.journal_connected:
+                break
+            remaining = journal_deadline - time.monotonic()
+            if remaining <= 0:
+                raise CallInObservationError(
+                    f"Call-in cycle {cycle_num} timed out waiting for supervisor journal capture"
+                )
+            session.condition.wait(min(0.25, remaining))
+
+    cycle_meta["phase"] = "navigate_to_call_in"
+    meter.goto_callin()
 
     cycle_meta["phase"] = "pre_check"
     baseline_snapshot, ready_elapsed_s = _wait_for_call_in_idle(
@@ -1572,355 +1160,31 @@ def _run_call_in_cycle(
     )
 
     cycle_meta["phase"] = "start_call_in"
-    journal_since = _journal_since_now(meter)
-    cycle_meta["journal_since"] = journal_since
+    cycle_meta["trigger_epoch"] = session.epoch
+    cycle_meta["trigger_generation"] = session.generation
+    capture = _ManagedJournalCapture()
+    with session.condition:
+        if not session.ready or not session.journal_connected or session.epoch != cycle_meta["trigger_epoch"]:
+            # No '+' was sent. The outer pre-trigger retry navigates again.
+            raise MeterInterrupted(session.reason, session.epoch)
+        session.subscribers.add(capture)
     shared.log(f"{meter.host} call-in cycle {cycle_num}: press '+' on Service:Call In")
-    session = session_for(meter)
-    capture = _ManagedJournalCapture() if session is not None and session.supervisor is not None else None
-    if session is not None:
-        cycle_meta["trigger_epoch"] = session.epoch
-    if capture is not None:
-        with session.condition:
-            session.subscribers.add(capture)
-    if session is not None:
-        shared.extras["call_in_in_flight"] = True
-        shared.lifecycle_observer = True
+    shared.extras["call_in_in_flight"] = True
+    shared.lifecycle_observer = True
     try:
         try:
             meter.press("plus")
         except MeterInterrupted:
-            if session is None:
-                raise
-            # The transition may have begun during the press. Preserve the
-            # original watermark and never send '+' a second time.
+            # The press might have reached MS3 before the restriction arrived.
+            # Retain this transaction window and never send '+' again.
             shared.log("MS3 interrupted the call-in trigger; retaining the original transaction window")
-        if capture is not None:
-            _complete_managed_call_in_cycle(
-                meter, shared, session, capture, cycle_num, cycle_meta,
-                settings, baseline_snapshot, journal_since, cycle_started,
-            )
-            return
+        _complete_managed_call_in_cycle(
+            meter, shared, session, capture, cycle_num, cycle_meta,
+            settings, baseline_snapshot, cycle_started,
+        )
     finally:
-        if capture is not None:
-            with session.condition:
-                session.subscribers.discard(capture)
-
-    lifecycle = _new_lifecycle()
-    lifecycle_snapshot: Optional[dict] = None
-    lifecycle_elapsed_s = 0.0
-    cleanup_snapshot: Optional[dict] = None
-    cleanup_observed_snapshot: Optional[dict] = None
-    cleanup_elapsed_s: Optional[float] = None
-    recovery_snapshot: Optional[dict] = None
-    recovery_elapsed_s: Optional[float] = None
-    post_recovery_snapshot: Optional[dict] = None
-    post_recovery_observed_snapshot: Optional[dict] = None
-    post_recovery_elapsed_s: Optional[float] = None
-    lifecycle_error = ""
-    cleanup_error = ""
-    post_recovery_error = ""
-    recovery = {
-        "attempted": False,
-        "recovered": False,
-        "saw_splash": False,
-        "saw_status_unavailable": False,
-    }
-
-    cycle_meta["phase"] = "lifecycle"
-    try:
-        lifecycle_snapshot, lifecycle, lifecycle_elapsed_s = _wait_for_call_in_lifecycle(
-            meter,
-            shared,
-            cycle_num=cycle_num,
-            start_timeout_s=settings["start_timeout_s"],
-            completion_timeout_s=settings["completion_timeout_s"],
-            poll_s=settings["poll_s"],
-            status_loss_grace_s=settings["status_loss_grace_s"],
-        )
-    except StopAutomation:
-        raise
-    except Exception as exc:
-        lifecycle_error = str(exc)
-        if isinstance(exc, CallInObservationError):
-            lifecycle_snapshot = exc.snapshot
-            if exc.lifecycle is not None:
-                lifecycle = exc.lifecycle
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: lifecycle observation ended with "
-            f"{type(exc).__name__}: {exc}",
-        )
-
-    cycle_meta["lifecycle_elapsed_s"] = round(lifecycle_elapsed_s, 1)
-    cycle_meta["lifecycle_snapshot"] = _snapshot_metadata(lifecycle_snapshot)
-    cycle_meta["lifecycle"] = dict(lifecycle)
-    cycle_meta["lifecycle_error"] = lifecycle_error or None
-
-    if not lifecycle_error and not lifecycle["runtime_loss_after_start"]:
-        cycle_meta["phase"] = "cleanup"
-        if settings["post_completion_grace_s"] > 0:
-            _sleep_with_stop(shared, settings["post_completion_grace_s"])
-
-        try:
-            cleanup_snapshot, cleanup_elapsed_s = _wait_for_call_in_idle(
-                meter,
-                shared,
-                cycle_num=cycle_num,
-                timeout_s=settings["disconnect_timeout_s"],
-                poll_s=settings["poll_s"],
-                phase="cleanup",
-            )
-            cleanup_observed_snapshot = cleanup_snapshot
-        except StopAutomation:
-            raise
-        except Exception as exc:
-            cleanup_error = str(exc)
-            if isinstance(exc, CallInObservationError):
-                cleanup_observed_snapshot = exc.snapshot
-            shared.log(
-                f"{meter.host} call-in cycle {cycle_num}: cleanup observation ended with "
-                f"{type(exc).__name__}: {exc}",
-            )
-
-    need_recovery = lifecycle["runtime_loss_after_start"] or bool(lifecycle_error) or bool(cleanup_error)
-    if need_recovery:
-        cycle_meta["phase"] = "recovery"
-        recovery_snapshot, recovery, recovery_elapsed_s = _wait_for_meter_status_recovery(
-            meter,
-            shared,
-            cycle_num=cycle_num,
-            timeout_s=settings["recovery_timeout_s"],
-            poll_s=settings["poll_s"],
-        )
-        if recovery_snapshot is not None:
-            cycle_meta["phase"] = "post_recovery_guard"
-            try:
-                post_recovery_snapshot, post_recovery_elapsed_s = _observe_post_recovery_guard(
-                    meter,
-                    shared,
-                    cycle_num=cycle_num,
-                    observe_s=settings["post_recovery_guard_s"],
-                    timeout_s=settings["post_recovery_timeout_s"],
-                    poll_s=settings["poll_s"],
-                )
-                post_recovery_observed_snapshot = post_recovery_snapshot
-            except StopAutomation:
-                raise
-            except Exception as exc:
-                post_recovery_error = str(exc)
-                if isinstance(exc, CallInObservationError):
-                    post_recovery_observed_snapshot = exc.snapshot
-                shared.log(
-                    f"{meter.host} call-in cycle {cycle_num}: post-recovery guard ended with "
-                    f"{type(exc).__name__}: {exc}",
-                )
-
-    cycle_meta.update(
-        {
-            "cleanup_elapsed_s": (
-                round(cleanup_elapsed_s, 1) if cleanup_elapsed_s is not None else None
-            ),
-            "recovery_elapsed_s": (
-                round(recovery_elapsed_s, 1) if recovery_elapsed_s is not None else None
-            ),
-            "post_recovery_elapsed_s": (
-                round(post_recovery_elapsed_s, 1)
-                if post_recovery_elapsed_s is not None
-                else None
-            ),
-            "cleanup_snapshot": _snapshot_metadata(cleanup_observed_snapshot),
-            "recovery_snapshot": _snapshot_metadata(recovery_snapshot),
-            "post_recovery_snapshot": _snapshot_metadata(post_recovery_observed_snapshot),
-            "cleanup_error": cleanup_error or None,
-            "post_recovery_error": post_recovery_error or None,
-            "recovery": dict(recovery),
-        }
-    )
-
-    session = session_for(meter)
-    if session is not None:
-        # The original transaction is never retriggered by an update. Shared
-        # recovery owns diagnostics/settling, including subsequent startup calls.
-        shared.attempt_epoch = session.wait_ready(shared)
-        shared.disruption_event.clear()
-    cycle_meta["phase"] = "collect_journals"
-    include_previous_boot = bool(need_recovery)
-    platform_journal = _get_service_journal(
-        meter,
-        service="MS3_Platform.service",
-        since=journal_since,
-        max_lines=settings["platform_journal_max_lines"],
-        include_previous_boot=include_previous_boot,
-    )
-    modem_journal = _get_service_journal(
-        meter,
-        service="MS3_Modem.service",
-        since=journal_since,
-        max_lines=settings["modem_journal_max_lines"],
-        include_previous_boot=include_previous_boot,
-    )
-    _debug_call_in(
-        meter, shared, cycle_num, settings["debug"],
-        f"legacy journals platform_lines={len(platform_journal.splitlines())} "
-        f"modem_lines={len(modem_journal.splitlines())} "
-        f"previous_boot_requested={include_previous_boot} "
-        f"lifecycle_error={lifecycle_error or 'none'} cleanup_error={cleanup_error or 'none'}",
-    )
-    platform_evidence = _collect_platform_call_in_evidence(platform_journal)
-    modem_evidence = _collect_modem_call_in_evidence(modem_journal)
-
-    effective_cleanup_snapshot = cleanup_snapshot
-    effective_cleanup_source = "cleanup" if cleanup_snapshot is not None else None
-    if (
-        effective_cleanup_snapshot is None
-        and post_recovery_snapshot is not None
-        and not recovery.get("saw_splash")
-    ):
-        effective_cleanup_snapshot = post_recovery_snapshot
-        effective_cleanup_source = "post_recovery"
-    if (
-        effective_cleanup_snapshot is None
-        and recovery_snapshot is not None
-        and not recovery.get("saw_splash")
-        and _snapshot_is_idle(recovery_snapshot)
-    ):
-        effective_cleanup_snapshot = recovery_snapshot
-        effective_cleanup_source = "recovery"
-    if (
-        effective_cleanup_snapshot is None
-        and lifecycle_snapshot is not None
-        and lifecycle["saw_ready_return"]
-    ):
-        effective_cleanup_snapshot = lifecycle_snapshot
-        effective_cleanup_source = "lifecycle_ready_return"
-
-    cycle_meta["phase"] = "validate"
-    validation = _validate_call_in_result(
-        meter,
-        shared,
-        cycle_num=cycle_num,
-        baseline_snapshot=baseline_snapshot,
-        cleanup_snapshot=effective_cleanup_snapshot,
-        lifecycle=lifecycle,
-        platform_evidence=platform_evidence,
-        modem_evidence=modem_evidence,
-    )
-
-    cycle_meta.update(
-        {
-            "connect_delta": validation["connect_delta"],
-            "disconnect_delta": validation["disconnect_delta"],
-            "failed_connect_delta": validation["failed_connect_delta"],
-            "rssi": modem_evidence["rssi"],
-            "ber": modem_evidence["ber"],
-            "session_manager_started": platform_evidence["session_manager_started"],
-            "session_manager_completed": platform_evidence["session_manager_completed"],
-            "session_complete": platform_evidence["session_complete"],
-            "rsync_started": platform_evidence["rsync_started"],
-            "rsync_completed": platform_evidence["rsync_completed"],
-            "runscript_started": platform_evidence["runscript_started"],
-            "runscript_completed": platform_evidence["runscript_completed"],
-            "update_activity": platform_evidence["update_activity"],
-            "update_restart": platform_evidence["update_restart"],
-            "runtime_loss_after_start": lifecycle["runtime_loss_after_start"],
-            "saw_runtime_splash": (
-                lifecycle["saw_splash_after_start"] or recovery.get("saw_splash")
-            ),
-            "used_previous_boot_journal": include_previous_boot,
-            "effective_cleanup_source": effective_cleanup_source,
-            "effective_cleanup_snapshot": _snapshot_metadata(effective_cleanup_snapshot),
-            "platform_evidence": platform_evidence,
-            "modem_evidence": modem_evidence,
-            "validation": validation,
-        }
-    )
-
-    shared.log(
-        f"{meter.host} call-in cycle {cycle_num}: status evidence -> "
-        f"baseline=[{_snapshot_summary(baseline_snapshot)}] | "
-        f"lifecycle=[{_snapshot_summary(lifecycle_snapshot)}] | "
-        f"cleanup=[{_snapshot_summary(cleanup_observed_snapshot)}] | "
-        f"recovery=[{_snapshot_summary(post_recovery_observed_snapshot or recovery_snapshot)}] | "
-        f"effective={effective_cleanup_source or 'none'}"
-        f"[{_snapshot_summary(effective_cleanup_snapshot)}]"
-    )
-
-    if platform_evidence["call_in_send_line"]:
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: request marker -> "
-            f"{platform_evidence['call_in_send_line']}"
-        )
-    if platform_evidence["call_in_response_line"]:
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: response marker -> "
-            f"{platform_evidence['call_in_response_line']}"
-        )
-    if platform_evidence["session_complete_line"]:
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: session marker -> "
-            f"{platform_evidence['session_complete_line']}"
-        )
-    if platform_evidence["clients_released_line"]:
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: client-release marker -> "
-            f"{platform_evidence['clients_released_line']}"
-        )
-    if modem_evidence["signal_line"]:
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: modem marker -> "
-            f"{modem_evidence['signal_line']}"
-        )
-    if platform_evidence["update_activity"]:
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: update activity observed -> "
-            f"{platform_evidence['update_line'] or 'see platform journal'}",
-        )
-
-    if validation["failures"]:
-        failure_summary = "; ".join(validation["failures"])
-        cycle_meta["status"] = "fail"
-        cycle_meta["error"] = failure_summary
-        raise RuntimeError(failure_summary)
-
-    check_stop_event(shared)
-
-    signal_summary = ""
-    if modem_evidence["rssi"] is not None and modem_evidence["ber"] is not None:
-        signal_summary = f" | rssi={modem_evidence['rssi']} ber={modem_evidence['ber']}"
-    elif effective_cleanup_snapshot and effective_cleanup_snapshot.get("csq_text"):
-        signal_summary = f" | csq={effective_cleanup_snapshot['csq_text']}"
-
-    total_elapsed_s = time.time() - cycle_started
-    cycle_meta.update(
-        {
-            "status": "pass",
-            "phase": "complete",
-            "error": None,
-            "total_elapsed_s": round(total_elapsed_s, 1),
-        }
-    )
-    shared.log(
-        f"{meter.host} call-in cycle {cycle_num}: pass in {total_elapsed_s:.1f}s "
-        f"({_format_delta('ppp_connect', validation['connect_delta'])}, "
-        f"{_format_delta('ppp_disconnect', validation['disconnect_delta'])})"
-        f"{signal_summary}"
-    )
-
-    if lifecycle_error:
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: validated despite lifecycle observer error -> "
-            f"{lifecycle_error}",
-        )
-    if cleanup_error:
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: validated despite cleanup observer error -> "
-            f"{cleanup_error}",
-        )
-    if recovery.get("recovered"):
-        shared.log(
-            f"{meter.host} call-in cycle {cycle_num}: recovery path succeeded "
-            f"(splash={recovery.get('saw_splash')})",
-        )
-    shared.extras.pop("call_in_in_flight", None)
+        with session.condition:
+            session.subscribers.discard(capture)
 
 
 def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
@@ -1945,36 +1209,9 @@ def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
         "disconnect_timeout_s": float(
             kwargs.get("disconnect_timeout_s", DEFAULT_CALL_IN_DISCONNECT_TIMEOUT_S)
         ),
-        "recovery_timeout_s": float(
-            kwargs.get("recovery_timeout_s", DEFAULT_CALL_IN_RECOVERY_TIMEOUT_S)
-        ),
-        "post_recovery_guard_s": float(
-            kwargs.get("post_recovery_guard_s", DEFAULT_CALL_IN_POST_RECOVERY_GUARD_S)
-        ),
-        "post_recovery_timeout_s": float(
-            kwargs.get("post_recovery_timeout_s", DEFAULT_CALL_IN_POST_RECOVERY_TIMEOUT_S)
-        ),
-        "status_loss_grace_s": float(
-            kwargs.get("status_loss_grace_s", DEFAULT_CALL_IN_STATUS_LOSS_GRACE_S)
-        ),
-        "startup_guard_s": float(
-            kwargs.get("startup_guard_s", DEFAULT_CALL_IN_STARTUP_GUARD_S)
-        ),
         "poll_s": float(kwargs.get("state_poll_s", DEFAULT_CALL_IN_POLL_S)),
-        "platform_journal_max_lines": int(
-            kwargs.get("platform_journal_max_lines", DEFAULT_CALL_IN_PLATFORM_JOURNAL_LINES)
-        ),
-        "modem_journal_max_lines": int(
-            kwargs.get("modem_journal_max_lines", DEFAULT_CALL_IN_MODEM_JOURNAL_LINES)
-        ),
-        "startup_platform_journal_max_lines": int(
-            kwargs.get(
-                "startup_platform_journal_max_lines",
-                DEFAULT_CALL_IN_STARTUP_PLATFORM_JOURNAL_LINES,
-            )
-        ),
-        "post_completion_grace_s": float(
-            kwargs.get("post_completion_grace_s", DEFAULT_CALL_IN_POST_GRACE_S)
+        "transition_observe_s": float(
+            kwargs.get("transition_observe_s", DEFAULT_CALL_IN_TRANSITION_OBSERVE_S)
         ),
     }
 
@@ -1993,12 +1230,10 @@ def test_cycle_call_in(meter: SSHMeter, shared: SharedState, **kwargs):
         call_in_meta[cycle_num] = cycle_meta
 
         shared.log(f"{meter.host} {func_name} {cycle_num}/{job_count}")
-        session = session_for(meter)
         _debug_call_in(
             meter, shared, cycle_num, settings["debug"],
-            f"mode={'supervised' if session is not None and session.supervisor is not None else 'legacy'} "
             f"timeouts=start:{settings['start_timeout_s']}s completion:{settings['completion_timeout_s']}s "
-            f"disconnect:{settings['disconnect_timeout_s']}s recovery:{settings['recovery_timeout_s']}s",
+            f"disconnect:{settings['disconnect_timeout_s']}s transition:{settings['transition_observe_s']}s",
         )
         try:
             if not subtest:

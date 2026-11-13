@@ -3,6 +3,9 @@
 `lib/automation/tests/cycle_call_in.py` drives **Service > Call In > +** and
 validates the resulting MS3 transaction. `cycle_modem.py` checks modem control
 and signal; this test checks the actual Session Agent exchange and teardown.
+Real Call In runs require the `MeterSession` and its active supervisor. Normal
+meter discovery attaches both before job admission; the virtual mock path
+handles its Call In stage separately.
 
 ## What constitutes PASS
 
@@ -25,7 +28,7 @@ Each requested cycle needs all of the following:
 
 An idle snapshot requires CIM `S1_WAITING_FOR_CALL_TIME` or `S4_SUSPENDED`, CS
 `S5_DISCONNECTED` or `S6_ERROR`, modem `S1_IDLE` or `S7_ERROR`, and no named
-ConnectionServer client. A supervised run discards an idle snapshot if the
+ConnectionServer client. The test discards an idle snapshot if the
 session epoch changed before validation, since it could belong to the new
 runtime. A terminal CS/modem error with a successful session
 can pass with a teardown warning. RSSI/BER and a rise in PPP failed connects
@@ -40,55 +43,52 @@ baseline never proves a *later* release.
 - `MS3_Platform.service` supplies the Session Agent request, matched response,
   session events, client release and updater markers.
 - `MS3_Modem.service` supplies connection and signal markers.
-- A managed meter has a continuously followed journal stream in
+- The meter has a continuously followed journal stream in
   `MeterSupervisor`. The test attaches a short-lived subscriber **before**
   pressing `+`. It collects platform and modem messages while the supervisor
   independently monitors readiness. This stream remains readable to the test
-  after the supervisor blocks ordinary SSHMeter actions for an update.
-- A meter without a supervisor keeps the older direct journal-query and
-  recovery path. The history-based startup guard and post-recovery guard are
-  only used there.
+  after the supervisor blocks ordinary SSHMeter actions for an update. No
+  Call In page or meter-status read is attempted after that restriction.
+- A direct call with no active supervisor fails before navigating or pressing
+  `+`, because it has no independent journal stream or lifecycle protection.
 
-The managed stream is bounded to 6,000 lines for one attempt. `callIn` sends
+The stream is bounded to 6,000 lines for one attempt. `callIn` sends
 bound the first transaction; modem evidence is also cut off before the next
 send. If CIM returns to ready without a `callIn` send, the test allows five
 seconds for follower lag and then fails that manual attempt; it does not wait
-for a later scheduled call-in. If live capture misses other required proof
-(for example, a journal reconnect or cursor gap), the test waits for readiness
-once and queries service journals
-with the original pre-press meter-time watermark. It never presses `+` again
-after an in-flight interruption. A real Linux reboot may erase previous-boot
-journal data, so the live capture is the primary proof in that case. A fetched
-request is accepted only if it matches the captured send line, or if no send
-was captured and the supervised epoch never changed. This prevents the
-post-restart startup call-in from filling a gap in the manual transaction.
+for a later scheduled call-in. It never presses `+` again after an in-flight
+interruption. If live journal proof remains incomplete, the attempt fails with
+its observed evidence; it does not wait through a restart to query the next
+runtime. A journal gap can therefore produce a missing-proof failure, which is
+distinguishable in metadata from an explicit `result=-1` response.
 
 ## Supervised flow
 
-1. At each iteration, wait for session readiness. The supervisor has already
-   handled the fresh-runtime startup window, startup call-in, diagnostics entry,
-   client idle state and stable UI. The managed path bypasses the legacy
-   history-based startup guard entirely, so an admitted runtime aged 75-179
-   seconds is not held until age 180. Navigate to Call In, verify local idle
-   status and the Call In page text, and save a baseline and journal watermark.
+1. At each iteration, wait for session readiness and a connected supervisor
+   journal follower before navigating or pressing `+`. The supervisor has
+   already handled its startup/settling and diagnostics admission checks. The
+   test has no separate history-based startup guard. Navigate to Call In,
+   verify local idle status and stable `Press [+] to Call In.` page text, and
+   save a baseline.
    A disruption before `+` retries navigation for that iteration; completed
    earlier iterations are retained.
 2. Attach the live journal capture, set `call_in_in_flight` and
    `lifecycle_observer`, then press `+` once. The observer exemption permits
    this transaction to finish gathering proof after the supervisor changes
    epochs. It is cleared in the iteration's `finally` block.
-3. Watch CIM/CS/modem state and evaluate the live transaction. On a stable
-   runtime, wait for a terminal idle status before returning. CIM may return
-   to ready while RSYNC or RunScript still owns the connection, so that state
-   alone does not pass. A cleanup timeout can still validate from independent
-   release proof, as the earlier test did.
-4. If update/restart makes status unavailable, keep reading the already
-   captured journal. Allow a short stream catch-up. An updater commitment can
-   stand in for local terminal status because it invalidates controls through
-   supervision. A complete verdict needs no wait for the new runtime's startup
-   call-in or 75-second settling gate.
-5. If proof remains incomplete, wait for supervisor readiness and make one
-   direct journal-query fallback. Missing or failed proof then fails the
+3. Confirm the trigger from CIM leaving ready or the first captured `callIn`
+   request. Watch CIM/CS/modem state and the journal until the matched response,
+   Session Manager completion, connection use and release are proven. CIM
+   returning to ready alone does not prove release: RSYNC or RunScript may
+   still own the connection.
+4. After complete proof, observe the independent journal for up to 20 seconds
+   for config/update evidence and MS3 stop. This covers the observed updater
+   delay without following a restarted runtime. An observed MS3 stop or later
+   call-in ends the observation window early. When no restriction occurs,
+   confirm terminal local idle status before handing the meter on.
+5. If update/restart restricts status reads, decide from the captured journal.
+   An updater decision can prove release because MS3 checks UI idle and no
+   connection clients before applying it. Missing or failed proof fails the
    original attempt. `run_subtest` does not replay an in-flight call-in.
 
 The call-in result can be recorded while the meter session is restricted.
@@ -96,6 +96,15 @@ Before another test or call-in iteration uses SSHMeter controls, its own
 readiness gate waits through recovery. `cycle_all` and the top-level runner
 also gate job completion on readiness. The test no longer needs a separate
 post-update guard merely to protect later work.
+
+`update_or_config_downloaded` is true when the transaction journal contains a
+config write, printer-template installation, legacy-config installation, or
+pending package/app configuration marker. RSYNC completion alone does not set
+it. `restart_detected` is true when the supervisor's journal shows MS3
+stopping, its phase enters `restarting`, or it observes a new MS3 generation
+before the next `callIn` send. An updater *decision* by itself does not mean a
+restart happened. False means **not observed within this transaction's
+window**, not proof that a later unrelated update can never happen.
 
 ## Why the earlier verdict is justified
 
@@ -128,6 +137,14 @@ The October 27 physical log `09-18-24_30005820_physical_cycle_all.log`
 does capture the Notice page text `This meter is being updated. Please wait.`;
 the supervisor classifies that HTML as a transition and restricts controls.
 
+Across 24 archived post-press cases with both a `callInResponse` and a
+subsequent updater marker, the largest observed interval was
+11.734 seconds. This is why the managed path uses a configurable 20-second
+post-proof window. The November 11 no-update desk capture shows response,
+post-session client release and later idle status without an updater marker.
+There is no positive journal line that certifies that no future update will
+ever occur; the false metadata values are bounded observations.
+
 The old code sometimes waited 75 to 180 more seconds after restart and could
 collect a second startup call-in. That wait protected following subtests before
 the supervisor existed; the original transaction's PASS/FAIL evidence was
@@ -139,9 +156,9 @@ Errors/10-20 Passive Call-In Reboot/`.
 
 Set **Settings > Passive > Call In > Debug** to `True` for additional
 `DEBUG:` lines in the normal job/meter log. It defaults to `False`. Debug
-records the selected execution mode and timeouts, changes in live journal
-proof (line count, matched reference, response, connection, release and missing
-criteria), and direct journal fallback coverage/identity checks. The ordinary
+records the observation timeouts and changes in live journal proof (line
+count, matched reference, response, connection, release and missing criteria).
+The ordinary
 PASS/FAIL validation and essential transition logs remain active when debug
 is off. The passive settings builder passes this toggle only to the Call In
 subtest; direct callers can supply `debug=True` as a keyword argument.
@@ -149,14 +166,13 @@ subtest; direct callers can supply `debug=True` as a keyword argument.
 Inspect `shared.device_meta["call_in"][cycle_number]` in the job summary:
 
 - `phase`, `status`, `exception_type`, `total_elapsed_s` locate the failure.
-- `startup_guard_source` is `meter_session` when supervised admission replaced
-  the guard, or `legacy_history` when the history-based guard ran.
 - `baseline_snapshot`, `lifecycle_snapshot`, `cleanup_snapshot` and
   `lifecycle` show what status was actually observed. Raw status HTML is omitted.
-- `evidence_source` is `supervisor_journal` for the normal managed path or
-  `post_recovery_journals` after its fallback. Legacy runs retain their older
-  cleanup/recovery fields. `journal_stream_connected` is the stream state at
-  verdict time, not a guarantee of gap-free history.
+- `evidence_source` is `supervisor_journal`. `journal_stream_connected` is
+  the stream state at verdict time, not a guarantee of gap-free history.
+- `update_or_config_downloaded`, `restart_detected`,
+  `transition_observed_s`, `transition_observation_complete`, and
+  `follow_on_call_in_seen` describe the bounded post-proof observation.
 - `platform_evidence.call_in_reference`, `call_in_send_line`,
   `call_in_response_line`, `clients_released_after_session` and `update_line`
   identify the original transaction and teardown evidence.
@@ -164,9 +180,9 @@ Inspect `shared.device_meta["call_in"][cycle_number]` in the job summary:
   `validation.release_sources`, `validation.failures` and warnings explain the
   decision. Missing signal data alone is not a failure.
 
-When a managed run unexpectedly uses the journal fallback, inspect the meter
-session log for `journal_disconnected`, `journal_gap`, update commitment,
-generation changes and UI transition samples around the saved watermark.
+When a run has incomplete journal proof, inspect the meter session
+log for `journal_disconnected`, `journal_gap`, update commitment,
+generation changes and UI transition samples around the trigger.
 If a response is missing, check whether a second `callIn` send ended the first
 transaction's window and whether the first send/reference belongs to the
 manual press. A failure after an in-flight trigger must not be fixed by
@@ -174,16 +190,17 @@ automatically pressing `+` again.
 
 ## Configuration and source references
 
-`ready_timeout_s` / `ready_stable_s` govern the local pre-check;
-`start_timeout_s`, `completion_timeout_s`, `disconnect_timeout_s` and
-`state_poll_s` govern observation and proof collection. `recovery_timeout_s`
-governs the managed journal fallback. `platform_journal_max_lines` and
-`modem_journal_max_lines` bound direct fallback queries. The remaining
-`startup_guard_s`, `startup_platform_journal_max_lines`,
-`post_completion_grace_s`, `post_recovery_guard_s`,
-`post_recovery_timeout_s` and `status_loss_grace_s` primarily support the
-legacy path or status-loss detection. `job_count` is the number of complete
-transactions, and `subtest=True` suppresses a duplicate progress broadcast.
+`ready_timeout_s` (120 seconds) bounds journal reconnection and the local idle
+status and Call In page pre-check. `ready_stable_s` (3 seconds) requires a stable
+ready page. These are **not** a startup age timer; the supervisor handles
+startup admission. `start_timeout_s` (20 seconds)
+bounds request confirmation. `completion_timeout_s` (120 seconds) and
+`disconnect_timeout_s` (45 seconds) bound original-transaction proof and local
+idle cleanup when no restriction occurs. `state_poll_s` defaults to 2 seconds.
+`transition_observe_s` defaults to 20 seconds after complete proof for update
+and restart metadata. There is no Call In-specific recovery or post-restart
+timeout. `job_count` is the number of complete transactions, and `subtest=True`
+suppresses a duplicate progress broadcast.
 
 MS3 source: `assets/ms3/main/UI/Diagnostics/DiagServiceMenu.c` triggers
 `CIMCallInNow()`; `CallInManager.c` and `Services/ConnectionServer.c` own the
